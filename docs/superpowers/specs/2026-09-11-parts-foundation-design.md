@@ -1,7 +1,7 @@
 # Parts Foundation Design — Local-First WiredPart Slice
 
 **Date:** 2026-09-11  
-**Status:** Draft for review  
+**Status:** Phase 1 implemented (local core)  
 **Stack:** Flutter + SQLite (Drift)  
 **Platforms (v1):** iOS, Android, Windows, Mac  
 

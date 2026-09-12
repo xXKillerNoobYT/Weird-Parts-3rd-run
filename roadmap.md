@@ -53,8 +53,9 @@ Reference drafts (rough, not binding detail yet):
 - [x] User review of foundation design spec
 - [x] Implementation plan for Phase 1 (`docs/superpowers/plans/2026-09-11-phase-1-local-core.md`)
 - [x] App scaffold
+- [x] **Phase 1 — Local core** complete (`feature/phase-1-local-core`)
 
-**Current focus:** execute Phase 1 implementation plan (Flutter local core).
+**Current focus:** Phase 2 — search, filters, and media.
 
 ---
 
@@ -63,10 +64,10 @@ Reference drafts (rough, not binding detail yet):
 ### Phase 1 — Local core
 
 - [x] Flutter multi-platform project
-- [ ] SQLite schema: jobs, job lines, catalog (part / brand version / supplier), taxonomy, device ID, change log, tombstones
-- [ ] Jobs CRUD + job parts list (general part by default; optional brand; needed · shop pull · **order splits** by supplier)
-- [ ] Catalog browse/add/edit + maintenance (categories, styles, types, devices, brands, suppliers)
-- [ ] Editor PIN gate for catalog writes
+- [x] SQLite schema: jobs, job lines, catalog (part / brand version / supplier), taxonomy, device ID, change log, tombstones
+- [x] Jobs CRUD + job parts list (general part by default; optional brand; needed · shop pull · **order splits** by supplier)
+- [x] Catalog browse/add/edit + maintenance (categories, styles, types, devices, brands, suppliers)
+- [x] Editor PIN gate for catalog writes
 
 ### Phase 2 — Search, filters, media
 
