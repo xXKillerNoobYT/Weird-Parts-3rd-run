@@ -1,0 +1,33 @@
+import 'dart:io';
+
+import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+import 'daos/settings_dao.dart';
+import 'tables/app_settings.dart';
+import 'tables/device_profile.dart';
+
+part 'app_database.g.dart';
+
+@DriftDatabase(
+  tables: [DeviceProfiles, AppSettings],
+  daos: [SettingsDao],
+)
+class AppDatabase extends _$AppDatabase {
+  AppDatabase() : super(_open());
+
+  AppDatabase.forTesting(super.e);
+
+  @override
+  int get schemaVersion => 1;
+}
+
+LazyDatabase _open() {
+  return LazyDatabase(() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(dir.path, 'wired_parts.sqlite'));
+    return NativeDatabase.createInBackground(file);
+  });
+}
