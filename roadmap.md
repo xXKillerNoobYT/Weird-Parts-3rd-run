@@ -51,10 +51,10 @@ Reference drafts (rough, not binding detail yet):
 - [x] Approach chosen: Flutter + SQLite
 - [x] Foundation design spec written (`docs/superpowers/specs/2026-09-11-parts-foundation-design.md`)
 - [x] User review of foundation design spec
-- [ ] Implementation plan for Phase 1
+- [x] Implementation plan for Phase 1 (`docs/superpowers/plans/2026-09-11-phase-1-local-core.md`)
 - [ ] App scaffold
 
-**Current focus:** write the Phase 1 implementation plan, then scaffold the Flutter app.
+**Current focus:** execute Phase 1 implementation plan (Flutter local core).
 
 ---
 
