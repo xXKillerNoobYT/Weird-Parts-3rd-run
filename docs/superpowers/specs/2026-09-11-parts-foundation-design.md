@@ -242,9 +242,10 @@ Aligned with `roadmap.md`:
 1. **Local core** — schema, jobs, catalog, PIN, job lines with pulls + order splits  
 2. **Search, filters, media** — photos; custom → catalog promote  
 3. **Backup** — encrypted export/import  
-4. **Nearby link** — pair + one-way test transfer  
-5. **Two-way sync** — deltas, tombstones, conflicts, photo policy  
-6. **Hardening** — performance, recovery, multi-device tests  
+4. **Nearby link** — pair + one-way test transfer (dev stepping stone only)
+5. **Two-way sync** — single Sync Now exchanges changes both ways (not two one-way syncs); deltas, tombstones, conflicts, photo policy
+6. **Hardening** — performance, recovery, multi-device tests
+7. **Later** — auto/background nearby sync (see roadmap Phase 7)
 
 ---
 
