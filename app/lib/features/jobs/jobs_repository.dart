@@ -17,7 +17,18 @@ class JobsRepository {
 
   Future<List<Job>> listActiveJobs() => _db.jobsDao.listActiveJobs();
 
+  Future<Job?> getJob(String id) => _db.jobsDao.getJob(id);
+
   Future<void> archiveJob(String id) => _db.jobsDao.archiveJob(id);
+
+  Future<List<JobLine>> listLinesForJob(String jobId) =>
+      _db.jobsDao.listLinesForJob(jobId);
+
+  Future<JobLine?> getJobLine(String lineId) =>
+      _db.jobsDao.getJobLine(lineId);
+
+  Future<List<OrderSplit>> orderSplitsForLine(String lineId) =>
+      _db.jobsDao.orderSplitsForLine(lineId);
 
   Future<String> addLine({
     required String jobId,
@@ -47,12 +58,12 @@ class JobsRepository {
 
   Future<void> updateLine({
     required String lineId,
-    String? partId,
-    String? brandVersionId,
-    String? customName,
+    required String? partId,
+    required String? brandVersionId,
+    required String? customName,
     String? customNotes,
-    double? neededQty,
-    double? shopPullQty,
+    required double neededQty,
+    required double shopPullQty,
     String? uom,
     String? notes,
   }) {

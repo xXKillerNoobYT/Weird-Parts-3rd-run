@@ -11,6 +11,14 @@ class CatalogRepository {
 
   Future<List<Part>> listParts() => _db.partsDao.listParts();
 
+  Future<Part?> getPart(String partId) => _db.partsDao.getPart(partId);
+
+  Future<List<BrandVersion>> listBrandVersionsForPart(String partId) =>
+      _db.partsDao.listBrandVersionsForPart(partId);
+
+  Future<List<SupplierListing>> listingsForBrandVersion(String bvId) =>
+      _db.partsDao.listingsForBrandVersion(bvId);
+
   Future<String> createGeneralPart({
     required String name,
     String? defaultSupplierId,

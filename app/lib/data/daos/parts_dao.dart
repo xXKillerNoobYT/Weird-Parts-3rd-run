@@ -86,6 +86,13 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
         .get();
   }
 
+  Future<List<BrandVersion>> listBrandVersionsForPart(String partId) {
+    return (select(brandVersions)
+          ..where((t) => t.partId.equals(partId) & t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm.asc(t.mpn)]))
+        .get();
+  }
+
   Future<List<SupplierListing>> listingsForBrandVersion(String bvId) {
     return (select(supplierListings)
           ..where(

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../jobs/jobs_page.dart';
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -16,7 +18,7 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(
         index: _index,
         children: const [
-          _PlaceholderTab(title: 'Jobs'),
+          JobsPage(),
           _PlaceholderTab(title: 'Catalog'),
           _MoreTab(),
         ],

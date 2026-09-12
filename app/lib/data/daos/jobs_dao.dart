@@ -45,6 +45,19 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     );
   }
 
+  Future<Job?> getJob(String id) {
+    return (select(jobs)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+        .getSingleOrNull();
+  }
+
+  Future<List<JobLine>> listLinesForJob(String jobId) {
+    return (select(jobLines)
+          ..where((t) => t.jobId.equals(jobId) & t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+        .get();
+  }
+
   Future<String> insertJobLine({
     required String id,
     required String jobId,
@@ -79,32 +92,29 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     return id;
   }
 
+  /// Rewrites identity/qty fields, including clearing nullables with [Value(null)].
   Future<void> updateJobLine({
     required String id,
-    String? partId,
-    String? brandVersionId,
-    String? customName,
+    required String? partId,
+    required String? brandVersionId,
+    required String? customName,
     String? customNotes,
-    double? neededQty,
-    double? shopPullQty,
+    required double neededQty,
+    required double shopPullQty,
     String? uom,
     String? notes,
   }) async {
     final now = DateTime.now().toUtc();
     await (update(jobLines)..where((t) => t.id.equals(id))).write(
       JobLinesCompanion(
-        partId: partId != null ? Value(partId) : const Value.absent(),
-        brandVersionId:
-            brandVersionId != null ? Value(brandVersionId) : const Value.absent(),
-        customName:
-            customName != null ? Value(customName) : const Value.absent(),
-        customNotes:
-            customNotes != null ? Value(customNotes) : const Value.absent(),
-        neededQty: neededQty != null ? Value(neededQty) : const Value.absent(),
-        shopPullQty:
-            shopPullQty != null ? Value(shopPullQty) : const Value.absent(),
-        uom: uom != null ? Value(uom) : const Value.absent(),
-        notes: notes != null ? Value(notes) : const Value.absent(),
+        partId: Value(partId),
+        brandVersionId: Value(brandVersionId),
+        customName: Value(customName),
+        customNotes: Value(customNotes),
+        neededQty: Value(neededQty),
+        shopPullQty: Value(shopPullQty),
+        uom: Value(uom),
+        notes: Value(notes),
         modifiedAt: Value(now),
       ),
     );
