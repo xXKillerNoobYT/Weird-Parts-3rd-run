@@ -27,6 +27,12 @@ class BrandVersions extends Table with SyncColumns {
   TextColumn get mpn => text()();
   TextColumn get model => text().withDefault(const Constant(''))();
   TextColumn get description => text().withDefault(const Constant(''))();
+
+  /// Color / option for this brand only. Empty = no named Variance.
+  TextColumn get varianceName => text().withDefault(const Constant(''))();
+
+  /// First pick for this brand on the part; others are extra options.
+  BoolColumn get isMain => boolean().withDefault(const Constant(false))();
 }
 
 class SupplierListings extends Table with SyncColumns {

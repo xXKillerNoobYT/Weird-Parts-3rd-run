@@ -14,6 +14,9 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     required String name,
     required String deviceId,
     String? defaultSupplierId,
+    String? categoryId,
+    String? styleId,
+    String? typeId,
   }) async {
     final now = DateTime.now().toUtc();
     await into(parts).insert(
@@ -24,6 +27,9 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
         createdAt: now,
         modifiedAt: now,
         defaultSupplierId: Value(defaultSupplierId),
+        categoryId: Value(categoryId),
+        styleId: Value(styleId),
+        typeId: Value(typeId),
       ),
     );
     return id;
@@ -35,6 +41,8 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     required String brandId,
     required String mpn,
     required String deviceId,
+    String varianceName = '',
+    bool isMain = false,
   }) async {
     final now = DateTime.now().toUtc();
     await into(brandVersions).insert(
@@ -46,9 +54,71 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
         originDeviceId: deviceId,
         createdAt: now,
         modifiedAt: now,
+        varianceName: Value(varianceName),
+        isMain: Value(isMain),
       ),
     );
+    if (isMain) {
+      await _ensureSingleMain(
+        partId: partId,
+        brandId: brandId,
+        keepId: id,
+      );
+    }
     return id;
+  }
+
+  Future<void> updateBrandVersion({
+    required String id,
+    required String mpn,
+    required String varianceName,
+    required bool isMain,
+  }) async {
+    final current = await (select(brandVersions)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+        .getSingleOrNull();
+    if (current == null) return;
+    final now = DateTime.now().toUtc();
+    await (update(brandVersions)..where((t) => t.id.equals(id))).write(
+      BrandVersionsCompanion.custom(
+        mpn: Variable(mpn),
+        varianceName: Variable(varianceName),
+        isMain: Variable(isMain),
+        modifiedAt: Variable(now),
+        revision: brandVersions.revision + const Constant(1),
+      ),
+    );
+    if (isMain) {
+      await _ensureSingleMain(
+        partId: current.partId,
+        brandId: current.brandId,
+        keepId: id,
+      );
+    }
+  }
+
+  Future<void> _ensureSingleMain({
+    required String partId,
+    required String brandId,
+    required String keepId,
+  }) async {
+    final now = DateTime.now().toUtc();
+    await (update(brandVersions)
+          ..where(
+            (t) =>
+                t.partId.equals(partId) &
+                t.brandId.equals(brandId) &
+                t.id.equals(keepId).not() &
+                t.deletedAt.isNull() &
+                t.isMain.equals(true),
+          ))
+        .write(
+      BrandVersionsCompanion.custom(
+        isMain: const Constant(false),
+        modifiedAt: Variable(now),
+        revision: brandVersions.revision + const Constant(1),
+      ),
+    );
   }
 
   Future<String> insertSupplierListing({
@@ -86,6 +156,9 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     required String uom,
     String? defaultSupplierId,
     required bool active,
+    String? categoryId,
+    String? styleId,
+    String? typeId,
   }) async {
     final now = DateTime.now().toUtc();
     await (update(parts)..where((t) => t.id.equals(id))).write(
@@ -95,6 +168,9 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
         uom: Variable(uom),
         defaultSupplierId: Variable(defaultSupplierId),
         active: Variable(active),
+        categoryId: Variable(categoryId),
+        styleId: Variable(styleId),
+        typeId: Variable(typeId),
         modifiedAt: Variable(now),
         revision: parts.revision + const Constant(1),
       ),
@@ -113,7 +189,22 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
   Future<List<BrandVersion>> listBrandVersionsForPart(String partId) {
     return (select(brandVersions)
           ..where((t) => t.partId.equals(partId) & t.deletedAt.isNull())
-          ..orderBy([(t) => OrderingTerm.asc(t.mpn)]))
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.isMain),
+            (t) => OrderingTerm.asc(t.varianceName),
+            (t) => OrderingTerm.asc(t.mpn),
+          ]))
+        .get();
+  }
+
+  Future<List<BrandVersion>> listAllBrandVersions() {
+    return (select(brandVersions)
+          ..where((t) => t.deletedAt.isNull())
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.isMain),
+            (t) => OrderingTerm.asc(t.varianceName),
+            (t) => OrderingTerm.asc(t.mpn),
+          ]))
         .get();
   }
 

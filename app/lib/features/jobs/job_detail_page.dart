@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app.dart';
 import '../../data/app_database.dart';
 import 'job_line_editor.dart';
+import 'job_line_qty.dart';
 import 'jobs_repository.dart';
 
 class JobDetailPage extends StatefulWidget {
@@ -39,10 +40,12 @@ class _JobDetailPageState extends State<JobDetailPage> {
     final parts = await scope.db.partsDao.listParts();
     final partNames = {for (final p in parts) p.id: p.name};
 
+    final suppliers = await scope.db.taxonomyDao.listSuppliers();
+    final supplierNames = {for (final s in suppliers) s.id: s.name};
+
     final rows = <_LineRow>[];
     for (final line in lines) {
       final splits = await _jobs.orderSplitsForLine(line.id);
-      final ordered = splits.fold<double>(0, (a, s) => a + s.quantity);
       final label = line.customName?.trim().isNotEmpty == true
           ? line.customName!
           : (line.partId != null
@@ -52,7 +55,17 @@ class _JobDetailPageState extends State<JobDetailPage> {
         _LineRow(
           line: line,
           label: label,
-          orderedQty: ordered,
+          qty: JobLineQty(
+            requested: line.neededQty,
+            shop: line.shopPullQty,
+            supplierSplits: [
+              for (final s in splits)
+                JobSupplierSplit(
+                  supplierName: supplierNames[s.supplierId] ?? 'Supply',
+                  qty: s.quantity,
+                ),
+            ],
+          ),
         ),
       );
     }
@@ -118,11 +131,8 @@ class _JobDetailPageState extends State<JobDetailPage> {
                     final line = row.line;
                     return ListTile(
                       title: Text(row.label),
-                      subtitle: Text(
-                        'Needed ${_fmt(line.neededQty)}'
-                        ' · Pull ${_fmt(line.shopPullQty)}'
-                        ' · Ordered ${_fmt(row.orderedQty)}',
-                      ),
+                      isThreeLine: true,
+                      subtitle: Text(row.qty.listSubtitle),
                       onTap: () => _openEditor(lineId: line.id),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),
@@ -139,21 +149,16 @@ class _JobDetailPageState extends State<JobDetailPage> {
       ),
     );
   }
-
-  static String _fmt(double v) {
-    if (v == v.roundToDouble()) return v.toInt().toString();
-    return v.toString();
-  }
 }
 
 class _LineRow {
   _LineRow({
     required this.line,
     required this.label,
-    required this.orderedQty,
+    required this.qty,
   });
 
   final JobLine line;
   final String label;
-  final double orderedQty;
+  final JobLineQty qty;
 }

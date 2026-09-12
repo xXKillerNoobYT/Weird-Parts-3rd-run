@@ -54,11 +54,38 @@ void main() {
       uom: 'ea',
       defaultSupplierId: supplierId,
       active: true,
+      categoryId: null,
+      styleId: null,
+      typeId: null,
     );
     final part = await catalog.getPart(id);
     expect(part!.name, 'Relay 24V');
     expect(part.description, 'Control relay');
     expect(part.defaultSupplierId, supplierId);
     expect(part.revision, 2);
+  });
+
+  test('variance write blocked when PIN set and locked', () async {
+    await pin.setPin('2468');
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Leviton',
+      deviceId: deviceId,
+    );
+    await expectLater(
+      catalog.createBrandVersion(
+        partId: partId,
+        brandId: brandId,
+        mpn: 'X',
+        varianceName: 'White',
+        isMain: true,
+      ),
+      throwsA(isA<StateError>()),
+    );
   });
 }

@@ -6,23 +6,34 @@ import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
 
 class PartDetailPage extends StatefulWidget {
-  const PartDetailPage({required this.partId, super.key});
+  const PartDetailPage({
+    required this.partId,
+    this.focusBrandId,
+    super.key,
+  });
 
   final String partId;
+  final String? focusBrandId;
 
   @override
   State<PartDetailPage> createState() => _PartDetailPageState();
 }
 
-class _BrandVersionRow {
-  _BrandVersionRow({
+class _BrandGroup {
+  _BrandGroup({required this.brandId, required this.brandName});
+
+  final String brandId;
+  final String brandName;
+  final List<_VarianceRow> variances = [];
+}
+
+class _VarianceRow {
+  _VarianceRow({
     required this.version,
-    required this.brandName,
     required this.listings,
   });
 
   final BrandVersion version;
-  final String brandName;
   final List<_ListingRow> listings;
 }
 
@@ -43,13 +54,20 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   List<Supplier> _suppliers = [];
   List<Brand> _brands = [];
-  List<_BrandVersionRow> _versions = [];
+  List<Category> _categories = [];
+  List<Style> _styles = [];
+  List<Type> _variants = [];
+  List<_BrandGroup> _brandGroups = [];
 
   String? _defaultSupplierId;
+  String? _categoryId;
+  String? _styleId;
+  String? _typeId;
   bool _active = true;
   bool _loading = true;
   bool _saving = false;
   bool _initialized = false;
+  bool _openedFocus = false;
 
   @override
   void didChangeDependencies() {
@@ -81,17 +99,26 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
     final suppliers = await _db.taxonomyDao.listSuppliers();
     final brands = await _db.taxonomyDao.listBrands();
+    final categories = await _db.taxonomyDao.listCategories();
+    final styles = await _db.taxonomyDao.listStyles();
+    final variants = await _db.taxonomyDao.listTypes();
     final brandNames = {for (final b in brands) b.id: b.name};
     final supplierNames = {for (final s in suppliers) s.id: s.name};
     final versions = await _catalog.listBrandVersionsForPart(widget.partId);
 
-    final rows = <_BrandVersionRow>[];
+    final groups = <String, _BrandGroup>{};
     for (final v in versions) {
-      final listings = await _catalog.listingsForBrandVersion(v.id);
-      rows.add(
-        _BrandVersionRow(
-          version: v,
+      final group = groups.putIfAbsent(
+        v.brandId,
+        () => _BrandGroup(
+          brandId: v.brandId,
           brandName: brandNames[v.brandId] ?? 'Unknown brand',
+        ),
+      );
+      final listings = await _catalog.listingsForBrandVersion(v.id);
+      group.variances.add(
+        _VarianceRow(
+          version: v,
           listings: [
             for (final l in listings)
               _ListingRow(
@@ -109,12 +136,36 @@ class _PartDetailPageState extends State<PartDetailPage> {
       _descriptionController.text = part.description;
       _uomController.text = part.uom;
       _defaultSupplierId = part.defaultSupplierId;
+      _categoryId = part.categoryId;
+      _styleId = part.styleId;
+      _typeId = part.typeId;
       _active = part.active;
       _suppliers = suppliers;
       _brands = brands;
-      _versions = rows;
+      _categories = categories;
+      _styles = styles;
+      _variants = variants;
+      _brandGroups = groups.values.toList()
+        ..sort((a, b) => a.brandName.compareTo(b.brandName));
       _loading = false;
     });
+
+    if (!_openedFocus && widget.focusBrandId != null) {
+      _openedFocus = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _addVariance(brandId: widget.focusBrandId);
+      });
+    }
+  }
+
+  List<Style> get _stylesForCategory {
+    if (_categoryId == null) return const [];
+    return _styles.where((s) => s.categoryId == _categoryId).toList();
+  }
+
+  List<Type> get _variantsForType {
+    if (_styleId == null) return const [];
+    return _variants.where((t) => t.styleId == _styleId).toList();
   }
 
   Future<bool> _gate() async {
@@ -143,6 +194,9 @@ class _PartDetailPageState extends State<PartDetailPage> {
             : _uomController.text.trim(),
         defaultSupplierId: _defaultSupplierId,
         active: _active,
+        categoryId: _categoryId,
+        styleId: _styleId,
+        typeId: _typeId,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -158,7 +212,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
     }
   }
 
-  Future<void> _addBrandVersion() async {
+  Future<void> _addVariance({String? brandId}) async {
     if (_brands.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add a brand in Maintenance first')),
@@ -167,35 +221,69 @@ class _PartDetailPageState extends State<PartDetailPage> {
     }
     if (!await _gate() || !mounted) return;
 
-    String? brandId = _brands.first.id;
+    String? selectedBrand = brandId ??
+        (_brands.any((b) => b.id == brandId) ? brandId : _brands.first.id);
+    selectedBrand ??= _brands.first.id;
+    final nameController = TextEditingController();
     final mpnController = TextEditingController();
+    final existingForBrand = _brandGroups
+        .where((g) => g.brandId == selectedBrand)
+        .expand((g) => g.variances);
+    var isMain = existingForBrand.isEmpty;
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setLocal) {
             return AlertDialog(
-              title: const Text('Add brand version'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    // ignore: deprecated_member_use
-                    value: brandId,
-                    decoration: const InputDecoration(labelText: 'Brand'),
-                    items: [
-                      for (final b in _brands)
-                        DropdownMenuItem(value: b.id, child: Text(b.name)),
-                    ],
-                    onChanged: (v) => setLocal(() => brandId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: mpnController,
-                    decoration: const InputDecoration(labelText: 'MPN'),
-                    autofocus: true,
-                  ),
-                ],
+              title: const Text('Add variance'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
+                      value: selectedBrand,
+                      decoration: const InputDecoration(labelText: 'Brand'),
+                      items: [
+                        for (final b in _brands)
+                          DropdownMenuItem(value: b.id, child: Text(b.name)),
+                      ],
+                      onChanged: (v) {
+                        setLocal(() {
+                          selectedBrand = v;
+                          final has = _brandGroups
+                              .where((g) => g.brandId == v)
+                              .expand((g) => g.variances)
+                              .isNotEmpty;
+                          isMain = !has;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Variance (color / option)',
+                        hintText: 'White',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: mpnController,
+                      decoration: const InputDecoration(labelText: 'Part number'),
+                      autofocus: true,
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Main'),
+                      subtitle: const Text('First pick; others are extra options'),
+                      value: isMain,
+                      onChanged: (v) => setLocal(() => isMain = v),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -204,7 +292,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    if (brandId == null || mpnController.text.trim().isEmpty) {
+                    if (selectedBrand == null ||
+                        mpnController.text.trim().isEmpty) {
                       return;
                     }
                     Navigator.pop(ctx, true);
@@ -218,14 +307,18 @@ class _PartDetailPageState extends State<PartDetailPage> {
       },
     );
     final mpn = mpnController.text.trim();
+    final varianceName = nameController.text.trim();
+    nameController.dispose();
     mpnController.dispose();
-    if (ok != true || brandId == null || mpn.isEmpty) return;
+    if (ok != true || selectedBrand == null || mpn.isEmpty) return;
 
     try {
       await _catalog.createBrandVersion(
         partId: widget.partId,
-        brandId: brandId!,
+        brandId: selectedBrand!,
         mpn: mpn,
+        varianceName: varianceName,
+        isMain: isMain,
       );
       await _reload();
     } on StateError catch (e) {
@@ -365,6 +458,76 @@ class _PartDetailPageState extends State<PartDetailPage> {
                     hintText: 'ea',
                   ),
                 ),
+                const SizedBox(height: 16),
+                Text(
+                  'Tree location',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String?>(
+                  // ignore: deprecated_member_use
+                  value: _categoryId,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('None'),
+                    ),
+                    for (final c in _categories)
+                      DropdownMenuItem(value: c.id, child: Text(c.name)),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _categoryId = v;
+                    if (_stylesForCategory.every((s) => s.id != _styleId)) {
+                      _styleId = null;
+                      _typeId = null;
+                    }
+                  }),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  // ignore: deprecated_member_use
+                  value: _styleId,
+                  decoration: const InputDecoration(
+                    labelText: 'Type',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('None'),
+                    ),
+                    for (final s in _stylesForCategory)
+                      DropdownMenuItem(value: s.id, child: Text(s.name)),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _styleId = v;
+                    if (_variantsForType.every((t) => t.id != _typeId)) {
+                      _typeId = null;
+                    }
+                  }),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  // ignore: deprecated_member_use
+                  value: _typeId,
+                  decoration: const InputDecoration(
+                    labelText: 'Variant',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('None'),
+                    ),
+                    for (final t in _variantsForType)
+                      DropdownMenuItem(value: t.id, child: Text(t.name)),
+                  ],
+                  onChanged: (v) => setState(() => _typeId = v),
+                ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
                   // ignore: deprecated_member_use
@@ -393,41 +556,71 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 Row(
                   children: [
                     Text(
-                      'Brand versions',
+                      'Brands',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const Spacer(),
                     TextButton.icon(
-                      onPressed: _addBrandVersion,
+                      onPressed: _addVariance,
                       icon: const Icon(Icons.add),
-                      label: const Text('Add'),
+                      label: const Text('Add variance'),
                     ),
                   ],
                 ),
-                if (_versions.isEmpty)
+                const Text(
+                  'Variance lives under a brand. Each color / option has its own part number.',
+                ),
+                const SizedBox(height: 8),
+                if (_brandGroups.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('No brand versions yet'),
+                    child: Text('No brand — this is a general part'),
                   )
                 else
-                  for (final row in _versions)
+                  for (final group in _brandGroups)
                     Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       child: ExpansionTile(
-                        title: Text('${row.brandName} · ${row.version.mpn}'),
+                        initiallyExpanded: true,
+                        title: Text(group.brandName),
+                        subtitle: const Text('Variance'),
                         children: [
-                          for (final listing in row.listings)
+                          for (final row in group.variances) ...[
                             ListTile(
                               dense: true,
-                              title: Text(listing.supplierName),
-                              subtitle: Text('SKU ${listing.listing.sku}'),
+                              title: Text(
+                                row.version.varianceName.trim().isEmpty
+                                    ? row.version.mpn
+                                    : '${row.version.varianceName} · ${row.version.mpn}',
+                              ),
+                              subtitle: Text(
+                                row.version.isMain ? 'Main' : 'Option',
+                              ),
                             ),
+                            for (final listing in row.listings)
+                              ListTile(
+                                dense: true,
+                                contentPadding:
+                                    const EdgeInsets.only(left: 32, right: 16),
+                                title: Text(listing.supplierName),
+                                subtitle: Text('SKU ${listing.listing.sku}'),
+                              ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: () => _addListing(row.version),
+                                icon: const Icon(Icons.add),
+                                label: const Text('Add listing'),
+                              ),
+                            ),
+                          ],
                           Align(
                             alignment: Alignment.centerLeft,
                             child: TextButton.icon(
-                              onPressed: () => _addListing(row.version),
+                              onPressed: () =>
+                                  _addVariance(brandId: group.brandId),
                               icon: const Icon(Icons.add),
-                              label: const Text('Add listing'),
+                              label: const Text('Add variance'),
                             ),
                           ),
                         ],

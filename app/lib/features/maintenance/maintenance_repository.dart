@@ -84,4 +84,24 @@ class MaintenanceRepository {
       deviceId: _deviceId,
     );
   }
+
+  Future<void> renameCategory(String id, String name) async {
+    await _pin.requireUnlocked();
+    await _db.taxonomyDao.renameCategory(id, name);
+  }
+
+  Future<void> renameStyle(String id, String name) async {
+    await _pin.requireUnlocked();
+    await _db.taxonomyDao.renameStyle(id, name);
+  }
+
+  Future<void> renameType(String id, String name) async {
+    await _pin.requireUnlocked();
+    await _db.taxonomyDao.renameType(id, name);
+  }
+
+  Future<void> renameBrand(String id, String name) async {
+    await _pin.requireUnlocked();
+    await _db.taxonomyDao.renameBrand(id, name);
+  }
 }

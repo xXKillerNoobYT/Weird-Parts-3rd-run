@@ -187,7 +187,7 @@ class _MoreTabState extends State<_MoreTab> {
           ListTile(
             leading: const Icon(Icons.build_outlined),
             title: const Text('Maintenance'),
-            subtitle: const Text('Categories, brands, suppliers, …'),
+            subtitle: const Text('Types tree, brands, suppliers'),
             onTap: _openMaintenance,
           ),
           ListTile(

@@ -167,4 +167,48 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
           ..orderBy([(t) => OrderingTerm.asc(t.name)]))
         .get();
   }
+
+  Future<void> renameCategory(String id, String name) async {
+    final now = DateTime.now().toUtc();
+    await (update(categories)..where((t) => t.id.equals(id))).write(
+      CategoriesCompanion.custom(
+        name: Variable(name),
+        modifiedAt: Variable(now),
+        revision: categories.revision + const Constant(1),
+      ),
+    );
+  }
+
+  Future<void> renameStyle(String id, String name) async {
+    final now = DateTime.now().toUtc();
+    await (update(styles)..where((t) => t.id.equals(id))).write(
+      StylesCompanion.custom(
+        name: Variable(name),
+        modifiedAt: Variable(now),
+        revision: styles.revision + const Constant(1),
+      ),
+    );
+  }
+
+  Future<void> renameType(String id, String name) async {
+    final now = DateTime.now().toUtc();
+    await (update(types)..where((t) => t.id.equals(id))).write(
+      TypesCompanion.custom(
+        name: Variable(name),
+        modifiedAt: Variable(now),
+        revision: types.revision + const Constant(1),
+      ),
+    );
+  }
+
+  Future<void> renameBrand(String id, String name) async {
+    final now = DateTime.now().toUtc();
+    await (update(brands)..where((t) => t.id.equals(id))).write(
+      BrandsCompanion.custom(
+        name: Variable(name),
+        modifiedAt: Variable(now),
+        revision: brands.revision + const Constant(1),
+      ),
+    );
+  }
 }

@@ -4972,6 +4972,31 @@ class $BrandVersionsTable extends BrandVersions
     requiredDuringInsert: false,
     defaultValue: const Constant(''),
   );
+  static const VerificationMeta _varianceNameMeta = const VerificationMeta(
+    'varianceName',
+  );
+  @override
+  late final GeneratedColumn<String> varianceName = GeneratedColumn<String>(
+    'variance_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _isMainMeta = const VerificationMeta('isMain');
+  @override
+  late final GeneratedColumn<bool> isMain = GeneratedColumn<bool>(
+    'is_main',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_main" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4985,6 +5010,8 @@ class $BrandVersionsTable extends BrandVersions
     mpn,
     model,
     description,
+    varianceName,
+    isMain,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -5081,6 +5108,21 @@ class $BrandVersionsTable extends BrandVersions
         ),
       );
     }
+    if (data.containsKey('variance_name')) {
+      context.handle(
+        _varianceNameMeta,
+        varianceName.isAcceptableOrUnknown(
+          data['variance_name']!,
+          _varianceNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('is_main')) {
+      context.handle(
+        _isMainMeta,
+        isMain.isAcceptableOrUnknown(data['is_main']!, _isMainMeta),
+      );
+    }
     return context;
   }
 
@@ -5134,6 +5176,14 @@ class $BrandVersionsTable extends BrandVersions
         DriftSqlType.string,
         data['${effectivePrefix}description'],
       )!,
+      varianceName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}variance_name'],
+      )!,
+      isMain: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_main'],
+      )!,
     );
   }
 
@@ -5155,6 +5205,12 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
   final String mpn;
   final String model;
   final String description;
+
+  /// Color / option for this brand only. Empty = no named Variance.
+  final String varianceName;
+
+  /// First pick for this brand on the part; others are extra options.
+  final bool isMain;
   const BrandVersion({
     required this.id,
     required this.originDeviceId,
@@ -5167,6 +5223,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
     required this.mpn,
     required this.model,
     required this.description,
+    required this.varianceName,
+    required this.isMain,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -5184,6 +5242,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
     map['mpn'] = Variable<String>(mpn);
     map['model'] = Variable<String>(model);
     map['description'] = Variable<String>(description);
+    map['variance_name'] = Variable<String>(varianceName);
+    map['is_main'] = Variable<bool>(isMain);
     return map;
   }
 
@@ -5202,6 +5262,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
       mpn: Value(mpn),
       model: Value(model),
       description: Value(description),
+      varianceName: Value(varianceName),
+      isMain: Value(isMain),
     );
   }
 
@@ -5222,6 +5284,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
       mpn: serializer.fromJson<String>(json['mpn']),
       model: serializer.fromJson<String>(json['model']),
       description: serializer.fromJson<String>(json['description']),
+      varianceName: serializer.fromJson<String>(json['varianceName']),
+      isMain: serializer.fromJson<bool>(json['isMain']),
     );
   }
   @override
@@ -5239,6 +5303,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
       'mpn': serializer.toJson<String>(mpn),
       'model': serializer.toJson<String>(model),
       'description': serializer.toJson<String>(description),
+      'varianceName': serializer.toJson<String>(varianceName),
+      'isMain': serializer.toJson<bool>(isMain),
     };
   }
 
@@ -5254,6 +5320,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
     String? mpn,
     String? model,
     String? description,
+    String? varianceName,
+    bool? isMain,
   }) => BrandVersion(
     id: id ?? this.id,
     originDeviceId: originDeviceId ?? this.originDeviceId,
@@ -5266,6 +5334,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
     mpn: mpn ?? this.mpn,
     model: model ?? this.model,
     description: description ?? this.description,
+    varianceName: varianceName ?? this.varianceName,
+    isMain: isMain ?? this.isMain,
   );
   BrandVersion copyWithCompanion(BrandVersionsCompanion data) {
     return BrandVersion(
@@ -5286,6 +5356,10 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
       description: data.description.present
           ? data.description.value
           : this.description,
+      varianceName: data.varianceName.present
+          ? data.varianceName.value
+          : this.varianceName,
+      isMain: data.isMain.present ? data.isMain.value : this.isMain,
     );
   }
 
@@ -5302,7 +5376,9 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
           ..write('brandId: $brandId, ')
           ..write('mpn: $mpn, ')
           ..write('model: $model, ')
-          ..write('description: $description')
+          ..write('description: $description, ')
+          ..write('varianceName: $varianceName, ')
+          ..write('isMain: $isMain')
           ..write(')'))
         .toString();
   }
@@ -5320,6 +5396,8 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
     mpn,
     model,
     description,
+    varianceName,
+    isMain,
   );
   @override
   bool operator ==(Object other) =>
@@ -5335,7 +5413,9 @@ class BrandVersion extends DataClass implements Insertable<BrandVersion> {
           other.brandId == this.brandId &&
           other.mpn == this.mpn &&
           other.model == this.model &&
-          other.description == this.description);
+          other.description == this.description &&
+          other.varianceName == this.varianceName &&
+          other.isMain == this.isMain);
 }
 
 class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
@@ -5350,6 +5430,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
   final Value<String> mpn;
   final Value<String> model;
   final Value<String> description;
+  final Value<String> varianceName;
+  final Value<bool> isMain;
   final Value<int> rowid;
   const BrandVersionsCompanion({
     this.id = const Value.absent(),
@@ -5363,6 +5445,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
     this.mpn = const Value.absent(),
     this.model = const Value.absent(),
     this.description = const Value.absent(),
+    this.varianceName = const Value.absent(),
+    this.isMain = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   BrandVersionsCompanion.insert({
@@ -5377,6 +5461,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
     required String mpn,
     this.model = const Value.absent(),
     this.description = const Value.absent(),
+    this.varianceName = const Value.absent(),
+    this.isMain = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        originDeviceId = Value(originDeviceId),
@@ -5397,6 +5483,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
     Expression<String>? mpn,
     Expression<String>? model,
     Expression<String>? description,
+    Expression<String>? varianceName,
+    Expression<bool>? isMain,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -5411,6 +5499,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
       if (mpn != null) 'mpn': mpn,
       if (model != null) 'model': model,
       if (description != null) 'description': description,
+      if (varianceName != null) 'variance_name': varianceName,
+      if (isMain != null) 'is_main': isMain,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -5427,6 +5517,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
     Value<String>? mpn,
     Value<String>? model,
     Value<String>? description,
+    Value<String>? varianceName,
+    Value<bool>? isMain,
     Value<int>? rowid,
   }) {
     return BrandVersionsCompanion(
@@ -5441,6 +5533,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
       mpn: mpn ?? this.mpn,
       model: model ?? this.model,
       description: description ?? this.description,
+      varianceName: varianceName ?? this.varianceName,
+      isMain: isMain ?? this.isMain,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -5481,6 +5575,12 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
     if (description.present) {
       map['description'] = Variable<String>(description.value);
     }
+    if (varianceName.present) {
+      map['variance_name'] = Variable<String>(varianceName.value);
+    }
+    if (isMain.present) {
+      map['is_main'] = Variable<bool>(isMain.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -5501,6 +5601,8 @@ class BrandVersionsCompanion extends UpdateCompanion<BrandVersion> {
           ..write('mpn: $mpn, ')
           ..write('model: $model, ')
           ..write('description: $description, ')
+          ..write('varianceName: $varianceName, ')
+          ..write('isMain: $isMain, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -10924,6 +11026,8 @@ typedef $$BrandVersionsTableCreateCompanionBuilder =
       required String mpn,
       Value<String> model,
       Value<String> description,
+      Value<String> varianceName,
+      Value<bool> isMain,
       Value<int> rowid,
     });
 typedef $$BrandVersionsTableUpdateCompanionBuilder =
@@ -10939,6 +11043,8 @@ typedef $$BrandVersionsTableUpdateCompanionBuilder =
       Value<String> mpn,
       Value<String> model,
       Value<String> description,
+      Value<String> varianceName,
+      Value<bool> isMain,
       Value<int> rowid,
     });
 
@@ -11003,6 +11109,16 @@ class $$BrandVersionsTableFilterComposer
 
   ColumnFilters<String> get description => $composableBuilder(
     column: $table.description,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get varianceName => $composableBuilder(
+    column: $table.varianceName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isMain => $composableBuilder(
+    column: $table.isMain,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -11070,6 +11186,16 @@ class $$BrandVersionsTableOrderingComposer
     column: $table.description,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get varianceName => $composableBuilder(
+    column: $table.varianceName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isMain => $composableBuilder(
+    column: $table.isMain,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$BrandVersionsTableAnnotationComposer
@@ -11119,6 +11245,14 @@ class $$BrandVersionsTableAnnotationComposer
     column: $table.description,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get varianceName => $composableBuilder(
+    column: $table.varianceName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isMain =>
+      $composableBuilder(column: $table.isMain, builder: (column) => column);
 }
 
 class $$BrandVersionsTableTableManager
@@ -11163,6 +11297,8 @@ class $$BrandVersionsTableTableManager
                 Value<String> mpn = const Value.absent(),
                 Value<String> model = const Value.absent(),
                 Value<String> description = const Value.absent(),
+                Value<String> varianceName = const Value.absent(),
+                Value<bool> isMain = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => BrandVersionsCompanion(
                 id: id,
@@ -11176,6 +11312,8 @@ class $$BrandVersionsTableTableManager
                 mpn: mpn,
                 model: model,
                 description: description,
+                varianceName: varianceName,
+                isMain: isMain,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -11191,6 +11329,8 @@ class $$BrandVersionsTableTableManager
                 required String mpn,
                 Value<String> model = const Value.absent(),
                 Value<String> description = const Value.absent(),
+                Value<String> varianceName = const Value.absent(),
+                Value<bool> isMain = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => BrandVersionsCompanion.insert(
                 id: id,
@@ -11204,6 +11344,8 @@ class $$BrandVersionsTableTableManager
                 mpn: mpn,
                 model: model,
                 description: description,
+                varianceName: varianceName,
+                isMain: isMain,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

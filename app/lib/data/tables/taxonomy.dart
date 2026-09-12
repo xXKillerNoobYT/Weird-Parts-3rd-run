@@ -27,6 +27,8 @@ class Types extends Table with SyncColumns {
   TextColumn get name => text()();
 }
 
+/// Parked: old "compatible devices" list. Phase 2 Variance is on [BrandVersions],
+/// not this table. No Maintenance chip.
 class Devices extends Table with SyncColumns {
   TextColumn get name => text()();
 }
