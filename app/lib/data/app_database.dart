@@ -5,15 +5,32 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'daos/parts_dao.dart';
 import 'daos/settings_dao.dart';
+import 'daos/taxonomy_dao.dart';
 import 'tables/app_settings.dart';
 import 'tables/device_profile.dart';
+import 'tables/parts.dart';
+import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
 @DriftDatabase(
-  tables: [DeviceProfiles, AppSettings],
-  daos: [SettingsDao],
+  tables: [
+    DeviceProfiles,
+    AppSettings,
+    Categories,
+    Styles,
+    Types,
+    Devices,
+    Brands,
+    Suppliers,
+    Parts,
+    PartDevices,
+    BrandVersions,
+    SupplierListings,
+  ],
+  daos: [SettingsDao, TaxonomyDao, PartsDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
