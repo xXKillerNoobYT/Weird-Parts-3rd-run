@@ -1,0 +1,29 @@
+---
+description: Flutter/Dart conventions for the app/ package
+globs: app/**/*.dart
+alwaysApply: false
+---
+
+# Flutter / Dart conventions
+
+## Layout
+
+- `app/lib/data/` — Drift tables, DAOs, `AppDatabase`
+- `app/lib/features/` — UI + repositories by domain (jobs, catalog, pin, maintenance)
+- `app/lib/core/` — small shared helpers (ids, hashing)
+
+## Practices
+
+- Prefer repositories between UI and DAOs; keep widgets thin.
+- Do not edit `*.g.dart` by hand — regenerate with build_runner.
+- Gate catalog mutations behind PIN; field may still add custom/temp parts on jobs per product rules.
+- Prefer `async`/`await` with explicit error handling over bare `print` for failures.
+- Keep changes phase-scoped; avoid pulling in end-goal screens from `docs/end-goal/`.
+
+## Checks before claiming done
+
+```bash
+cd app
+flutter analyze
+flutter test
+```
