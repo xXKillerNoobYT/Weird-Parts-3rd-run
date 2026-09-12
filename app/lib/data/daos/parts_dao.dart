@@ -79,11 +79,34 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
         .getSingleOrNull();
   }
 
-  Future<List<Part>> listParts() {
-    return (select(parts)
-          ..where((t) => t.deletedAt.isNull() & t.active.equals(true))
-          ..orderBy([(t) => OrderingTerm.asc(t.name)]))
-        .get();
+  Future<void> updatePart({
+    required String id,
+    required String name,
+    required String description,
+    required String uom,
+    String? defaultSupplierId,
+    required bool active,
+  }) async {
+    final now = DateTime.now().toUtc();
+    await (update(parts)..where((t) => t.id.equals(id))).write(
+      PartsCompanion(
+        name: Value(name),
+        description: Value(description),
+        uom: Value(uom),
+        defaultSupplierId: Value(defaultSupplierId),
+        active: Value(active),
+        modifiedAt: Value(now),
+      ),
+    );
+  }
+
+  Future<List<Part>> listParts({bool activeOnly = true}) {
+    final q = select(parts)..where((t) => t.deletedAt.isNull());
+    if (activeOnly) {
+      q.where((t) => t.active.equals(true));
+    }
+    q.orderBy([(t) => OrderingTerm.asc(t.name)]);
+    return q.get();
   }
 
   Future<List<BrandVersion>> listBrandVersionsForPart(String partId) {

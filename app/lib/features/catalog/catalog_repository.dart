@@ -9,7 +9,8 @@ class CatalogRepository {
   final PinService _pin;
   final String _deviceId;
 
-  Future<List<Part>> listParts() => _db.partsDao.listParts();
+  Future<List<Part>> listParts({bool activeOnly = true}) =>
+      _db.partsDao.listParts(activeOnly: activeOnly);
 
   Future<Part?> getPart(String partId) => _db.partsDao.getPart(partId);
 
@@ -29,6 +30,25 @@ class CatalogRepository {
       name: name,
       deviceId: _deviceId,
       defaultSupplierId: defaultSupplierId,
+    );
+  }
+
+  Future<void> updatePart({
+    required String partId,
+    required String name,
+    required String description,
+    required String uom,
+    String? defaultSupplierId,
+    required bool active,
+  }) async {
+    await _pin.requireUnlocked();
+    await _db.partsDao.updatePart(
+      id: partId,
+      name: name,
+      description: description,
+      uom: uom,
+      defaultSupplierId: defaultSupplierId,
+      active: active,
     );
   }
 
