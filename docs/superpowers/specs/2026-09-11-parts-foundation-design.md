@@ -78,7 +78,7 @@ App services (Jobs · Catalog · PIN · Media · Backup · Sync orchestrator)
 - **Now:** unique `device_id` at install; shared editor PIN for catalog writes
 - **Reserved:** nullable `user_id` / role fields for local user profiles and Hats
 - **Later (sooner than cloud):** MCP tools gated by logged-in user + MCP settings
-- **Much later:** optional company cloud; company IDs; auto nearby sync
+- **Much later:** optional **paid** company cloud + web client (monetization; free local-first + nearby sync remains base); company IDs; auto nearby sync
 
 ---
 

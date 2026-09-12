@@ -6,7 +6,7 @@ Living tracker. End goal is saved under `docs/end-goal/`; details get worked out
 
 **WiredPart** — outdoor / field construction ops app (jobs, notebooks, parts, warehouse, scheduling, chat, fleet, people/Hats, etc.).
 
-**Foundation first** — local-first, server-free Parts + Jobs/JPO on every device, nearby sync, encrypted backup. No cloud required. Accounts/MCP later; company cloud much later.
+**Foundation first** — local-first, server-free Parts + Jobs/JPO on every device, nearby sync, encrypted backup. No cloud required. Free offline + nearby sync stays the base product. Accounts/MCP later; **paid** web client + optional company cloud much later (monetization offering — not a foundation dependency).
 
 Reference drafts (rough, not binding detail yet):
 
@@ -36,7 +36,7 @@ Reference drafts (rough, not binding detail yet):
 | AI                 | On-device later; **MCP + 3rd-party AI** sooner than cloud, permissioned by logged-in user + MCP settings                                           |
 | Catalog identity   | **General Part** is the default (info, no MPN). Brand versions optional when brand matters. Part has a **default supplier**.                       |
 | Job line tracking  | Needed / shop-pull separate from orders. **Order splits**: multiple supplier+qty rows per line. Brand optional on the line; else default supplier. |
-| Cloud              | Far future, optional                                                                                                                               |
+| Cloud / web        | Far future, **paid** optional tier — web client + company cloud sync/accounts; does **not** replace free local-first + nearby sync                 |
 | Company IDs        | Future — local company identity shared across crew devices (before/alongside cloud)                                                                |
 | Auto sync          | **Later (Phase 7)** — auto/background nearby sync after manual **two-way** Sync Now is solid; still local-first, no internet |
 | Detail policy      | End goal saved; work out screen/module detail **as we build**                                                                                      |
@@ -123,7 +123,9 @@ Do **not** fully spec these now. Pull from `docs/end-goal/` when a phase starts.
 - [ ] Preferred brand on a part, and/or preferred brand for a job (after general-part + optional brand works)
 - [ ] Company IDs (crew/company identity on devices)
 - [ ] Auto / background nearby sync (Phase 7 — after two-way manual sync works)
-- [ ] Optional company cloud
+- [ ] **Web client** (Flutter web or progressive web) as a product surface — later monetization offering
+- [ ] **Optional company cloud** sync / accounts — **paid** tier (not required for core use)
+- [ ] Keep **free / offline local-first + nearby sync** as the base product; cloud/web never replaces it
 
 ---
 
