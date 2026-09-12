@@ -16,6 +16,23 @@ void main() {
 
   test('no PIN set means catalog unlocked until set', () async {
     expect(await pin.isPinSet(), isFalse);
+    await expectLater(pin.requireUnlocked(), completes);
+  });
+
+  test('requireUnlocked throws when PIN set and locked', () async {
+    await pin.setPin('1357');
+    await expectLater(
+      pin.requireUnlocked(),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('lock clears unlocked session', () async {
+    await pin.setPin('1357');
+    await pin.unlock('1357');
+    expect(pin.isUnlocked, isTrue);
+    pin.lock();
+    expect(pin.isUnlocked, isFalse);
   });
 
   test('set and unlock with correct PIN', () async {
