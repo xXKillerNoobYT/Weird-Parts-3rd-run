@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..700,0..1,-25..0&display=swap" rel="stylesheet">
+<script src="./image-slot.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  .print-sheet.ps-gray { filter: grayscale(1); }
+  .psb { font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; background:#E9E9EC; padding:40px; min-height:100vh; }
+  .msr { font-family: 'Material Symbols Rounded'; font-weight: normal; font-style: normal; line-height: 1; display: inline-block; -webkit-font-smoothing: antialiased; font-variation-settings: 'FILL' 1, 'wght' 500; }
+  .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+  .scroll::-webkit-scrollbar { width:0; height:0; }
+  .psb input, .psb textarea { font-family: inherit; }
+  @media print {
+    body * { visibility: hidden !important; }
+    .print-sheet, .print-sheet * { visibility: visible !important; }
+    .print-sheet { position:fixed !important; inset:0 !important; left:0 !important; right:0 !important; top:0 !important; bottom:auto !important; margin:0 !important; max-height:none !important; height:auto !important; box-shadow:none !important; border-radius:0 !important; padding:0.5in !important; overflow:visible !important; }
+    .print-hide { display:none !important; }
+  }
+</style>
+</helmet>
+<div class="psb" style="{{ shellStyle }}">
+  <div style="{{ rowStyle }}">
+
+    <sc-if value="{{ notEmbed }}" hint-placeholder-val="{{ true }}">
+    <!-- RIGHT (order 2): reference -->
+    <div style="width:470px; flex:0 0 auto; display:flex; flex-direction:column; gap:18px; order:2;">
+      <div>
+        <div style="font-size:12px; font-weight:700; letter-spacing:0.6px; color:#8E8E93; text-transform:uppercase;">Panel Schedule Builder</div>
+        <div style="font-size:26px; font-weight:700; color:#1c1c1e; margin-top:5px; letter-spacing:-0.3px;">Real spaces, real load</div>
+        <div style="font-size:14px; color:#3c3c43; margin-top:8px; line-height:1.55;">Layout switches up top — <b>Classic</b>, <b>List</b>, or <b>Visual</b> (default). Every circuit carries a <b>breaker size</b> (the max) and a <b>connected load</b> (used A); <b>phase balance sums used amps per leg</b>. Four form factors cover what's really in a panel: single/multi-pole, tandem twins, and quads.</div>
+      </div>
+
+      <div style="background:#fff; border:1px solid rgba(60,60,67,0.12); border-radius:14px; padding:15px 17px;">
+        <div style="font-size:12px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px;">Space form factors</div>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; gap:10px; align-items:flex-start;"><span style="width:22px; height:34px; border-radius:5px; background:#0A84FF22; border:1px solid #0A84FF; flex:0 0 auto;"></span><div style="font-size:12.5px; color:#3c3c43; line-height:1.4;"><b>1-pole</b> — one space, one leg (120V branch). <b>2/3-pole</b> ties handles across 2–3 spaces on consecutive legs for 240V / 3Ø.</div></div>
+          <div style="display:flex; gap:10px; align-items:flex-start;"><span style="width:22px; height:34px; border-radius:5px; background:#fff; border:1px solid #8E8E93; display:flex; flex-direction:column; flex:0 0 auto;"><span style="flex:1; border-bottom:1px dashed #8E8E93;"></span><span style="flex:1;"></span></span><div style="font-size:12.5px; color:#3c3c43; line-height:1.4;"><b>Tandem (twin)</b> — two 120V circuits in one space, both on the <b>same leg</b>. Builds like 15/15, 20/20, 15/20.</div></div>
+          <div style="display:flex; gap:10px; align-items:flex-start;"><span style="width:22px; height:34px; border-radius:5px; background:#fff; border:1px solid #5E5CE6; display:flex; flex-direction:column; flex:0 0 auto;"><span style="flex:1; border-bottom:1px dashed #8E8E93;"></span><span style="flex:1.3; background:#5E5CE622; border-bottom:1px dashed #8E8E93;"></span><span style="flex:1;"></span></span><div style="font-size:12.5px; color:#3c3c43; line-height:1.4;"><b>Quad</b> (two spaces) — <b>4×1P</b> singles, <b>120/240/120</b> (two singles + tied inner 2-pole, e.g. 20·30·20), or <b>2×2P</b> (e.g. 30/50).</div></div>
+          <div style="display:flex; gap:10px; align-items:flex-start;"><span class="msr" style="font-size:20px; color:#FF9F0A; flex:0 0 auto; margin-top:2px;">info</span><div style="font-size:12.5px; color:#3c3c43; line-height:1.4;"><b>CTL</b> — a stab-on panel labeled "40/40" only accepts tandems in <b>marked</b> slots; some (QO) fit any space. Set this in Panel setup.</div></div>
+        </div>
+      </div>
+
+      <div style="background:#fff; border:1px solid rgba(60,60,67,0.12); border-radius:14px; padding:15px 17px;">
+        <div style="font-size:12px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:11px;">Breaker types</div>
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px 18px;">
+          <sc-for list="{{ catalog }}" as="t" hint-placeholder-count="8">
+            <div style="display:flex; gap:8px; align-items:flex-start;">
+              <span style="width:11px; height:11px; border-radius:3px; background:{{ t.color }}; margin-top:3px; flex:0 0 auto;"></span>
+              <div><div style="font-size:13px; font-weight:700; color:#1c1c1e;">{{ t.name }} <span class="mono" style="font-weight:600; color:#aeaeb2; font-size:11px;">{{ t.short }}</span></div><div style="font-size:11px; color:rgba(60,60,67,0.6); line-height:1.35;">{{ t.desc }}</div></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- RIGHT: the phone -->
+    <div style="{{ phoneWrapStyle }}">
+      <div style="{{ frameStyle }}">
+        <div style="{{ screenStyle }}">
+
+          <sc-if value="{{ notEmbed }}" hint-placeholder-val="{{ true }}"><div style="height:42px; display:flex; align-items:center; justify-content:space-between; padding:0 30px; flex:0 0 auto;"><span style="font-size:14px; font-weight:600;">9:41</span><span style="display:flex; gap:6px; align-items:center;"><span class="msr" style="font-size:16px;">network_wifi</span><span class="msr" style="font-size:17px;">battery_full</span></span></div></sc-if>
+
+          <div onClick="{{ onOpenSetup }}" style="padding:2px 20px 10px; flex:0 0 auto; cursor:pointer;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <div style="font-size:23px; font-weight:700; color:#000; letter-spacing:-0.3px;">{{ panelName }}</div>
+              <span class="msr" style="font-size:20px; color:#8E8E93;">tune</span>
+            </div>
+            <div style="font-size:12px; color:#8E8E93; margin-top:1px;">{{ panel.metaLine }}</div>
+          </div>
+
+          <div style="padding:0 20px 10px; flex:0 0 auto;">
+            <div style="display:flex; background:rgba(118,118,128,0.12); border-radius:10px; padding:2px;">
+              <sc-for list="{{ viewBtns }}" as="v" hint-placeholder-count="3">
+                <span onClick="{{ v.onTap }}" style="flex:1; text-align:center; font-size:13px; font-weight:600; padding:7px 0; border-radius:8px; cursor:pointer; background:{{ v.bg }}; color:{{ v.fg }}; box-shadow:{{ v.shadow }};">{{ v.label }}</span>
+              </sc-for>
+            </div>
+          </div>
+
+          <div class="scroll" style="flex:1 1 auto; overflow:auto; padding:0 14px 18px;">
+
+            <!-- CLASSIC -->
+            <sc-if value="{{ isClassic }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; gap:8px;">
+                <div style="flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:6px;">
+                  <sc-for list="{{ leftCells }}" as="c" hint-placeholder-count="6">
+                    <div onClick="{{ c.onTap }}" style="height:{{ c.height }}; border:1px solid rgba(60,60,67,0.12); border-radius:8px; background:#fff; cursor:pointer; overflow:hidden; display:flex;">
+                      <div style="width:5px; background:{{ c.barColor }}; flex:0 0 auto;"></div>
+                      <div style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column;">
+                        <sc-if value="{{ c.isSplit }}" hint-placeholder-val="{{ false }}">
+                          <sc-for list="{{ c.subs }}" as="s" hint-placeholder-count="2">
+                            <div style="flex:1; display:flex; align-items:center; gap:5px; padding:1px 7px; border-bottom:1px dashed rgba(60,60,67,0.18); min-width:0; background:{{ s.rowBg }};"><span style="width:6px; height:6px; border-radius:50%; background:{{ s.phaseColor }}; flex:0 0 auto;"></span><span class="mono" style="font-size:9px; color:#8E8E93; width:34px; flex:0 0 auto;">{{ s.label }}</span><span class="mono" style="font-size:10px; font-weight:700; color:{{ s.color }}; flex:0 0 auto;">{{ s.amps }}</span><span style="font-size:10px; color:#1c1c1e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.desc }}</span></div>
+                          </sc-for>
+                        </sc-if>
+                        <sc-if value="{{ c.isFull }}" hint-placeholder-val="{{ false }}">
+                          <div style="flex:1; display:flex; align-items:center; gap:5px; padding:4px 7px; min-width:0;">
+                            <span style="width:7px; height:7px; border-radius:50%; background:{{ c.phaseColor }}; flex:0 0 auto;"></span>
+                            <span class="mono" style="font-size:10px; color:#8E8E93; width:30px; flex:0 0 auto;">{{ c.slotLabel }}</span>
+                            <span class="mono" style="font-size:10px; font-weight:700; color:{{ c.typeColor }}; width:46px; flex:0 0 auto;">{{ c.ampsPolesShort }}</span>
+                            <div style="min-width:0;"><div style="font-size:11px; color:#1c1c1e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.desc }}</div><div class="mono" style="font-size:9px; color:{{ c.loadColor }};">{{ c.footLabel }}</div></div>
+                          </div>
+                        </sc-if>
+                        <sc-if value="{{ c.isEmpty }}" hint-placeholder-val="{{ false }}">
+                          <div style="flex:1; display:flex; align-items:center; gap:5px; padding:4px 7px;"><span class="mono" style="font-size:10px; color:#c7c7cc; width:30px;">{{ c.slotLabel }}</span><span style="font-size:11px; color:#c7c7cc;">Open</span></div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:6px;">
+                  <sc-for list="{{ rightCells }}" as="c" hint-placeholder-count="6">
+                    <div onClick="{{ c.onTap }}" style="height:{{ c.height }}; border:1px solid rgba(60,60,67,0.12); border-radius:8px; background:#fff; cursor:pointer; overflow:hidden; display:flex;">
+                      <div style="width:5px; background:{{ c.barColor }}; flex:0 0 auto;"></div>
+                      <div style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column;">
+                        <sc-if value="{{ c.isSplit }}" hint-placeholder-val="{{ false }}">
+                          <sc-for list="{{ c.subs }}" as="s" hint-placeholder-count="2">
+                            <div style="flex:1; display:flex; align-items:center; gap:5px; padding:1px 7px; border-bottom:1px dashed rgba(60,60,67,0.18); min-width:0; background:{{ s.rowBg }};"><span style="width:6px; height:6px; border-radius:50%; background:{{ s.phaseColor }}; flex:0 0 auto;"></span><span class="mono" style="font-size:9px; color:#8E8E93; width:34px; flex:0 0 auto;">{{ s.label }}</span><span class="mono" style="font-size:10px; font-weight:700; color:{{ s.color }}; flex:0 0 auto;">{{ s.amps }}</span><span style="font-size:10px; color:#1c1c1e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.desc }}</span></div>
+                          </sc-for>
+                        </sc-if>
+                        <sc-if value="{{ c.isFull }}" hint-placeholder-val="{{ false }}">
+                          <div style="flex:1; display:flex; align-items:center; gap:5px; padding:4px 7px; min-width:0;">
+                            <span style="width:7px; height:7px; border-radius:50%; background:{{ c.phaseColor }}; flex:0 0 auto;"></span>
+                            <span class="mono" style="font-size:10px; color:#8E8E93; width:30px; flex:0 0 auto;">{{ c.slotLabel }}</span>
+                            <span class="mono" style="font-size:10px; font-weight:700; color:{{ c.typeColor }}; width:46px; flex:0 0 auto;">{{ c.ampsPolesShort }}</span>
+                            <div style="min-width:0;"><div style="font-size:11px; color:#1c1c1e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.desc }}</div><div class="mono" style="font-size:9px; color:{{ c.loadColor }};">{{ c.footLabel }}</div></div>
+                          </div>
+                        </sc-if>
+                        <sc-if value="{{ c.isEmpty }}" hint-placeholder-val="{{ false }}">
+                          <div style="flex:1; display:flex; align-items:center; gap:5px; padding:4px 7px;"><span class="mono" style="font-size:10px; color:#c7c7cc; width:30px;">{{ c.slotLabel }}</span><span style="font-size:11px; color:#c7c7cc;">Open</span></div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- LIST -->
+            <sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <div style="flex:1; background:#fff; border-radius:11px; padding:10px; text-align:center; border:1px solid rgba(60,60,67,0.08);"><div style="font-size:20px; font-weight:700; color:#1c1c1e;">{{ circuitCount }}</div><div style="font-size:10px; color:#8E8E93; text-transform:uppercase; letter-spacing:0.3px;">Circuits</div></div>
+                <div style="flex:1; background:#fff; border-radius:11px; padding:10px; text-align:center; border:1px solid rgba(60,60,67,0.08);"><div style="font-size:20px; font-weight:700; color:#1c1c1e;">{{ spares }}</div><div style="font-size:10px; color:#8E8E93; text-transform:uppercase; letter-spacing:0.3px;">Free sp.</div></div>
+                <div style="flex:1; background:#fff; border-radius:11px; padding:10px; text-align:center; border:1px solid rgba(60,60,67,0.08);"><div style="font-size:20px; font-weight:700; color:#1c1c1e;">{{ panel.spaces }}</div><div style="font-size:10px; color:#8E8E93; text-transform:uppercase; letter-spacing:0.3px;">Spaces</div></div>
+              </div>
+              <div onClick="{{ onAddCircuit }}" style="display:flex; align-items:center; justify-content:center; gap:7px; background:#007AFF; border-radius:12px; padding:13px; margin-bottom:12px; cursor:pointer; color:#fff; font-size:15px; font-weight:600;"><span class="msr" style="font-size:19px;">add_circle</span>Add Circuit</div>
+              <sc-for list="{{ listItems }}" as="c" hint-placeholder-count="6">
+                <div onClick="{{ c.onTap }}" style="display:flex; align-items:stretch; background:#fff; border-radius:12px; margin-bottom:8px; overflow:hidden; border:1px solid rgba(60,60,67,0.08); cursor:pointer;">
+                  <div style="width:5px; background:{{ c.typeColor }}; flex:0 0 auto;"></div>
+                  <div style="flex:1 1 auto; min-width:0; padding:11px 13px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <span class="mono" style="font-size:11px; color:#8E8E93;">{{ c.slotLabel }}</span>
+                      <span class="mono" style="font-size:13px; font-weight:700; color:#1c1c1e;">{{ c.ampsPoles }}</span>
+                      <span style="font-size:10px; font-weight:700; color:{{ c.typeColor }}; background:{{ c.typeBg }}; padding:1px 7px; border-radius:7px;">{{ c.tag }}</span>
+                    </div>
+                    <div style="font-size:13px; color:#3c3c43; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.desc }}</div>
+                    <div class="mono" style="font-size:11px; color:{{ c.loadColor }}; margin-top:3px;">{{ c.footLabel }}</div>
+                  </div>
+                  <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding-right:12px; gap:3px;"><span style="font-size:10px; font-weight:700; color:{{ c.phaseColor }};">{{ c.phaseSpan }}</span></div>
+                </div>
+              </sc-for>
+            </sc-if>
+
+            <!-- VISUAL -->
+            <sc-if value="{{ isVisual }}" hint-placeholder-val="{{ false }}">
+              <div style="background:#0e0e10; border:1px solid #2c2c2e; border-radius:14px; padding:10px 8px; overflow:hidden;">
+                <div style="text-align:center; font-size:10px; font-weight:700; letter-spacing:1px; color:#5a5a5e; text-transform:uppercase; margin-bottom:7px;">{{ panel.brand }} · {{ panel.mainAmps }}A Main</div>
+                <div style="display:flex; gap:6px;">
+                  <div style="flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:6px;">
+                    <sc-for list="{{ leftCells }}" as="c" hint-placeholder-count="6">
+                      <div onClick="{{ c.onTap }}" style="height:{{ c.height }}; border:1px solid {{ c.darkBorder }}; border-radius:7px; background:{{ c.darkBg }}; cursor:pointer; overflow:hidden; display:flex;">
+                        <div style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column;">
+                          <sc-if value="{{ c.isSplit }}" hint-placeholder-val="{{ false }}">
+                            <sc-for list="{{ c.subs }}" as="s" hint-placeholder-count="2">
+                              <div style="flex:1; display:flex; align-items:center; gap:5px; padding:1px 7px; border-bottom:1px dashed #333335; min-width:0; background:{{ s.rowBgDark }};"><span style="width:6px; height:6px; border-radius:50%; background:{{ s.phaseColor }}; flex:0 0 auto;"></span><span class="mono" style="font-size:9px; color:#8E8E93; width:34px; flex:0 0 auto;">{{ s.label }}</span><span class="mono" style="font-size:10px; font-weight:700; color:{{ s.color }}; flex:0 0 auto;">{{ s.amps }}</span><span style="font-size:9px; color:#aeaeb2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.desc }}</span></div>
+                            </sc-for>
+                          </sc-if>
+                          <sc-if value="{{ c.isFull }}" hint-placeholder-val="{{ false }}">
+                            <div style="flex:1; display:flex; align-items:center; gap:6px; padding:4px 8px; min-width:0;">
+                              <span class="mono" style="font-size:9px; color:#8E8E93; width:28px; flex:0 0 auto;">{{ c.slotLabel }}</span>
+                              <div style="min-width:0; flex:1 1 auto;"><div class="mono" style="font-size:11px; font-weight:700; color:{{ c.darkText }};">{{ c.ampsPolesShort }}</div><div style="font-size:9px; color:#aeaeb2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.desc }}</div></div>
+                              <span style="width:8px; height:8px; border-radius:50%; background:{{ c.phaseColor }}; flex:0 0 auto;"></span>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{ c.isEmpty }}" hint-placeholder-val="{{ false }}">
+                            <div style="flex:1; display:flex; align-items:center; gap:6px; padding:4px 8px;"><span class="mono" style="font-size:9px; color:#48484a; width:28px;">{{ c.slotLabel }}</span><span style="font-size:10px; color:#48484a;">Open</span></div>
+                          </sc-if>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="width:1px; background:#2c2c2e; flex:0 0 auto;"></div>
+                  <div style="flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:6px;">
+                    <sc-for list="{{ rightCells }}" as="c" hint-placeholder-count="6">
+                      <div onClick="{{ c.onTap }}" style="height:{{ c.height }}; border:1px solid {{ c.darkBorder }}; border-radius:7px; background:{{ c.darkBg }}; cursor:pointer; overflow:hidden; display:flex;">
+                        <div style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column;">
+                          <sc-if value="{{ c.isSplit }}" hint-placeholder-val="{{ false }}">
+                            <sc-for list="{{ c.subs }}" as="s" hint-placeholder-count="2">
+                              <div style="flex:1; display:flex; align-items:center; gap:5px; padding:1px 7px; border-bottom:1px dashed #333335; min-width:0; background:{{ s.rowBgDark }};"><span style="font-size:9px; color:#aeaeb2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto;">{{ s.desc }}</span><span class="mono" style="font-size:10px; font-weight:700; color:{{ s.color }}; flex:0 0 auto;">{{ s.amps }}</span><span class="mono" style="font-size:9px; color:#8E8E93; width:34px; text-align:right; flex:0 0 auto;">{{ s.label }}</span><span style="width:6px; height:6px; border-radius:50%; background:{{ s.phaseColor }}; flex:0 0 auto;"></span></div>
+                            </sc-for>
+                          </sc-if>
+                          <sc-if value="{{ c.isFull }}" hint-placeholder-val="{{ false }}">
+                            <div style="flex:1; display:flex; align-items:center; gap:6px; padding:4px 8px; min-width:0;">
+                              <span style="width:8px; height:8px; border-radius:50%; background:{{ c.phaseColor }}; flex:0 0 auto;"></span>
+                              <div style="min-width:0; flex:1 1 auto;"><div class="mono" style="font-size:11px; font-weight:700; color:{{ c.darkText }};">{{ c.ampsPolesShort }}</div><div style="font-size:9px; color:#aeaeb2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.desc }}</div></div>
+                              <span class="mono" style="font-size:9px; color:#8E8E93; width:28px; text-align:right; flex:0 0 auto;">{{ c.slotLabel }}</span>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{ c.isEmpty }}" hint-placeholder-val="{{ false }}">
+                            <div style="flex:1; display:flex; align-items:center; justify-content:flex-end; gap:6px; padding:4px 8px;"><span style="font-size:10px; color:#48484a;">Open</span><span class="mono" style="font-size:9px; color:#48484a; width:28px; text-align:right;">{{ c.slotLabel }}</span></div>
+                          </sc-if>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- PHASE BALANCE -->
+            <div style="margin-top:12px; background:#fff; border-radius:12px; padding:12px 14px; border:1px solid rgba(60,60,67,0.1);">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;"><span style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px;">Phase balance · used load</span><div style="display:flex; gap:2px; background:rgba(118,118,128,0.12); border-radius:8px; padding:2px;"><sc-for list="{{ unitBtns }}" as="u" hint-placeholder-count="2"><span onClick="{{ u.onTap }}" style="padding:3px 10px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer; background:{{ u.bg }}; color:{{ u.fg }}; box-shadow:{{ u.shadow }};">{{ u.label }}</span></sc-for></div></div>
+              <sc-for list="{{ bars }}" as="bar" hint-placeholder-count="3">
+                <div style="display:flex; align-items:center; gap:9px; margin:6px 0;">
+                  <span style="width:14px; font-weight:700; font-size:13px; color:{{ bar.color }};">{{ bar.label }}</span>
+                  <div style="flex:1; height:9px; border-radius:5px; background:#ececf0; overflow:hidden;"><div style="height:100%; width:{{ bar.pct }}%; background:{{ bar.color }};"></div></div>
+                  <span class="mono" style="width:74px; text-align:right; font-size:11px; color:#666;">{{ bar.disp }} · {{ bar.pct }}%</span>
+                </div>
+              </sc-for>
+              <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(60,60,67,0.08);">
+                <div style="display:flex; align-items:center; justify-content:space-between;"><span style="font-size:11px; color:#8E8E93;">Largest leg</span><span class="mono" style="font-size:12px; font-weight:700; color:{{ balColor }};">{{ balLabel }}</span></div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:5px;"><span style="font-size:11px; color:#8E8E93;">Total connected</span><span class="mono" style="font-size:12px; font-weight:700; color:#1c1c1e;">{{ totalTxt }}</span></div>
+                <div style="font-size:10px; color:#aeaeb2; margin-top:3px;">{{ svcNote }}</div>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-top:12px;">
+              <div onClick="{{ onPrint }}" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:#fff; border:1px solid rgba(60,60,67,0.12); border-radius:10px; padding:11px; cursor:pointer; color:#007AFF; font-size:13px; font-weight:600;"><span class="msr" style="font-size:16px;">print</span>Print schedule</div>
+              <div onClick="{{ onAddJpo }}" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:#fff; border:1px solid rgba(60,60,67,0.12); border-radius:10px; padding:11px; cursor:pointer; color:#007AFF; font-size:13px; font-weight:600;"><span class="msr" style="font-size:16px;">receipt_long</span>Add to JPO</div>
+            </div>
+          </div>
+
+          <!-- CIRCUIT EDITOR -->
+          <sc-if value="{{ ed.open }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ ed.onClose }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.35); border-radius:42px;"></div>
+            <div class="scroll" style="position:absolute; left:10px; right:10px; bottom:10px; background:#F2F2F7; border-radius:30px 30px 34px 34px; padding:16px 18px 20px; box-shadow:0 -8px 30px rgba(0,0,0,0.25); max-height:93%; overflow:auto;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div style="font-size:18px; font-weight:700; color:#1c1c1e;">{{ ed.title }}</div>
+                <span class="msr" onClick="{{ ed.onClose }}" style="font-size:22px; color:#8E8E93; cursor:pointer;">close</span>
+              </div>
+
+              <div style="display:flex; background:rgba(118,118,128,0.12); border-radius:10px; padding:2px;">
+                <sc-for list="{{ ed.factorBtns }}" as="f" hint-placeholder-count="3"><span onClick="{{ f.onTap }}" style="flex:1; text-align:center; font-size:12px; font-weight:600; padding:8px 0; border-radius:8px; cursor:pointer; background:{{ f.bg }}; color:{{ f.fg }}; box-shadow:{{ f.shadow }};">{{ f.label }}</span></sc-for>
+              </div>
+
+              <!-- FULL -->
+              <sc-if value="{{ ed.isFull }}" hint-placeholder-val="{{ true }}">
+                <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Breaker size <span style="color:#c7c7cc; font-weight:600;">· max rating</span></div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;"><sc-for list="{{ ed.ampsOpts }}" as="o" hint-placeholder-count="6"><span onClick="{{ o.onTap }}" style="padding:7px 12px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+
+                <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Poles <span style="color:#c7c7cc; font-weight:600;">· {{ ed.spanNote }}</span></div>
+                <div style="display:flex; gap:6px;"><sc-for list="{{ ed.poleOpts }}" as="o" hint-placeholder-count="3"><span onClick="{{ o.onTap }}" style="flex:1; text-align:center; padding:9px 4px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+
+                <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Breaker type</div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;"><sc-for list="{{ ed.typeOpts }}" as="o" hint-placeholder-count="8"><span onClick="{{ o.onTap }}" style="display:flex; align-items:center; gap:5px; padding:7px 11px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};"><span style="width:8px; height:8px; border-radius:2px; background:{{ o.dot }};"></span>{{ o.name }}</span></sc-for></div>
+
+                <div style="display:flex; align-items:center; justify-content:space-between; margin:16px 0 7px;">
+                  <span style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px;">Connected load</span>
+                  <div style="display:flex; gap:2px; background:rgba(118,118,128,0.12); border-radius:8px; padding:2px;"><sc-for list="{{ unitBtns }}" as="u" hint-placeholder-count="2"><span onClick="{{ u.onTap }}" style="padding:3px 11px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer; background:{{ u.bg }}; color:{{ u.fg }}; box-shadow:{{ u.shadow }};">{{ u.label }}</span></sc-for></div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; background:#fff; border:1px solid rgba(60,60,67,0.15); border-radius:12px; padding:6px 8px 6px 14px;">
+                  <span class="msr" onClick="{{ ed.onUsedDec }}" style="font-size:26px; color:#007AFF; cursor:pointer;">remove_circle</span>
+                  <input type="number" value="{{ ed.loadValue }}" onInput="{{ ed.onUsed }}" style="flex:1; min-width:0; text-align:center; font-size:22px; font-weight:700; border:none; outline:none; background:none; color:#1c1c1e; font-family:ui-monospace,'SF Mono',monospace;" />
+                  <span style="font-size:14px; color:#8E8E93; width:26px;">{{ ed.loadUnit }}</span>
+                  <span class="msr" onClick="{{ ed.onUsedInc }}" style="font-size:26px; color:#007AFF; cursor:pointer;">add_circle</span>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
+                  <span style="font-size:11px; color:#8E8E93;">{{ ed.loadAlt }} · <b style="color:{{ ed.phaseColor }};">{{ ed.phaseSpan }}</b></span>
+                  <span onClick="{{ ed.onEst }}" style="font-size:12px; font-weight:600; color:#007AFF; cursor:pointer;">Estimate {{ ed.estLabel }}</span>
+                </div>
+
+                <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 7px;">Circuit name <span style="color:#c7c7cc; font-weight:600;">· printed on the schedule</span></div>
+                <input value="{{ ed.desc }}" onInput="{{ ed.onDesc }}" placeholder="e.g. Recept — North Wall" style="width:100%; font-size:15px; padding:12px; border:1px solid rgba(60,60,67,0.15); border-radius:12px; outline:none;" />
+                <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Description <span style="color:#c7c7cc; font-weight:600;">· optional, not on legend</span></div>
+                <textarea value="{{ ed.note }}" onInput="{{ ed.onNote }}" placeholder="Internal notes — wire size, home run, why this exists…" style="width:100%; min-height:52px; resize:none; font-size:14px; padding:11px 12px; border:1px solid rgba(60,60,67,0.15); border-radius:12px; outline:none;"></textarea>
+              </sc-if>
+
+              <!-- SPLIT: tandem + quad -->
+              <sc-if value="{{ ed.isSplit }}" hint-placeholder-val="{{ false }}">
+                <sc-if value="{{ ed.isQuad }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Quad configuration</div>
+                  <div style="display:flex; background:rgba(118,118,128,0.12); border-radius:10px; padding:2px;"><sc-for list="{{ ed.modeBtns }}" as="m" hint-placeholder-count="2"><span onClick="{{ m.onTap }}" style="flex:1; text-align:center; font-size:12px; font-weight:600; padding:8px 4px; border-radius:8px; cursor:pointer; background:{{ m.bg }}; color:{{ m.fg }}; box-shadow:{{ m.shadow }};">{{ m.label }}</span></sc-for></div>
+                </sc-if>
+                <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Common builds</div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;"><sc-for list="{{ ed.presetOpts }}" as="o" hint-placeholder-count="4"><span onClick="{{ o.onTap }}" style="padding:7px 12px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+                <div style="font-size:11px; color:rgba(60,60,67,0.6); margin-top:8px; line-height:1.4;">{{ ed.splitHint }}</div>
+
+                <sc-for list="{{ ed.editRows }}" as="h" hint-placeholder-count="2">
+                  <div style="background:#fff; border:1px solid {{ h.cardBorder }}; border-radius:14px; padding:12px 13px; margin-top:10px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;"><span style="font-size:13px; font-weight:700; color:#1c1c1e;">{{ h.title }}</span><span class="mono" style="font-size:11px; color:{{ h.phaseColor }}; font-weight:700;">{{ h.phaseLabel }}</span></div>
+                    <div style="display:flex; flex-wrap:wrap; gap:5px;"><sc-for list="{{ h.ampsOpts }}" as="o" hint-placeholder-count="3"><span onClick="{{ o.onTap }}" style="padding:6px 11px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+                    <div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;"><sc-for list="{{ h.typeOpts }}" as="o" hint-placeholder-count="4"><span onClick="{{ o.onTap }}" style="display:flex; align-items:center; gap:4px; padding:6px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};"><span style="width:7px; height:7px; border-radius:2px; background:{{ o.dot }};"></span>{{ o.name }}</span></sc-for></div>
+                    <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+                      <input value="{{ h.desc }}" onInput="{{ h.onDesc }}" placeholder="Circuit name" style="flex:1; min-width:0; font-size:14px; padding:9px 11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                      <div style="display:flex; align-items:center; gap:4px; background:#F2F2F7; border-radius:10px; padding:3px 4px; flex:0 0 auto;"><span class="msr" onClick="{{ h.onUsedDec }}" style="font-size:22px; color:#007AFF; cursor:pointer;">remove_circle</span><input type="number" value="{{ h.loadValue }}" onInput="{{ h.onUsed }}" style="width:52px; text-align:center; font-size:15px; font-weight:700; border:none; outline:none; background:none; font-family:ui-monospace,monospace;" /><span style="font-size:11px; color:#8E8E93; width:22px;">{{ h.unit }}</span><span class="msr" onClick="{{ h.onUsedInc }}" style="font-size:22px; color:#007AFF; cursor:pointer;">add_circle</span></div>
+                    </div>
+                  </div>
+                </sc-for>
+              </sc-if>
+
+              <div style="display:flex; gap:8px; margin-top:16px;"><span onClick="{{ ed.onRemove }}" style="padding:12px 16px; border-radius:12px; font-size:15px; font-weight:600; color:#FF3B30; background:rgba(255,59,48,0.1); cursor:pointer;">Clear</span><span onClick="{{ ed.onSave }}" style="flex:1; text-align:center; padding:12px; border-radius:12px; font-size:15px; font-weight:700; color:#fff; background:#007AFF; cursor:pointer;">Save</span></div>
+            </div>
+          </sc-if>
+
+          <!-- PANEL SETUP -->
+          <sc-if value="{{ setup.open }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ setup.onClose }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.35); border-radius:42px;"></div>
+            <div class="scroll" style="position:absolute; left:10px; right:10px; bottom:10px; background:#F2F2F7; border-radius:30px 30px 34px 34px; padding:16px 18px 20px; box-shadow:0 -8px 30px rgba(0,0,0,0.25); max-height:92%; overflow:auto;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <div style="font-size:18px; font-weight:700; color:#1c1c1e;">Panel setup</div>
+                <span class="msr" onClick="{{ setup.onClose }}" style="font-size:22px; color:#8E8E93; cursor:pointer;">close</span>
+              </div>
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:12px 0 7px;">Brand</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;"><sc-for list="{{ setup.brandOpts }}" as="o" hint-placeholder-count="6"><span onClick="{{ o.onTap }}" style="padding:7px 11px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Model / catalog</div>
+              <input value="{{ setup.model }}" onInput="{{ setup.onModel }}" placeholder="e.g. QO, BR, PON" style="width:100%; font-size:15px; padding:11px 12px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Panel type</div>
+              <div style="display:flex; gap:6px;"><sc-for list="{{ setup.typeOpts }}" as="o" hint-placeholder-count="3"><span onClick="{{ o.onTap }}" style="flex:1; text-align:center; padding:9px 4px; border-radius:9px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Voltage</div>
+              <div style="display:flex; flex-direction:column; gap:6px;"><sc-for list="{{ setup.voltOpts }}" as="o" hint-placeholder-count="4"><span onClick="{{ o.onTap }}" style="padding:9px 12px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+              <div style="display:flex; align-items:center; justify-content:space-between; background:#fff; border:1px solid rgba(60,60,67,0.12); border-radius:12px; padding:11px 14px; margin-top:14px;">
+                <div><div style="font-size:14px; font-weight:600; color:#1c1c1e;">CTL — tandems any slot</div><div style="font-size:11px; color:#8E8E93;">Off = 40/40 stab bus, tandems only in marked slots</div></div>
+                <div onClick="{{ setup.onToggleCtl }}" style="width:44px; height:26px; border-radius:13px; background:{{ setup.ctlBg }}; flex:0 0 auto; position:relative; cursor:pointer;"><div style="position:absolute; top:2px; left:{{ setup.ctlX }}; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div></div>
+              </div>
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Spaces</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;"><sc-for list="{{ setup.spaceOpts }}" as="o" hint-placeholder-count="5"><span onClick="{{ o.onTap }}" style="padding:7px 11px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for><span onClick="{{ setup.customChip.onTap }}" style="padding:7px 12px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ setup.customChip.bg }}; color:{{ setup.customChip.fg }};">{{ setup.customChip.label }}</span></div>
+              <sc-if value="{{ setup.isCustom }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; align-items:center; gap:8px; background:#fff; border:1px solid rgba(60,60,67,0.15); border-radius:12px; padding:6px 8px 6px 14px; margin-top:8px;">
+                  <span style="flex:1; font-size:12px; color:#8E8E93;">Custom count <span style="color:#c7c7cc;">· even only</span></span>
+                  <span class="msr" onClick="{{ setup.onCustomDec }}" style="font-size:24px; color:#007AFF; cursor:pointer;">remove_circle</span>
+                  <input type="number" step="2" value="{{ setup.customVal }}" onInput="{{ setup.onCustom }}" style="width:50px; text-align:center; font-size:18px; font-weight:700; border:none; outline:none; background:none; color:#1c1c1e; font-family:ui-monospace,'SF Mono',monospace;" />
+                  <span class="msr" onClick="{{ setup.onCustomInc }}" style="font-size:24px; color:#007AFF; cursor:pointer;">add_circle</span>
+                </div>
+              </sc-if>
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:14px 0 7px;">Main rating</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;"><sc-for list="{{ setup.mainOpts }}" as="o" hint-placeholder-count="6"><span onClick="{{ o.onTap }}" style="padding:7px 11px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+              <div style="display:flex; gap:8px; margin-top:16px;"><span onClick="{{ setup.onSave }}" style="flex:1; text-align:center; padding:12px; border-radius:12px; font-size:15px; font-weight:700; color:#fff; background:#007AFF; cursor:pointer;">Save panel</span></div>
+            </div>
+          </sc-if>
+
+          <!-- PRINT PREVIEW (professional schedule document) -->
+          <sc-if value="{{ printOpen }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ onClosePrint }}" class="print-hide" style="position:absolute; inset:0; background:rgba(0,0,0,0.4); border-radius:42px;"></div>
+            <div class="print-sheet scroll {{ grayClass }}" style="position:absolute; left:8px; right:8px; top:10px; bottom:10px; background:#fff; border-radius:14px; padding:20px; box-shadow:0 -8px 30px rgba(0,0,0,0.28); overflow:auto; color:#1f2933;">
+
+              <!-- LETTERHEAD -->
+              <div style="display:flex; gap:13px; align-items:flex-start; border-bottom:3px solid #1f2933; padding-bottom:12px;">
+                <div style="width:56px; height:56px; flex:0 0 auto; border-radius:9px; overflow:hidden; border:1px solid #e4e8eb;"><image-slot id="psb-logo" shape="rounded" radius="9" placeholder="Logo"></image-slot></div>
+                <div style="flex:1 1 auto; min-width:0;">
+                  <div style="font-size:16px; font-weight:800; letter-spacing:-0.2px;">{{ print.coName }}</div>
+                  <div style="font-size:9.5px; color:#5a636c; margin-top:2px;">{{ print.coLic }} · {{ print.coPhone }}</div>
+                  <div style="font-size:9.5px; color:#5a636c;">{{ print.coAddr }}</div>
+                  <div style="font-size:9.5px; color:#5a636c;">{{ print.coEmail }} · {{ print.coWeb }}</div>
+                </div>
+                <div style="text-align:right; flex:0 0 auto;">
+                  <div style="font-size:15px; font-weight:800; letter-spacing:1px;">PANEL SCHEDULE</div>
+                  <div style="font-size:13px; font-weight:700; margin-top:2px;">{{ panelName }}</div>
+                  <div style="font-size:9.5px; color:#5a636c; margin-top:2px;">{{ today }}</div>
+                </div>
+              </div>
+
+              <!-- TITLE BLOCK -->
+              <div style="display:grid; grid-template-columns:repeat(3,1fr); border:1px solid #d0d5da; border-bottom:none; margin-top:12px;">
+                <sc-for list="{{ titleFields }}" as="f" hint-placeholder-count="12">
+                  <div style="border-bottom:1px solid #d0d5da; border-right:1px solid #d0d5da; padding:5px 8px; min-width:0;">
+                    <div style="font-size:8px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:#8a929b;">{{ f.k }}</div>
+                    <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ f.v }}</div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <!-- SCHEDULE TABLE -->
+              <div style="margin-top:14px;">
+                <div style="display:flex; align-items:center; font-size:8.5px; font-weight:700; color:#fff; background:#1f2933; text-transform:uppercase; letter-spacing:0.4px; padding:5px 8px;">
+                  <span style="width:34px;">Ckt</span>
+                  <span style="flex:1;">Circuit / Load Served</span>
+                  <sc-if value="{{ print.showWire }}" hint-placeholder-val="{{ false }}"><span style="width:54px;">Wire</span></sc-if>
+                  <span style="width:60px;">Breaker</span>
+                  <sc-if value="{{ print.showVA }}" hint-placeholder-val="{{ true }}"><span style="width:50px; text-align:right;">VA</span></sc-if>
+                  <span style="width:34px; text-align:right;">Ph</span>
+                </div>
+                <sc-for list="{{ printItems }}" as="p" hint-placeholder-count="10">
+                  <div style="display:flex; align-items:center; font-size:10px; border-bottom:1px solid #eef1f3; min-height:19px; padding:2px 8px;">
+                    <span class="mono" style="width:34px; color:#8a929b;">{{ p.slotLabel }}</span>
+                    <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.desc }} <span style="color:#98a1aa; font-size:8.5px;">{{ p.typeShort }}</span></span>
+                    <sc-if value="{{ print.showWire }}" hint-placeholder-val="{{ false }}"><span class="mono" style="width:54px; color:#5a636c;">{{ p.wire }}</span></sc-if>
+                    <span class="mono" style="width:60px; font-weight:700; color:{{ p.typeColor }};">{{ p.brk }}</span>
+                    <sc-if value="{{ print.showVA }}" hint-placeholder-val="{{ true }}"><span class="mono" style="width:50px; text-align:right; color:#5a636c;">{{ p.vaTxt }}</span></sc-if>
+                    <span class="mono" style="width:34px; text-align:right; font-weight:700; color:{{ p.phaseColor }};">{{ p.phase }}</span>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ print.showEmpty }}" hint-placeholder-val="{{ true }}">
+                  <sc-for list="{{ printEmpty }}" as="e" hint-placeholder-count="0">
+                    <div style="display:flex; align-items:center; font-size:10px; border-bottom:1px solid #eef1f3; min-height:19px; padding:2px 8px; color:#b8bec4;">
+                      <span class="mono" style="width:34px;">{{ e.slotLabel }}</span><span style="flex:1; font-style:italic;">SPACE — open</span>
+                    </div>
+                  </sc-for>
+                </sc-if>
+              </div>
+
+              <!-- LOAD SUMMARY -->
+              <div style="margin-top:14px; border:1px solid #d0d5da; border-radius:8px; overflow:hidden;">
+                <div style="background:#f2f4f6; padding:5px 10px; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Load Summary <span style="color:#8a929b; font-weight:600;">· connected</span></div>
+                <div style="display:flex; padding:8px 10px; gap:10px;">
+                  <sc-for list="{{ sum.legs }}" as="l" hint-placeholder-count="3">
+                    <div style="flex:1 1 0; min-width:0;">
+                      <div style="font-size:9px; color:#8a929b;">Phase <b style="color:{{ l.color }};">{{ l.label }}</b></div>
+                      <div class="mono" style="font-size:12px; font-weight:700;">{{ l.va }} VA</div>
+                      <div class="mono" style="font-size:9.5px; color:#5a636c;">{{ l.amps }} · {{ l.pct }}%</div>
+                    </div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ print.showBars }}" hint-placeholder-val="{{ true }}">
+                  <div style="padding:0 10px 8px;">
+                    <sc-for list="{{ sum.legs }}" as="l" hint-placeholder-count="3">
+                      <div style="display:flex; align-items:center; gap:8px; margin:3px 0;">
+                        <span style="width:12px; font-size:10px; font-weight:700; color:{{ l.color }};">{{ l.label }}</span>
+                        <div style="flex:1; height:7px; border-radius:4px; background:#eef1f3; overflow:hidden;"><div style="height:100%; width:{{ l.pct }}%; background:{{ l.color }};"></div></div>
+                        <span class="mono" style="width:40px; text-align:right; font-size:9px; color:#5a636c;">{{ l.pct }}%</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <div style="display:flex; border-top:1px solid #e4e8eb;">
+                  <div style="flex:1; padding:6px 10px; border-right:1px solid #e4e8eb;"><div style="font-size:8.5px; color:#8a929b; text-transform:uppercase;">Total connected</div><div class="mono" style="font-size:12px; font-weight:700;">{{ sum.totalVA }} VA</div></div>
+                  <div style="flex:1; padding:6px 10px; border-right:1px solid #e4e8eb;"><div style="font-size:8.5px; color:#8a929b; text-transform:uppercase;">Service (bal.)</div><div class="mono" style="font-size:12px; font-weight:700;">{{ sum.svcAmps }}</div></div>
+                  <div style="flex:1; padding:6px 10px;"><div style="font-size:8.5px; color:#8a929b; text-transform:uppercase;">Imbalance</div><div class="mono" style="font-size:12px; font-weight:700; color:{{ sum.imbalColor }};">{{ sum.imbalance }}</div></div>
+                </div>
+                <sc-if value="{{ print.showDemand }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex; border-top:1px solid #e4e8eb; background:#f7f9fa;">
+                    <div style="flex:1; padding:6px 10px; border-right:1px solid #e4e8eb;"><div style="font-size:8.5px; color:#8a929b; text-transform:uppercase;">Demand factor</div><div class="mono" style="font-size:12px; font-weight:700;">{{ sum.demandPct }}</div></div>
+                    <div style="flex:1.4; padding:6px 10px; border-right:1px solid #e4e8eb;"><div style="font-size:8.5px; color:#8a929b; text-transform:uppercase;">Demand load</div><div class="mono" style="font-size:12px; font-weight:700;">{{ sum.demandVA }} VA · {{ sum.demandAmps }}</div></div>
+                    <div style="flex:1; padding:6px 10px;"><div style="font-size:8.5px; color:#8a929b; text-transform:uppercase;">Min. service</div><div class="mono" style="font-size:12px; font-weight:700; color:#0A84FF;">{{ sum.recommend }}</div></div>
+                  </div>
+                </sc-if>
+              </div>
+
+              <!-- NOTES -->
+              <sc-if value="{{ showNotesBlock }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:12px;"><div style="font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid #d0d5da; padding-bottom:3px;">Notes</div>
+                  <sc-for list="{{ printNotes }}" as="n" hint-placeholder-count="2"><div style="font-size:10px; color:#445; margin-top:4px;"><b>{{ n.slot }} {{ n.name }}:</b> {{ n.note }}</div></sc-for>
+                </div>
+              </sc-if>
+
+              <!-- SIGNATURE -->
+              <sc-if value="{{ print.showSig }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex; gap:10px; margin-top:16px;">
+                  <sc-for list="{{ sigBlocks }}" as="sg" hint-placeholder-count="3">
+                    <div style="flex:1;"><div style="border-bottom:1px solid #1f2933; height:26px;"></div><div style="font-size:8px; color:#8a929b; text-transform:uppercase; letter-spacing:0.4px; margin-top:3px;">{{ sg.role }}</div><div style="font-size:10px; font-weight:600; min-height:13px;">{{ sg.name }}</div></div>
+                  </sc-for>
+                  <div style="width:76px; flex:0 0 auto; border:1px dashed #b8bec4; border-radius:6px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:8px; color:#b8bec4; text-transform:uppercase; letter-spacing:0.4px;">P.E. Stamp</div>
+                </div>
+              </sc-if>
+
+              <div style="font-size:8px; color:#b8bec4; text-align:center; margin-top:12px; line-height:1.4;">{{ paperLabel }} · Generated by WiredPart · Planning estimate — verify against NEC &amp; local AHJ before construction.</div>
+
+              <!-- ACTIONS -->
+              <div class="print-hide" style="display:flex; gap:8px; margin-top:16px;">
+                <span onClick="{{ onClosePrint }}" style="padding:11px 14px; border-radius:10px; font-size:13px; font-weight:600; color:#3c3c43; background:#f0f0f2; cursor:pointer;">Close</span>
+                <span onClick="{{ onPrintSetup }}" style="display:flex; align-items:center; gap:5px; padding:11px 14px; border-radius:10px; font-size:13px; font-weight:600; color:#007AFF; background:rgba(0,122,255,0.1); cursor:pointer;"><span class="msr" style="font-size:16px;">tune</span>Customize</span>
+                <span onClick="{{ onDoPrint }}" style="flex:1; text-align:center; padding:11px; border-radius:10px; font-size:13px; font-weight:700; color:#fff; background:#007AFF; cursor:pointer;">Print / Save PDF</span>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- PRINT SETUP -->
+          <sc-if value="{{ printSetup.open }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ printSetup.onClose }}" class="print-hide" style="position:absolute; inset:0; background:rgba(0,0,0,0.4); border-radius:42px;"></div>
+            <div class="scroll print-hide" style="position:absolute; left:10px; right:10px; top:14px; bottom:10px; background:#F2F2F7; border-radius:28px; padding:16px 16px 20px; box-shadow:0 -8px 30px rgba(0,0,0,0.28); overflow:auto;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <div><div style="font-size:18px; font-weight:700; color:#1c1c1e;">Print setup</div><div style="font-size:11px; color:#8E8E93;">Saved for every schedule you print</div></div>
+                <span class="msr" onClick="{{ printSetup.onClose }}" style="font-size:22px; color:#8E8E93; cursor:pointer;">close</span>
+              </div>
+
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:12px 0 7px;">Company letterhead</div>
+              <div style="background:#fff; border-radius:12px; padding:12px; font-size:11px; color:#8E8E93; line-height:1.4; display:flex; gap:9px; align-items:center;"><span class="msr" style="font-size:20px; color:#007AFF;">image</span>Drop your logo on the schedule header (the box top-left of the print preview) — it saves and prints on every schedule.</div>
+              <input value="{{ printSetup.f.coName.value }}" onInput="{{ printSetup.f.coName.onInput }}" placeholder="Company name" style="width:100%; margin-top:8px; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <input value="{{ printSetup.f.coLic.value }}" onInput="{{ printSetup.f.coLic.onInput }}" placeholder="License #" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                <input value="{{ printSetup.f.coPhone.value }}" onInput="{{ printSetup.f.coPhone.onInput }}" placeholder="Phone" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              </div>
+              <input value="{{ printSetup.f.coAddr.value }}" onInput="{{ printSetup.f.coAddr.onInput }}" placeholder="Address" style="width:100%; margin-top:8px; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <input value="{{ printSetup.f.coEmail.value }}" onInput="{{ printSetup.f.coEmail.onInput }}" placeholder="Email" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                <input value="{{ printSetup.f.coWeb.value }}" onInput="{{ printSetup.f.coWeb.onInput }}" placeholder="Website" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              </div>
+
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 7px;">Project / title block</div>
+              <input value="{{ printSetup.f.project.value }}" onInput="{{ printSetup.f.project.onInput }}" placeholder="Project name" style="width:100%; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <input value="{{ printSetup.f.jobNo.value }}" onInput="{{ printSetup.f.jobNo.onInput }}" placeholder="Job #" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                <input value="{{ printSetup.f.location.value }}" onInput="{{ printSetup.f.location.onInput }}" placeholder="Location / room" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              </div>
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <input value="{{ printSetup.f.fedFrom.value }}" onInput="{{ printSetup.f.fedFrom.onInput }}" placeholder="Fed from" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                <input value="{{ printSetup.f.rev.value }}" onInput="{{ printSetup.f.rev.onInput }}" placeholder="Rev" style="width:74px; flex:0 0 auto; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              </div>
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <input value="{{ printSetup.f.drawnBy.value }}" onInput="{{ printSetup.f.drawnBy.onInput }}" placeholder="Drawn by" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                <input value="{{ printSetup.f.checkedBy.value }}" onInput="{{ printSetup.f.checkedBy.onInput }}" placeholder="Checked by" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              </div>
+
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 7px;">Panel details</div>
+              <div style="display:flex; gap:8px;">
+                <input value="{{ printSetup.f.aic.value }}" onInput="{{ printSetup.f.aic.onInput }}" placeholder="AIC (kA)" style="width:96px; flex:0 0 auto; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+                <input value="{{ printSetup.f.feeder.value }}" onInput="{{ printSetup.f.feeder.onInput }}" placeholder="Feeder conductor (e.g. 3/0 Cu)" style="flex:1; min-width:0; font-size:14px; padding:11px; border:1px solid rgba(60,60,67,0.15); border-radius:10px; outline:none;" />
+              </div>
+              <div style="font-size:11px; color:#8E8E93; margin:10px 0 6px;">Mounting</div>
+              <div style="display:flex; gap:6px;"><sc-for list="{{ printSetup.mountOpts }}" as="o" hint-placeholder-count="2"><span onClick="{{ o.onTap }}" style="flex:1; text-align:center; padding:9px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+              <div style="font-size:11px; color:#8E8E93; margin:10px 0 6px;">Enclosure</div>
+              <div style="display:flex; gap:6px;"><sc-for list="{{ printSetup.encOpts }}" as="o" hint-placeholder-count="3"><span onClick="{{ o.onTap }}" style="flex:1; text-align:center; padding:9px 4px; border-radius:9px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 7px;">Demand factor <span style="color:#c7c7cc; font-weight:600;">· ×connected load</span></div>
+              <div style="display:flex; align-items:center; gap:10px; background:#fff; border:1px solid rgba(60,60,67,0.15); border-radius:12px; padding:6px 10px;">
+                <span class="msr" onClick="{{ printSetup.onDemandDec }}" style="font-size:26px; color:#007AFF; cursor:pointer;">remove_circle</span>
+                <input type="number" value="{{ printSetup.demandPct }}" onInput="{{ printSetup.onDemand }}" style="flex:1; min-width:0; text-align:center; font-size:20px; font-weight:700; border:none; outline:none; background:none; font-family:ui-monospace,'SF Mono',monospace;" />
+                <span style="font-size:14px; color:#8E8E93;">%</span>
+                <span class="msr" onClick="{{ printSetup.onDemandInc }}" style="font-size:26px; color:#007AFF; cursor:pointer;">add_circle</span>
+              </div>
+
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 7px;">Show on schedule</div>
+              <div style="background:#fff; border-radius:12px; overflow:hidden;">
+                <sc-for list="{{ printSetup.toggleRows }}" as="t" hint-placeholder-count="8">
+                  <div style="display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-bottom:0.5px solid rgba(60,60,67,0.08);">
+                    <span style="font-size:14px; color:#1c1c1e;">{{ t.label }}</span>
+                    <div onClick="{{ t.onTap }}" style="width:44px; height:26px; border-radius:13px; background:{{ t.bg }}; flex:0 0 auto; position:relative; cursor:pointer;"><div style="position:absolute; top:2px; left:{{ t.x }}; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div></div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="font-size:11px; font-weight:700; color:#8E8E93; text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 7px;">Paper size</div>
+              <div style="display:flex; gap:6px;"><sc-for list="{{ printSetup.paperOpts }}" as="o" hint-placeholder-count="3"><span onClick="{{ o.onTap }}" style="flex:1; text-align:center; padding:9px 4px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid rgba(60,60,67,0.12); background:{{ o.bg }}; color:{{ o.fg }};">{{ o.label }}</span></sc-for></div>
+
+              <div onClick="{{ printSetup.onClose }}" style="margin-top:18px; text-align:center; padding:12px; border-radius:12px; font-size:15px; font-weight:700; color:#fff; background:#007AFF; cursor:pointer;">Done</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showToast }}" hint-placeholder-val="{{ false }}"><div style="position:absolute; left:20px; right:20px; bottom:24px; background:rgba(28,28,30,0.96); color:#fff; border-radius:12px; padding:12px 15px; font-size:13px; display:flex; align-items:center; gap:8px; z-index:5;"><span class="msr" style="font-size:17px; color:#30D158;">check_circle</span>{{ toastMsg }}</div></sc-if>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;embed&quot;:{&quot;editor&quot;:null,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;panelName&quot;:{&quot;editor&quot;:null,&quot;default&quot;:&quot;Panel A&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;blank&quot;:{&quot;editor&quot;:null,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  PC = { A:'#0A84FF', B:'#FF9F0A', C:'#BF5AF2' };
+  TIE = '#5E5CE6';
+  TYPES = [
+    { key:'STD',   name:'Standard', short:'STD',  desc:'General branch — receptacles & lighting', color:'#0A84FF' },
+    { key:'GFCI',  name:'GFCI',     short:'GFCI', desc:'Wet locations — baths, kitchens, exterior', color:'#00B0A6' },
+    { key:'AFCI',  name:'AFCI',     short:'CAFI', desc:'Dwelling living areas — arc-fault',          color:'#FF9F0A' },
+    { key:'DF',    name:'Dual-Fn',  short:'DF',   desc:'Combined arc-fault + ground-fault',          color:'#BF5AF2' },
+    { key:'GFPE',  name:'GFPE',     short:'GFPE', desc:'Equipment ground-fault — feeders, heaters',  color:'#FF375F' },
+    { key:'HACR',  name:'HACR',     short:'HACR', desc:'HVAC / AC & refrigeration equipment',        color:'#30D158' },
+    { key:'GEN',   name:'General',  short:'GEN',  desc:'Sub-feed / non-branch load',                 color:'#8E8E93' },
+    { key:'SPARE', name:'Spare',    short:'—',    desc:'Reserved empty space',                       color:'#C7C7CC' },
+  ];
+  AMPS = [15,20,25,30,40,50,60,70,90,100];
+  HALF_AMPS = [15,20,30];
+  DBL_AMPS = [15,20,30,40,50,60];
+  HALF_TYPES = ['STD','GFCI','AFCI','DF'];
+  DBL_TYPES = ['STD','HACR','GFPE','GFCI'];
+  POLES = [1,2,3];
+  PRESETS_T = [ {label:'20 / 20',a:[20,20]}, {label:'15 / 15',a:[15,15]}, {label:'15 / 20',a:[15,20]}, {label:'20 / 30',a:[20,30]} ];
+  PRESETS_QC = [ {label:'20·30·20',a:[20,30,20]}, {label:'15·20·15',a:[15,20,15]}, {label:'15·30·15',a:[15,30,15]}, {label:'20·20·20',a:[20,20,20]} ];
+  PRESETS_QD = [ {label:'30 / 50',a:[30,50]}, {label:'20 / 30',a:[20,30]}, {label:'20 / 20',a:[20,20]} ];
+  PRESETS_QF = [ {label:'15·15·15·15',a:[15,15,15,15]}, {label:'20·20·20·20',a:[20,20,20,20]}, {label:'20·20·15·15',a:[20,20,15,15]} ];
+  BRANDS = ['Square D','Eaton','Siemens','GE','Cutler-Hammer','Murray'];
+  PTYPES = ['Main Breaker','Main Lug','Sub-Panel'];
+  SPACESOPT = [4,6,8,12,20,24,30,40,42,54,60,64,72];
+  MAINS = [100,125,150,200,225,400];
+  VOLTS = [ {label:'120V · 1Ø 2-wire',vln:120,vll:120,phases:1}, {label:'120/240V · 1Ø 3-wire',vln:120,vll:240,phases:2}, {label:'120/208V · 3Ø',vln:120,vll:208,phases:3}, {label:'277/480V · 3Ø',vln:277,vll:480,phases:3} ];
+
+  seed() {
+    return {
+      1:{ kind:'full', amps:20, poles:1, type:'STD',  used:8,  desc:'Recept — Break Room', note:'' },
+      2:{ kind:'full', amps:15, poles:1, type:'STD',  used:6,  desc:'Lighting — Office', note:'' },
+      3:{ kind:'full', amps:20, poles:1, type:'GFCI', used:10, desc:'Recept — Kitchen', note:'' },
+      4:{ kind:'full', amps:20, poles:1, type:'AFCI', used:9,  desc:'Bedroom Circuits', note:'' },
+      5:{ kind:'full', amps:30, poles:2, type:'HACR', used:22, desc:'RTU-1 Condenser', note:'#8 THHN, 40ft home run' },
+      6:{ kind:'tandem', halves:[ {amps:20,type:'STD',used:7,desc:'Recept — Restroom',note:''}, {amps:20,type:'GFCI',used:6,desc:'Recept — Exterior',note:''} ] },
+      8:{ kind:'quad', mode:'center', sections:[ {amps:20,type:'STD',used:6,desc:'Recept — Bay 1',note:''}, {amps:30,type:'HACR',used:18,desc:'Mini-split 240V',note:''}, {amps:20,type:'GFCI',used:5,desc:'Recept — Bay 2',note:''} ] },
+      9:{ kind:'full', amps:40, poles:3, type:'HACR', used:28, desc:'RTU-2 Compressor', note:'' },
+      14:{ kind:'quad', mode:'double', sections:[ {amps:30,type:'STD',used:20,desc:'Dryer',note:''}, {amps:50,type:'STD',used:34,desc:'Range / Oven',note:''} ] },
+    };
+  }
+  state = {
+    panel:{ brand:'Square D', model:'QO', type:'Main Breaker', mainAmps:200, volts:'120/208V · 3Ø', vln:120, vll:208, phases:3, spaces:42, ctl:true },
+    spaces: (this.props && this.props.blank) ? {} : this.seed(), view:'visual', editing:null, draft:null, unit:'A',
+    setupOpen:false, setupDraft:null, printOpen:false, jpoToast:null,
+    print: (function(){ const d={ logo:'WP', coName:'WiredPart Electric', coLic:'Lic. C-10 #1043928', coAddr:'1420 Foothill Blvd, Rialto, CA 92376', coPhone:'(909) 555-0142', coEmail:'service@wiredpart.com', coWeb:'wiredpart.com', project:'', jobNo:'', location:'', fedFrom:'', drawnBy:'', checkedBy:'', approvedBy:'', rev:'0', aic:'22', enclosure:'NEMA 1', mounting:'Surface', feeder:'', demandPct:100, showVA:true, showWire:false, showEmpty:true, showDemand:true, showBars:true, showNotes:true, showSig:true, paper:'letter', grayscale:false }; try{ return { ...d, ...(JSON.parse(localStorage.getItem('psb.print')||'{}')) }; }catch(e){ return d; } })(),
+    printSetupOpen:false,
+  };
+
+  typeInfo(k){ return this.TYPES.find(t=>t.key===k) || this.TYPES[0]; }
+  vln(){ return this.state.panel.vln||120; }
+  vll(){ return this.state.panel.vll||240; }
+  circVolts(poles){ return (+poles>=2)?this.vll():this.vln(); }
+  wattsOf(amps, poles){ const v=this.circVolts(poles); const w=(+poles>=3)?(+amps||0)*v*Math.sqrt(3):(+amps||0)*v; return Math.round(w); }
+  ampsOf(watts, poles){ const v=this.circVolts(poles); const d=(+poles>=3)?v*Math.sqrt(3):v; return d?Math.round((+watts||0)/d*10)/10:0; }
+  fmtA(a){ const n=Math.round((+a||0)*10)/10; return Number.isInteger(n)?(''+n):n.toFixed(1); }
+  loadTxt(amps, poles){ return this.state.unit==='W' ? this.wattsOf(amps,poles).toLocaleString()+'W' : this.fmtA(amps)+'A'; }
+  fmtLeg(amps){ return this.state.unit==='W' ? Math.round((+amps||0)*this.vln()).toLocaleString()+'W' : this.fmtA(amps)+'A'; }
+  mainTxt(){ return this.state.unit==='W' ? (this.state.panel.mainAmps*this.vln()).toLocaleString()+'W' : this.state.panel.mainAmps+'A'; }
+  setUnit(u){ this.setState({ unit:u }); }
+  savePrintCfg(p){ try{ localStorage.setItem('psb.print', JSON.stringify(p)); }catch(e){} }
+  setPrint(k,v){ this.setState(s=>{ const print={ ...s.print, [k]:v }; this.savePrintCfg(print); return { print }; }); }
+  togglePrint(k){ this.setState(s=>{ const print={ ...s.print, [k]:!s.print[k] }; this.savePrintCfg(print); return { print }; }); }
+  openPrintSetup(){ this.setState({ printSetupOpen:true }); }
+  closePrintSetup(){ this.setState({ printSetupOpen:false }); }
+  bumpDemand(d){ this.setState(s=>{ const v=Math.max(25,Math.min(150,(+s.print.demandPct||100)+d)); const print={ ...s.print, demandPct:v }; this.savePrintCfg(print); return { print }; }); }
+  STD_SIZES=[60,100,125,150,175,200,225,250,300,350,400,500,600,800,1000,1200];
+  nextStd(a){ for(const s of this.STD_SIZES){ if(s>=a) return s; } return this.STD_SIZES[this.STD_SIZES.length-1]; }
+  wireFor(a){ const t=[[15,'#14 Cu'],[20,'#12 Cu'],[30,'#10 Cu'],[40,'#8 Cu'],[50,'#8 Cu'],[60,'#6 Cu'],[70,'#4 Cu'],[90,'#3 Cu'],[100,'#3 Cu'],[125,'#1 Cu'],[150,'#1/0'],[175,'#2/0'],[200,'#3/0']]; for(const r of t){ if(+a<=r[0]) return r[1]; } return '—'; }
+  loadSummary(){
+    const p=this.state.panel; const bars=this.totals();
+    const totalVA=bars.reduce((a,b)=>a+(b.va||0),0);
+    const vll=p.vll||208, vln=p.vln||120, ph=p.phases;
+    const svcAmps = ph>=3 ? totalVA/(Math.sqrt(3)*vll) : (ph===2 ? totalVA/vll : totalVA/vln);
+    const amps=bars.map(b=>b.amps); const maxA=amps.length?Math.max(...amps):0, minA=amps.length?Math.min(...amps):0;
+    const imbalance = maxA>0 ? Math.round((maxA-minA)/maxA*100) : 0;
+    const demandPct=+this.state.print.demandPct||100; const demandVA=totalVA*demandPct/100;
+    const demandAmps = ph>=3 ? demandVA/(Math.sqrt(3)*vll) : (ph===2 ? demandVA/vll : demandVA/vln);
+    const pctMain = p.mainAmps>0 ? Math.round(svcAmps/p.mainAmps*100) : 0;
+    return { bars, totalVA, svcAmps, imbalance, demandPct, demandVA, demandAmps, pctMain, recommend:this.nextStd(demandAmps) };
+  }
+  componentDidMount(){ if(this.props.blank){ this.setState(s=>({ spaces: Object.keys(s.spaces||{}).length ? {} : s.spaces })); } }
+  phaseArr(){ const n=this.state.panel.phases; return n===3 ? ['A','B','C'] : (n===2 ? ['A','B'] : ['A']); }
+  phaseFor(space){ const arr=this.phaseArr(); const pair=Math.ceil(space/2); return arr[(pair-1)%arr.length]; }
+  cap(){ return Math.min(this.state.panel.spaces, 24); }
+  spanOf(e, s){ if(e.kind==='full'){ const p=e.poles||1; const o=[]; for(let k=0;k<p;k++) o.push(s+2*k); return o; } if(e.kind==='quad'){ return [s, s+2]; } return [s]; }
+  phaseSpanFor(space, poles){ const o=[]; for(let k=0;k<poles;k++) o.push(this.phaseFor(space+2*k)); return o; }
+
+  occupied(){ const set=new Set(); const sp=this.state.spaces; Object.keys(sp).forEach(k=>{ const s=+k; this.spanOf(sp[s], s).forEach(x=>set.add(x)); }); return set; }
+  nextFree(){ const occ=this.occupied(); const cap=this.cap(); for(let n=1;n<=cap;n++){ if(!occ.has(n)) return n; } return 1; }
+
+  totals(){
+    const arr=this.phaseArr(); const va={}; arr.forEach(k=>{ va[k]=0; });
+    const addVA=(ph,v)=>{ if(va[ph]!=null) va[ph]+=(+v||0); };
+    const sp=this.state.spaces;
+    Object.keys(sp).forEach(k=>{ const s=+k; const e=sp[s]; const pa=this.phaseFor(s), pb=this.phaseFor(s+2);
+      if(e.kind==='full'){ if(e.type==='SPARE') return; const p=e.poles||1; const per=this.wattsOf(e.used,p)/p; this.phaseSpanFor(s,p).forEach(ph=>addVA(ph, per)); }
+      else if(e.kind==='tandem'){ (e.halves||[]).forEach(h=>addVA(pa, this.wattsOf(h.used,1))); }
+      else if(e.kind==='quad'){ const sec=e.sections;
+        if(e.mode==='center'){ addVA(pa, this.wattsOf(sec[0].used,1)); const inner=this.wattsOf(sec[1].used,2)/2; addVA(pa, inner); addVA(pb, inner); addVA(pb, this.wattsOf(sec[2].used,1)); }
+        else if(e.mode==='double'){ [sec[0],sec[1]].forEach(x=>{ const half=this.wattsOf(x.used,2)/2; addVA(pa, half); addVA(pb, half); }); }
+        else { addVA(pa, this.wattsOf(sec[0].used,1)); addVA(pa, this.wattsOf(sec[1].used,1)); addVA(pb, this.wattsOf(sec[2].used,1)); addVA(pb, this.wattsOf(sec[3].used,1)); }
+      }
+    });
+    const main=this.state.panel.mainAmps; const vln=this.vln();
+    return arr.map(k=>{ const amps=va[k]/vln; return { label:k, amps, va:va[k], disp:(this.state.unit==='W'?Math.round(va[k]).toLocaleString()+'W':this.fmtA(amps)+'A'), pct:Math.min(100,Math.round(amps/main*100)), color:this.PC[k] }; });
+  }
+
+  rowH(p){ return p<=1 ? '38px' : (p*38 + (p-1)*6)+'px'; }
+
+  tandemSubs(space, e){ const ph=this.phaseFor(space); const pc=this.PC[ph]; return (e.halves||[]).map((h,i)=>{ const ti=this.typeInfo(h.type); return { label:space+(i===0?'a':'b'), amps:(h.amps||0)+'A', color:ti.color, desc:h.desc||ti.name, phaseColor:pc, rowBg:'#fff', rowBgDark:'transparent' }; }); }
+  quadSubs(space, e){ const pa=this.phaseFor(space), pb=this.phaseFor(space+2); const T=(k)=>this.typeInfo(k); const s=e.sections;
+    const single=(sec,lbl,pc)=>({ label:lbl, amps:(sec.amps||0)+'A', color:T(sec.type).color, desc:sec.desc||T(sec.type).name, phaseColor:pc, rowBg:'#fff', rowBgDark:'transparent' });
+    const dbl=(sec,lbl)=>({ label:lbl, amps:(sec.amps||0)+'A·2P', color:this.TIE, desc:sec.desc||'240V', phaseColor:this.TIE, rowBg:'rgba(94,92,230,0.06)', rowBgDark:'rgba(94,92,230,0.14)' });
+    if(e.mode==='center'){ return [ single(s[0],''+space,this.PC[pa]), dbl(s[1],space+'–'+(space+2)), single(s[2],''+(space+2),this.PC[pb]) ]; }
+    if(e.mode==='double'){ return [ dbl(s[0],space+'–'+(space+2)), dbl(s[1],space+'–'+(space+2)) ]; }
+    return [ single(s[0],space+'a',this.PC[pa]), single(s[1],space+'b',this.PC[pa]), single(s[2],(space+2)+'a',this.PC[pb]), single(s[3],(space+2)+'b',this.PC[pb]) ];
+  }
+
+  cell(space){
+    const sp=this.state.spaces; const e=sp[space]; const phase=this.phaseFor(space); const pc=this.PC[phase];
+    if(!e){ return { key:'e'+space, isEmpty:true, isFull:false, isSplit:false, slotLabel:''+space, height:'38px', barColor:'#ececf0', darkBg:'#161618', darkBorder:'#2c2c2e', onTap:()=>this.openEditor(space) }; }
+    if(e.kind==='tandem'){ return { key:'t'+space, isEmpty:false, isFull:false, isSplit:true, height:'38px', barColor:pc, darkBg:'#161618', darkBorder:'#2c2c2e', subs:this.tandemSubs(space,e), onTap:()=>this.openEditor(space) }; }
+    if(e.kind==='quad'){ const tie=e.mode!=='four'; return { key:'q'+space, isEmpty:false, isFull:false, isSplit:true, height:this.rowH(2), barColor: tie?this.TIE:pc, darkBg:'#161618', darkBorder: tie?'#3a3a52':'#2c2c2e', subs:this.quadSubs(space,e), onTap:()=>this.openEditor(space) }; }
+    const p=e.poles||1; const ti=this.typeInfo(e.type); const cov=this.spanOf(e,space); const over=(+e.used>+e.amps);
+    return { key:'f'+space, isEmpty:false, isFull:true, isSplit:false, height:this.rowH(p), barColor:ti.color,
+      slotLabel: p>1 ? (cov[0]+'–'+cov[cov.length-1]) : (''+space),
+      ampsPolesShort: e.amps+'A·'+p+'P', ampsPoles: e.amps+'A · '+p+'-Pole', desc: e.desc||ti.name,
+      footLabel: this.loadTxt(e.used, e.poles)+' used · '+e.amps+'A max', loadColor: over?'#FF3B30':'#aeaeb2',
+      typeColor:ti.color, typeName:ti.name, typeBg:ti.color+'22', darkBg:ti.color+'26', darkBorder:ti.color, darkText:ti.color,
+      phase, phaseColor:pc, phaseSpan:this.phaseSpanFor(space,p).join('+'), onTap:()=>this.openEditor(space) };
+  }
+
+  columnCells(list){ const cells=[]; const skip=new Set(); const sp=this.state.spaces;
+    for(const s of list){ if(skip.has(s)) continue; const e=sp[s]; if(e){ this.spanOf(e,s).slice(1).forEach(x=>skip.add(x)); } cells.push(this.cell(s)); }
+    return cells;
+  }
+
+  // ---- editor ----
+  defFull(){ return { kind:'full', amps:20, poles:1, type:'STD', used:0, desc:'', note:'' }; }
+  defTandem(){ return { kind:'tandem', halves:[ {amps:20,type:'STD',used:0,desc:'',note:''}, {amps:20,type:'STD',used:0,desc:'',note:''} ] }; }
+  defQuad(mode){ if(mode==='double'){ return { kind:'quad', mode:'double', sections:[ {amps:30,type:'STD',used:0,desc:'',note:''}, {amps:50,type:'STD',used:0,desc:'',note:''} ] }; }
+    if(mode==='four'){ return { kind:'quad', mode:'four', sections:[ {amps:20,type:'STD',used:0,desc:'',note:''}, {amps:20,type:'STD',used:0,desc:'',note:''}, {amps:20,type:'STD',used:0,desc:'',note:''}, {amps:20,type:'STD',used:0,desc:'',note:''} ] }; }
+    return { kind:'quad', mode:'center', sections:[ {amps:20,type:'STD',used:0,desc:'',note:''}, {amps:30,type:'HACR',used:0,desc:'',note:''}, {amps:20,type:'STD',used:0,desc:'',note:''} ] }; }
+  openEditor(space){ const e=this.state.spaces[space]; let draft;
+    if(!e) draft=this.defFull();
+    else if(e.kind==='tandem') draft={ kind:'tandem', halves:e.halves.map(h=>({...h})) };
+    else if(e.kind==='quad') draft={ kind:'quad', mode:e.mode||'center', sections:e.sections.map(h=>({...h})) };
+    else draft={ kind:'full', amps:e.amps, poles:e.poles, type:e.type, used:e.used, desc:e.desc, note:e.note||'' };
+    this.setState({ editing:space, draft });
+  }
+  closeEditor(){ this.setState({ editing:null }); }
+  setDraft(k,v){ this.setState(s=>({ draft:{ ...s.draft, [k]:v } })); }
+  setFactor(kind){ this.setState(s=>{ if(s.draft && s.draft.kind===kind) return {}; return { draft: kind==='tandem'?this.defTandem():(kind==='quad'?this.defQuad('center'):this.defFull()) }; }); }
+  setQuadMode(mode){ this.setState(s=>{ if(s.draft.mode===mode) return {}; return { draft:this.defQuad(mode) }; }); }
+  bumpUsed(d){ this.setState(s=>({ draft:{ ...s.draft, used: Math.max(0,(+s.draft.used||0)+d) } })); }
+  estUsed(){ this.setState(s=>({ draft:{ ...s.draft, used: Math.round((+s.draft.amps||0)*0.8) } })); }
+  arrKey(){ return this.state.draft.kind==='tandem' ? 'halves' : 'sections'; }
+  setSub(i,k,v){ const key=this.arrKey(); this.setState(s=>{ const a=s.draft[key].map((x,j)=> j===i?{...x,[k]:v}:x ); return { draft:{ ...s.draft, [key]:a } }; }); }
+  bumpSub(i,d){ const key=this.arrKey(); this.setState(s=>{ const a=s.draft[key].map((x,j)=> j===i?{...x, used:Math.max(0,(+x.used||0)+d)}:x ); return { draft:{ ...s.draft, [key]:a } }; }); }
+  setPreset(a){ const key=this.arrKey(); this.setState(s=>{ const arr=s.draft[key].map((x,j)=>({ ...x, amps: a[j]!=null?a[j]:x.amps })); return { draft:{ ...s.draft, [key]:arr } }; }); }
+  saveEditor(){ const space=this.state.editing; const d=this.state.draft; this.setState(s=>{ const c={...s.spaces};
+    const newSpan = d.kind==='full' ? this.spanOf({kind:'full',poles:+d.poles}, space) : (d.kind==='quad' ? [space, space+2] : [space]);
+    Object.keys(c).forEach(k=>{ const ks=+k; if(ks===space) return; const os=this.spanOf(c[ks], ks); if(os.some(x=>newSpan.includes(x))) delete c[ks]; });
+    if(d.kind==='full'){ if(d.type==='SPARE'){ delete c[space]; } else c[space]={ kind:'full', amps:+d.amps, poles:+d.poles, type:d.type, used:+d.used||0, desc:d.desc||this.typeInfo(d.type).name, note:d.note||'' }; }
+    else if(d.kind==='tandem'){ c[space]={ kind:'tandem', halves:d.halves.map(h=>({ amps:+h.amps, type:h.type, used:+h.used||0, desc:h.desc||this.typeInfo(h.type).name, note:h.note||'' })) }; }
+    else { c[space]={ kind:'quad', mode:d.mode, sections:d.sections.map(h=>({ amps:+h.amps, type:h.type, used:+h.used||0, desc:h.desc||this.typeInfo(h.type).name, note:h.note||'' })) }; }
+    return { spaces:c, editing:null };
+  }); }
+  removeCircuit(){ const space=this.state.editing; this.setState(s=>{ const c={...s.spaces}; delete c[space]; return { spaces:c, editing:null }; }); }
+
+  setView(v){ this.setState({ view:v }); }
+  openPrint(){ this.setState({ printOpen:true }); }
+  closePrint(){ this.setState({ printOpen:false }); }
+  addToJpo(){ const n=this.circuitCount(); this.setState({ jpoToast:n }); setTimeout(()=>{ if(this.state.jpoToast===n) this.setState({ jpoToast:null }); },2400); }
+
+  circuitCount(){ const sp=this.state.spaces; let n=0; Object.keys(sp).forEach(k=>{ const e=sp[k]; if(e.kind==='tandem') n+=(e.halves||[]).length; else if(e.kind==='quad') n+=(e.sections||[]).length; else if(e.type!=='SPARE') n+=1; }); return n; }
+
+  openSetup(){ this.setState(s=>({ setupOpen:true, setupDraft:{ ...s.panel } })); }
+  closeSetup(){ this.setState({ setupOpen:false }); }
+  setSetup(k,v){ this.setState(s=>({ setupDraft:{ ...s.setupDraft, [k]:v } })); }
+  setSetupVolt(label){ const v=this.VOLTS.find(x=>x.label===label)||this.VOLTS[2]; this.setState(s=>({ setupDraft:{ ...s.setupDraft, volts:label, vln:v.vln, vll:v.vll, phases:v.phases } })); }
+  toggleCtl(){ this.setState(s=>({ setupDraft:{ ...s.setupDraft, ctl:!s.setupDraft.ctl } })); }
+  bumpSpaces(d){ this.setState(s=>{ let v=(+s.setupDraft.spaces||0)+d; if(v%2!==0) v=v+(d>0?1:-1); v=Math.max(4,Math.min(200,v)); return { setupDraft:{ ...s.setupDraft, spaces:v } }; }); }
+  saveSetup(){ this.setState(s=>{ const p={ ...s.setupDraft }; let sp=Math.floor(+p.spaces||0); if(sp<4) sp=4; if(sp%2!==0) sp+=1; p.spaces=sp; return { panel:p, setupOpen:false }; }); }
+
+  splitRows(space, d){
+    const chip=(a)=>({ bg:a?'#007AFF':'#fff', fg:a?'#fff':'#3c3c43' });
+    const pa=this.phaseFor(space), pb=this.phaseFor(space+2);
+    const mk=(item,i,cfg)=>{ const dbl=cfg.role==='double'; const ampsList=dbl?this.DBL_AMPS:this.HALF_AMPS; const typeList=dbl?this.DBL_TYPES:this.HALF_TYPES;
+      return { title:cfg.title, phaseLabel:cfg.phaseLabel, phaseColor:cfg.pc, cardBorder: dbl?'rgba(94,92,230,0.4)':'rgba(60,60,67,0.12)',
+        ampsOpts:ampsList.map(a=>({ label:a+'A', onTap:()=>this.setSub(i,'amps',a), ...chip(+item.amps===a) })),
+        typeOpts:typeList.map(k=>{ const t=this.typeInfo(k); return { name:t.name, dot:t.color, onTap:()=>this.setSub(i,'type',k), bg:item.type===k?t.color:'#fff', fg:item.type===k?'#fff':'#3c3c43' }; }),
+        desc:item.desc, onDesc:(e)=>this.setSub(i,'desc',e.target.value),
+        used:item.used, unit:this.state.unit, loadValue:(item.used===''?'':(this.state.unit==='W'?this.wattsOf(item.used,dbl?2:1):this.fmtA(item.used))),
+        onUsed:(e)=>{ const v=e.target.value; if(this.state.unit==='W'){ this.setSub(i,'used', v===''?'':Math.max(0,this.ampsOf(+v,dbl?2:1))); } else { this.setSub(i,'used', v===''?'':Math.max(0,+v)); } }, onUsedInc:()=>this.bumpSub(i,1), onUsedDec:()=>this.bumpSub(i,-1) };
+    };
+    if(d.kind==='tandem'){ return d.halves.map((h,i)=>mk(h,i,{ role:'single', title:i===0?'Half A (top)':'Half B (bottom)', phaseLabel:'Phase '+pa, pc:this.PC[pa] })); }
+    const s=d.sections;
+    if(d.mode==='center'){ return [
+      mk(s[0],0,{ role:'single', title:'Outer top · 120V', phaseLabel:'Phase '+pa, pc:this.PC[pa] }),
+      mk(s[1],1,{ role:'double', title:'Inner pair · 240V (2-pole tie)', phaseLabel:pa+' + '+pb, pc:this.TIE }),
+      mk(s[2],2,{ role:'single', title:'Outer bottom · 120V', phaseLabel:'Phase '+pb, pc:this.PC[pb] }),
+    ]; }
+    if(d.mode==='double'){ return [
+      mk(s[0],0,{ role:'double', title:'Upper 2-pole · 240V', phaseLabel:pa+' + '+pb, pc:this.TIE }),
+      mk(s[1],1,{ role:'double', title:'Lower 2-pole · 240V', phaseLabel:pa+' + '+pb, pc:this.TIE }),
+    ]; }
+    return [
+      mk(s[0],0,{ role:'single', title:'Space '+space+' · top', phaseLabel:'Phase '+pa, pc:this.PC[pa] }),
+      mk(s[1],1,{ role:'single', title:'Space '+space+' · bottom', phaseLabel:'Phase '+pa, pc:this.PC[pa] }),
+      mk(s[2],2,{ role:'single', title:'Space '+(space+2)+' · top', phaseLabel:'Phase '+pb, pc:this.PC[pb] }),
+      mk(s[3],3,{ role:'single', title:'Space '+(space+2)+' · bottom', phaseLabel:'Phase '+pb, pc:this.PC[pb] }),
+    ];
+  }
+
+  edVM(){
+    const space=this.state.editing; if(space==null) return { open:false }; const d=this.state.draft||this.defFull();
+    const chip=(a)=>({ bg:a?'#007AFF':'#fff', fg:a?'#fff':'#3c3c43' });
+    const seg=(active)=>({ bg:active?'#fff':'transparent', fg:active?'#1c1c1e':'rgba(60,60,67,0.6)', shadow:active?'0 1px 3px rgba(0,0,0,0.12)':'none' });
+    const fb=(k,label)=>({ label, onTap:()=>this.setFactor(k), ...seg(d.kind===k) });
+    const isSplit=d.kind==='tandem'||d.kind==='quad'; const isQuad=d.kind==='quad';
+    const base={ open:true, title:'Space '+space+(isQuad?('–'+(space+2)):''), factorBtns:[ fb('full','Full'), fb('tandem','Tandem'), fb('quad','Quad · 2sp') ], isFull:d.kind==='full', isSplit, isQuad,
+      onSave:()=>this.saveEditor(), onRemove:()=>this.removeCircuit(), onClose:()=>this.closeEditor() };
+    if(d.kind==='full'){
+      const phase=this.phaseFor(space); const span=this.phaseSpanFor(space,+d.poles).join(' + ');
+      return { ...base,
+        ampsOpts:this.AMPS.map(a=>({ label:a+'A', onTap:()=>this.setDraft('amps',a), ...chip(+d.amps===a) })),
+        poleOpts:this.POLES.map(p=>({ label:p+'-Pole', onTap:()=>this.setDraft('poles',p), ...chip(+d.poles===p) })),
+        spanNote: (+d.poles>1) ? ('spans spaces '+[space,space+2,space+4].slice(0,+d.poles).join(', ')) : 'one space',
+        typeOpts:this.TYPES.map(t=>({ name:t.name, dot:t.color, onTap:()=>this.setDraft('type',t.key), bg:d.type===t.key?t.color:'#fff', fg:d.type===t.key?'#fff':'#3c3c43' })),
+        amps:d.amps, phaseColor:this.PC[phase], phaseSpan:span,
+        loadUnit:this.state.unit, loadValue:(d.used===''?'':(this.state.unit==='W'?this.wattsOf(d.used,+d.poles):this.fmtA(d.used))),
+        loadAlt:(this.state.unit==='W'?('≈ '+this.fmtA(d.used||0)+' A'):('≈ '+this.wattsOf(d.used||0,+d.poles).toLocaleString()+' W'))+' at '+((+d.poles>=3)?(this.circVolts(+d.poles)+'V ×√3 · 3Ø'):((+d.poles>=2)?(this.circVolts(+d.poles)+'V · L-L'):(this.circVolts(+d.poles)+'V'))),
+        estLabel:(this.state.unit==='W'?(this.wattsOf(Math.round((+d.amps||0)*0.8),+d.poles).toLocaleString()+'W'):(Math.round((+d.amps||0)*0.8)+'A')),
+        onUsed:(e)=>{ const v=e.target.value; const pl=+d.poles; if(this.state.unit==='W'){ this.setDraft('used', v===''?'':Math.max(0,this.ampsOf(+v,pl))); } else { this.setDraft('used', v===''?'':Math.max(0,+v)); } }, onUsedInc:()=>this.bumpUsed(1), onUsedDec:()=>this.bumpUsed(-1), onEst:()=>this.estUsed(),
+        desc:d.desc, onDesc:(e)=>this.setDraft('desc', e.target.value), note:d.note, onNote:(e)=>this.setDraft('note', e.target.value) };
+    }
+    const presets = isQuad ? (d.mode==='center'?this.PRESETS_QC:(d.mode==='double'?this.PRESETS_QD:this.PRESETS_QF)) : this.PRESETS_T;
+    const qhint = d.mode==='center' ? 'Two outer 120V circuits with a tied inner 2-pole for a 240V load — the classic quad.' : (d.mode==='double' ? 'Two independent 2-pole 240V breakers in two spaces (e.g. dryer + range).' : 'Four independent 120V circuits in two spaces — top two on one leg, bottom two on the other.');
+    return { ...base,
+      modeBtns: isQuad ? [ { label:'4 × 1P', onTap:()=>this.setQuadMode('four'), ...seg(d.mode==='four') }, { label:'120/240/120', onTap:()=>this.setQuadMode('center'), ...seg(d.mode==='center') }, { label:'2 × 2P', onTap:()=>this.setQuadMode('double'), ...seg(d.mode==='double') } ] : [],
+      presetOpts: presets.map(p=>({ label:p.label, onTap:()=>this.setPreset(p.a), bg:'#fff', fg:'#3c3c43' })),
+      splitHint: isQuad ? qhint : 'Two 120V circuits in one space, both on the same leg — cannot make 240V.',
+      editRows:this.splitRows(space, d) };
+  }
+
+  setupVM(){
+    const sd=this.state.setupDraft; if(!this.state.setupOpen || !sd) return { open:false };
+    const chip=(a)=>({ bg:a?'#007AFF':'#fff', fg:a?'#fff':'#3c3c43' });
+    const cur=+sd.spaces; const isCustom=!this.SPACESOPT.includes(cur);
+    return { open:true,
+      brandOpts:this.BRANDS.map(b=>({ label:b, onTap:()=>this.setSetup('brand',b), ...chip(sd.brand===b) })),
+      model:sd.model, onModel:(e)=>this.setSetup('model', e.target.value),
+      typeOpts:this.PTYPES.map(t=>({ label:t, onTap:()=>this.setSetup('type',t), ...chip(sd.type===t) })),
+      voltOpts:this.VOLTS.map(v=>({ label:v.label, onTap:()=>this.setSetupVolt(v.label), ...chip(sd.volts===v.label) })),
+      ctlOn:!!sd.ctl, ctlBg:sd.ctl?'#30D158':'#c7c7cc', ctlX:sd.ctl?'20px':'2px', onToggleCtl:()=>this.toggleCtl(),
+      spaceOpts:this.SPACESOPT.map(n=>({ label:n+'', onTap:()=>this.setSetup('spaces',n), ...chip(cur===n) })),
+      isCustom, customChip:{ label:'Custom', onTap:()=>{ if(!isCustom) this.setSetup('spaces',48); }, ...chip(isCustom) },
+      customVal: isCustom ? cur : '', onCustom:(e)=>{ const v=e.target.value; this.setSetup('spaces', v===''?'':Math.max(2,Math.min(200,Math.floor(+v||0)))); }, onCustomInc:()=>this.bumpSpaces(2), onCustomDec:()=>this.bumpSpaces(-2),
+      mainOpts:this.MAINS.map(a=>({ label:a+'A', onTap:()=>this.setSetup('mainAmps',a), ...chip(+sd.mainAmps===a) })),
+      onSave:()=>this.saveSetup(), onClose:()=>this.closeSetup() };
+  }
+
+  printSetupVM(){
+    const P=this.state.print; if(!this.state.printSetupOpen) return { open:false };
+    const t=(k)=>({ value:(P[k]==null?'':P[k]), onInput:(e)=>this.setPrint(k, e.target.value) });
+    const tog=(k,label)=>({ label, on:!!P[k], bg:P[k]?'#30D158':'#c7c7cc', x:P[k]?'20px':'2px', onTap:()=>this.togglePrint(k) });
+    const chip=(k,v,label)=>({ label:label||v, onTap:()=>this.setPrint(k,v), bg:P[k]===v?'#007AFF':'#fff', fg:P[k]===v?'#fff':'#3c3c43' });
+    return { open:true,
+      f:{ coName:t('coName'), coLic:t('coLic'), coAddr:t('coAddr'), coPhone:t('coPhone'), coEmail:t('coEmail'), coWeb:t('coWeb'), project:t('project'), jobNo:t('jobNo'), location:t('location'), fedFrom:t('fedFrom'), drawnBy:t('drawnBy'), checkedBy:t('checkedBy'), rev:t('rev'), aic:t('aic'), feeder:t('feeder') },
+      toggleRows:[ tog('showVA','VA load column'), tog('showWire','Wire size column'), tog('showEmpty','Empty spaces'), tog('showBars','Phase balance bars'), tog('showDemand','Demand calc'), tog('showNotes','Circuit notes'), tog('showSig','Signature block'), tog('grayscale','Grayscale (B&W)') ],
+      demandPct:P.demandPct, onDemand:(e)=>this.setPrint('demandPct', Math.max(25,Math.min(150,Math.floor(+e.target.value||100)))), onDemandInc:()=>this.bumpDemand(5), onDemandDec:()=>this.bumpDemand(-5),
+      paperOpts:[ chip('paper','letter','Letter'), chip('paper','legal','Legal'), chip('paper','a4','A4') ],
+      mountOpts:[ chip('mounting','Surface','Surface'), chip('mounting','Flush','Flush') ],
+      encOpts:[ chip('enclosure','NEMA 1','NEMA 1'), chip('enclosure','NEMA 3R','NEMA 3R'), chip('enclosure','NEMA 12','NEMA 12') ],
+      onClose:()=>this.closePrintSetup() };
+  }
+
+  flatCircuits(){ const sp=this.state.spaces; const out=[]; const keys=Object.keys(sp).map(x=>+x).sort((a,b)=>a-b);
+    keys.forEach(s=>{ const e=sp[s]; const pa=this.phaseFor(s), pb=this.phaseFor(s+2);
+      if(e.kind==='tandem'){ (e.halves||[]).forEach((h,i)=>{ out.push({ slot:s+(i===0?'a':'b'), amps:h.amps, poles:1, form:'twin', type:h.type, used:h.used, desc:h.desc, phase:pa, phaseSpan:pa, onTap:()=>this.openEditor(s) }); }); }
+      else if(e.kind==='quad'){ const sec=e.sections;
+        if(e.mode==='center'){
+          out.push({ slot:''+s, amps:sec[0].amps, poles:1, form:'quad', type:sec[0].type, used:sec[0].used, desc:sec[0].desc, phase:pa, phaseSpan:pa, onTap:()=>this.openEditor(s) });
+          out.push({ slot:s+'–'+(s+2), amps:sec[1].amps, poles:2, form:'quad', type:sec[1].type, used:sec[1].used, desc:sec[1].desc, phase:pa, phaseSpan:pa+'+'+pb, onTap:()=>this.openEditor(s) });
+          out.push({ slot:''+(s+2), amps:sec[2].amps, poles:1, form:'quad', type:sec[2].type, used:sec[2].used, desc:sec[2].desc, phase:pb, phaseSpan:pb, onTap:()=>this.openEditor(s) });
+        } else if(e.mode==='double'){
+          out.push({ slot:s+'–'+(s+2)+'↑', amps:sec[0].amps, poles:2, form:'quad', type:sec[0].type, used:sec[0].used, desc:sec[0].desc, phase:pa, phaseSpan:pa+'+'+pb, onTap:()=>this.openEditor(s) });
+          out.push({ slot:s+'–'+(s+2)+'↓', amps:sec[1].amps, poles:2, form:'quad', type:sec[1].type, used:sec[1].used, desc:sec[1].desc, phase:pa, phaseSpan:pa+'+'+pb, onTap:()=>this.openEditor(s) });
+        } else {
+          out.push({ slot:s+'a', amps:sec[0].amps, poles:1, form:'quad', type:sec[0].type, used:sec[0].used, desc:sec[0].desc, phase:pa, phaseSpan:pa, onTap:()=>this.openEditor(s) });
+          out.push({ slot:s+'b', amps:sec[1].amps, poles:1, form:'quad', type:sec[1].type, used:sec[1].used, desc:sec[1].desc, phase:pa, phaseSpan:pa, onTap:()=>this.openEditor(s) });
+          out.push({ slot:(s+2)+'a', amps:sec[2].amps, poles:1, form:'quad', type:sec[2].type, used:sec[2].used, desc:sec[2].desc, phase:pb, phaseSpan:pb, onTap:()=>this.openEditor(s) });
+          out.push({ slot:(s+2)+'b', amps:sec[3].amps, poles:1, form:'quad', type:sec[3].type, used:sec[3].used, desc:sec[3].desc, phase:pb, phaseSpan:pb, onTap:()=>this.openEditor(s) });
+        }
+      }
+      else if(e.type!=='SPARE'){ const p=e.poles||1; const cov=this.spanOf(e,s); out.push({ slot: p>1?(cov[0]+'–'+cov[cov.length-1]):(''+s), amps:e.amps, poles:p, form:'full', type:e.type, used:e.used, desc:e.desc, phase:pa, phaseSpan:this.phaseSpanFor(s,p).join('+'), onTap:()=>this.openEditor(s) }); }
+    });
+    return out;
+  }
+
+  polesTxt(c){ if(c.poles>1) return c.poles+'P'; if(c.form==='twin') return '½'; return '1P'; }
+  buildList(){ return this.flatCircuits().map((c,i)=>{ const ti=this.typeInfo(c.type); const over=(+c.used>+c.amps); const tag = c.form==='twin'?'Twin':(c.form==='quad'?'Quad':ti.name); return { key:i, slotLabel:'#'+c.slot, ampsPoles:c.amps+'A · '+this.polesTxt(c), tag, typeColor:ti.color, typeBg:ti.color+'22', desc:c.desc||ti.name, footLabel:this.loadTxt(c.used,c.poles)+' used · '+c.amps+'A max', loadColor:over?'#FF3B30':'#8E8E93', phaseColor:c.poles>1?this.TIE:this.PC[c.phase], phaseSpan:c.phaseSpan, onTap:c.onTap }; }); }
+  buildPrint(){ return this.flatCircuits().map((c,i)=>{ const ti=this.typeInfo(c.type); const over=(+c.used>+c.amps); return { key:i, slotLabel:''+c.slot, brk:c.amps+'A/'+this.polesTxt(c), typeShort:ti.short, typeColor:ti.color, desc:c.desc||ti.name, usedTxt:this.loadTxt(c.used,c.poles), vaTxt:this.wattsOf(c.used,c.poles).toLocaleString(), wire:this.wireFor(c.amps), phase:c.phaseSpan, phaseColor:c.poles>1?this.TIE:this.PC[c.phase], over }; }); }
+  printEmptyRows(){ const occ=this.occupied(); const rows=[]; for(let n=1;n<=this.state.panel.spaces;n++){ if(!occ.has(n)) rows.push({ slotLabel:''+n }); } return rows; }
+
+  renderVals(){
+    const p=this.state.panel; const cap=this.cap();
+    const embed=!!this.props.embed; const notEmbed=!embed; const panelName=this.props.panelName||'Panel A';
+    const shellStyle = embed ? 'padding:0; background:transparent; min-height:0; height:100%;' : '';
+    const rowStyle = embed ? 'display:flex; height:100%;' : 'display:flex; gap:34px; align-items:flex-start; flex-wrap:wrap;';
+    const phoneWrapStyle = embed ? 'flex:1 1 auto; height:100%; min-width:0;' : 'width:392px; flex:0 0 auto;';
+    const frameStyle = embed ? 'position:relative; width:100%; height:100%; background:transparent; border-radius:0; padding:0; box-shadow:none;' : 'position:relative; width:392px; height:768px; background:#000; border-radius:52px; padding:10px; box-shadow:0 26px 60px rgba(0,0,0,0.25);';
+    const screenStyle = embed ? 'position:relative; width:100%; height:100%; background:#F2F2F7; border-radius:0; overflow:hidden; display:flex; flex-direction:column;' : 'position:relative; width:100%; height:100%; background:#F2F2F7; border-radius:42px; overflow:hidden; display:flex; flex-direction:column;';
+    const leftSpaces=[], rightSpaces=[]; for(let n=1;n<=cap;n++){ (n%2? leftSpaces:rightSpaces).push(n); }
+    const leftCells=this.columnCells(leftSpaces); const rightCells=this.columnCells(rightSpaces);
+    const listItems=this.buildList(); const printItems=this.buildPrint();
+    const circuitCount=this.circuitCount(); const spares=Math.max(0, p.spaces-this.occupied().size);
+    const view=this.state.view;
+    const vb=(key,label)=>({ label, onTap:()=>this.setView(key), bg:view===key?'#fff':'transparent', fg:view===key?'#1c1c1e':'rgba(60,60,67,0.6)', shadow:view===key?'0 1px 3px rgba(0,0,0,0.12)':'none' });
+    const ub=(u)=>({ label:u, onTap:()=>this.setUnit(u), bg:this.state.unit===u?'#fff':'transparent', fg:this.state.unit===u?'#1c1c1e':'rgba(60,60,67,0.55)', shadow:this.state.unit===u?'0 1px 3px rgba(0,0,0,0.12)':'none' });
+    const bars=this.totals(); const worst=bars.reduce((m,b)=>b.amps>m.amps?b:m, bars[0]);
+    const totalVA=bars.reduce((a,b)=>a+(b.va||0),0);
+    const svcAmps = p.phases>=3 ? totalVA/(Math.sqrt(3)*(p.vll||208)) : (p.phases===2 ? totalVA/(p.vll||240) : totalVA/(p.vln||120));
+    const svcNote = p.phases>=3 ? ('3Ø · 2-pole @'+(p.vll||208)+'V · 3-pole ×√3') : (p.phases===2 ? ('1Ø 3-wire · 2-pole @'+(p.vll||240)+'V') : '1Ø 2-wire · 120V');
+    const totalTxt = Math.round(totalVA).toLocaleString()+'W · '+this.fmtA(svcAmps)+'A service';
+    const catalog=this.TYPES.map(t=>({ name:t.name, short:t.short, desc:t.desc, color:t.color }));
+    const meta=p.brand+' '+p.model+' · '+p.volts+' · '+p.mainAmps+'A '+(p.type==='Main Lug'?'MLO':(p.type==='Sub-Panel'?'Sub':'MCB'))+' · '+p.spaces+' sp'+(p.ctl?'':' · CTL');
+    const P=this.state.print; const sum=this.loadSummary(); const freeSp=Math.max(0,p.spaces-this.occupied().size);
+    const mainTag=(p.type==='Main Lug'?'MLO':(p.type==='Sub-Panel'?'Sub-feed':'MCB'));
+    const sumVM={ legs:sum.bars.map(b=>({ label:b.label, color:b.color, va:Math.round(b.va).toLocaleString(), amps:this.fmtA(b.amps)+'A', pct:b.pct })),
+      totalVA:Math.round(sum.totalVA).toLocaleString(), svcAmps:this.fmtA(sum.svcAmps)+'A', imbalance:sum.imbalance+'%',
+      imbalColor: sum.imbalance>20?'#FF9F0A':'#30D158', demandPct:sum.demandPct+'%', demandVA:Math.round(sum.demandVA).toLocaleString(), demandAmps:this.fmtA(sum.demandAmps)+'A', recommend:sum.recommend+'A', pctMain:sum.pctMain+'%' };
+    const titleFields=[ {k:'Project',v:P.project||'—'},{k:'Location',v:P.location||'—'},{k:'Voltage / Phase',v:p.volts},
+      {k:'Job No.',v:P.jobNo||'—'},{k:'Fed From',v:P.fedFrom||'—'},{k:'Main',v:p.mainAmps+'A '+mainTag},
+      {k:'Mounting',v:P.mounting},{k:'Enclosure',v:P.enclosure},{k:'Bus / AIC',v:p.mainAmps+'A · '+P.aic+'kAIC'},
+      {k:'Spaces',v:p.spaces+' · '+freeSp+' free'},{k:'Feeder',v:P.feeder||'—'},{k:'Rev.',v:P.rev||'0'} ];
+    const sigBlocks=[ {role:'Drawn By',name:P.drawnBy||''},{role:'Checked By',name:P.checkedBy||''},{role:'Approved By',name:P.approvedBy||''} ];
+    const today=new Date().toLocaleDateString('en-US',{ year:'numeric', month:'short', day:'numeric' });
+    const notes=[]; const sp=this.state.spaces; Object.keys(sp).map(x=>+x).sort((a,b)=>a-b).forEach(s=>{ const e=sp[s]; if(e.kind==='full'&&e.note) notes.push({ slot:'#'+s, name:e.desc, note:e.note }); });
+    const paperLabel=({letter:'Letter · 8.5×11',legal:'Legal · 8.5×14',a4:'A4 · 210×297mm'})[P.paper]||'Letter';
+    const toast=this.state.jpoToast;
+    return {
+      embed, notEmbed, shellStyle, rowStyle, phoneWrapStyle, frameStyle, screenStyle, panelName,
+      panel:{ brand:p.brand, model:p.model, mainAmps:p.mainAmps, spaces:p.spaces, metaLine:meta },
+      viewBtns:[ vb('classic','Classic'), vb('list','List'), vb('visual','Visual') ],
+      isClassic:view==='classic', isList:view==='list', isVisual:view==='visual',
+      leftCells, rightCells, listItems, printItems, printEmpty:this.printEmptyRows(), circuitCount, spares, bars, catalog,
+      balColor:worst?worst.color:'#8E8E93', balLabel: worst?(worst.label+' · '+worst.disp+' of '+this.mainTxt()+' ('+worst.pct+'%)'):'—', unitBtns:[ ub('A'), ub('W') ], totalTxt, svcNote,
+      ed:this.edVM(), setup:this.setupVM(), printSetup:this.printSetupVM(),
+      print:P, sum:sumVM, titleFields, sigBlocks, today, paperLabel, grayClass:(P.grayscale?'ps-gray':''),
+      printNotes:notes, hasNotes:notes.length>0, showNotesBlock:(P.showNotes&&notes.length>0), printOpen:this.state.printOpen,
+      onOpenSetup:()=>this.openSetup(), onPrintSetup:()=>this.openPrintSetup(), onAddCircuit:()=>this.openEditor(this.nextFree()), onAddJpo:()=>this.addToJpo(),
+      onPrint:()=>this.openPrint(), onClosePrint:()=>this.closePrint(), onDoPrint:()=>{ try{ window.print(); }catch(e){} },
+      showToast: toast!=null, toastMsg: (toast||0)+' circuits added to a new JPO draft',
+    };
+  }
+}
+</script>
+</body>
+</html>
