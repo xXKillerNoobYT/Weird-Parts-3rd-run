@@ -5,11 +5,13 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'daos/jobs_dao.dart';
 import 'daos/parts_dao.dart';
 import 'daos/settings_dao.dart';
 import 'daos/taxonomy_dao.dart';
 import 'tables/app_settings.dart';
 import 'tables/device_profile.dart';
+import 'tables/jobs.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
 
@@ -29,8 +31,11 @@ part 'app_database.g.dart';
     PartDevices,
     BrandVersions,
     SupplierListings,
+    Jobs,
+    JobLines,
+    OrderSplits,
   ],
-  daos: [SettingsDao, TaxonomyDao, PartsDao],
+  daos: [SettingsDao, TaxonomyDao, PartsDao, JobsDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());

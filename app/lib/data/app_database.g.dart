@@ -6273,6 +6273,2145 @@ class SupplierListingsCompanion extends UpdateCompanion<SupplierListing> {
   }
 }
 
+class $JobsTable extends Jobs with TableInfo<$JobsTable, Job> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originDeviceIdMeta = const VerificationMeta(
+    'originDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> originDeviceId = GeneratedColumn<String>(
+    'origin_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _modifiedAtMeta = const VerificationMeta(
+    'modifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> modifiedAt = GeneratedColumn<DateTime>(
+    'modified_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _customerMeta = const VerificationMeta(
+    'customer',
+  );
+  @override
+  late final GeneratedColumn<String> customer = GeneratedColumn<String>(
+    'customer',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _locationMeta = const VerificationMeta(
+    'location',
+  );
+  @override
+  late final GeneratedColumn<String> location = GeneratedColumn<String>(
+    'location',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _jobNumberMeta = const VerificationMeta(
+    'jobNumber',
+  );
+  @override
+  late final GeneratedColumn<String> jobNumber = GeneratedColumn<String>(
+    'job_number',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('active'),
+  );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    name,
+    customer,
+    location,
+    jobNumber,
+    status,
+    notes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'jobs';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Job> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('origin_device_id')) {
+      context.handle(
+        _originDeviceIdMeta,
+        originDeviceId.isAcceptableOrUnknown(
+          data['origin_device_id']!,
+          _originDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originDeviceIdMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('modified_at')) {
+      context.handle(
+        _modifiedAtMeta,
+        modifiedAt.isAcceptableOrUnknown(data['modified_at']!, _modifiedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_modifiedAtMeta);
+    }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('customer')) {
+      context.handle(
+        _customerMeta,
+        customer.isAcceptableOrUnknown(data['customer']!, _customerMeta),
+      );
+    }
+    if (data.containsKey('location')) {
+      context.handle(
+        _locationMeta,
+        location.isAcceptableOrUnknown(data['location']!, _locationMeta),
+      );
+    }
+    if (data.containsKey('job_number')) {
+      context.handle(
+        _jobNumberMeta,
+        jobNumber.isAcceptableOrUnknown(data['job_number']!, _jobNumberMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Job map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Job(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      originDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_device_id'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      modifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}modified_at'],
+      )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      customer: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}customer'],
+      ),
+      location: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}location'],
+      ),
+      jobNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_number'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
+    );
+  }
+
+  @override
+  $JobsTable createAlias(String alias) {
+    return $JobsTable(attachedDatabase, alias);
+  }
+}
+
+class Job extends DataClass implements Insertable<Job> {
+  final String id;
+  final String originDeviceId;
+  final DateTime createdAt;
+  final DateTime modifiedAt;
+  final int revision;
+  final DateTime? deletedAt;
+  final String name;
+  final String? customer;
+  final String? location;
+  final String? jobNumber;
+  final String status;
+  final String? notes;
+  const Job({
+    required this.id,
+    required this.originDeviceId,
+    required this.createdAt,
+    required this.modifiedAt,
+    required this.revision,
+    this.deletedAt,
+    required this.name,
+    this.customer,
+    this.location,
+    this.jobNumber,
+    required this.status,
+    this.notes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['origin_device_id'] = Variable<String>(originDeviceId);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['modified_at'] = Variable<DateTime>(modifiedAt);
+    map['revision'] = Variable<int>(revision);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['name'] = Variable<String>(name);
+    if (!nullToAbsent || customer != null) {
+      map['customer'] = Variable<String>(customer);
+    }
+    if (!nullToAbsent || location != null) {
+      map['location'] = Variable<String>(location);
+    }
+    if (!nullToAbsent || jobNumber != null) {
+      map['job_number'] = Variable<String>(jobNumber);
+    }
+    map['status'] = Variable<String>(status);
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
+    return map;
+  }
+
+  JobsCompanion toCompanion(bool nullToAbsent) {
+    return JobsCompanion(
+      id: Value(id),
+      originDeviceId: Value(originDeviceId),
+      createdAt: Value(createdAt),
+      modifiedAt: Value(modifiedAt),
+      revision: Value(revision),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      name: Value(name),
+      customer: customer == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customer),
+      location: location == null && nullToAbsent
+          ? const Value.absent()
+          : Value(location),
+      jobNumber: jobNumber == null && nullToAbsent
+          ? const Value.absent()
+          : Value(jobNumber),
+      status: Value(status),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
+    );
+  }
+
+  factory Job.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Job(
+      id: serializer.fromJson<String>(json['id']),
+      originDeviceId: serializer.fromJson<String>(json['originDeviceId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      modifiedAt: serializer.fromJson<DateTime>(json['modifiedAt']),
+      revision: serializer.fromJson<int>(json['revision']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      name: serializer.fromJson<String>(json['name']),
+      customer: serializer.fromJson<String?>(json['customer']),
+      location: serializer.fromJson<String?>(json['location']),
+      jobNumber: serializer.fromJson<String?>(json['jobNumber']),
+      status: serializer.fromJson<String>(json['status']),
+      notes: serializer.fromJson<String?>(json['notes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'originDeviceId': serializer.toJson<String>(originDeviceId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'modifiedAt': serializer.toJson<DateTime>(modifiedAt),
+      'revision': serializer.toJson<int>(revision),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'name': serializer.toJson<String>(name),
+      'customer': serializer.toJson<String?>(customer),
+      'location': serializer.toJson<String?>(location),
+      'jobNumber': serializer.toJson<String?>(jobNumber),
+      'status': serializer.toJson<String>(status),
+      'notes': serializer.toJson<String?>(notes),
+    };
+  }
+
+  Job copyWith({
+    String? id,
+    String? originDeviceId,
+    DateTime? createdAt,
+    DateTime? modifiedAt,
+    int? revision,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    String? name,
+    Value<String?> customer = const Value.absent(),
+    Value<String?> location = const Value.absent(),
+    Value<String?> jobNumber = const Value.absent(),
+    String? status,
+    Value<String?> notes = const Value.absent(),
+  }) => Job(
+    id: id ?? this.id,
+    originDeviceId: originDeviceId ?? this.originDeviceId,
+    createdAt: createdAt ?? this.createdAt,
+    modifiedAt: modifiedAt ?? this.modifiedAt,
+    revision: revision ?? this.revision,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    name: name ?? this.name,
+    customer: customer.present ? customer.value : this.customer,
+    location: location.present ? location.value : this.location,
+    jobNumber: jobNumber.present ? jobNumber.value : this.jobNumber,
+    status: status ?? this.status,
+    notes: notes.present ? notes.value : this.notes,
+  );
+  Job copyWithCompanion(JobsCompanion data) {
+    return Job(
+      id: data.id.present ? data.id.value : this.id,
+      originDeviceId: data.originDeviceId.present
+          ? data.originDeviceId.value
+          : this.originDeviceId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      modifiedAt: data.modifiedAt.present
+          ? data.modifiedAt.value
+          : this.modifiedAt,
+      revision: data.revision.present ? data.revision.value : this.revision,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      name: data.name.present ? data.name.value : this.name,
+      customer: data.customer.present ? data.customer.value : this.customer,
+      location: data.location.present ? data.location.value : this.location,
+      jobNumber: data.jobNumber.present ? data.jobNumber.value : this.jobNumber,
+      status: data.status.present ? data.status.value : this.status,
+      notes: data.notes.present ? data.notes.value : this.notes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Job(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('name: $name, ')
+          ..write('customer: $customer, ')
+          ..write('location: $location, ')
+          ..write('jobNumber: $jobNumber, ')
+          ..write('status: $status, ')
+          ..write('notes: $notes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    name,
+    customer,
+    location,
+    jobNumber,
+    status,
+    notes,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Job &&
+          other.id == this.id &&
+          other.originDeviceId == this.originDeviceId &&
+          other.createdAt == this.createdAt &&
+          other.modifiedAt == this.modifiedAt &&
+          other.revision == this.revision &&
+          other.deletedAt == this.deletedAt &&
+          other.name == this.name &&
+          other.customer == this.customer &&
+          other.location == this.location &&
+          other.jobNumber == this.jobNumber &&
+          other.status == this.status &&
+          other.notes == this.notes);
+}
+
+class JobsCompanion extends UpdateCompanion<Job> {
+  final Value<String> id;
+  final Value<String> originDeviceId;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> modifiedAt;
+  final Value<int> revision;
+  final Value<DateTime?> deletedAt;
+  final Value<String> name;
+  final Value<String?> customer;
+  final Value<String?> location;
+  final Value<String?> jobNumber;
+  final Value<String> status;
+  final Value<String?> notes;
+  final Value<int> rowid;
+  const JobsCompanion({
+    this.id = const Value.absent(),
+    this.originDeviceId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.modifiedAt = const Value.absent(),
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.name = const Value.absent(),
+    this.customer = const Value.absent(),
+    this.location = const Value.absent(),
+    this.jobNumber = const Value.absent(),
+    this.status = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobsCompanion.insert({
+    required String id,
+    required String originDeviceId,
+    required DateTime createdAt,
+    required DateTime modifiedAt,
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    required String name,
+    this.customer = const Value.absent(),
+    this.location = const Value.absent(),
+    this.jobNumber = const Value.absent(),
+    this.status = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       originDeviceId = Value(originDeviceId),
+       createdAt = Value(createdAt),
+       modifiedAt = Value(modifiedAt),
+       name = Value(name);
+  static Insertable<Job> custom({
+    Expression<String>? id,
+    Expression<String>? originDeviceId,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? modifiedAt,
+    Expression<int>? revision,
+    Expression<DateTime>? deletedAt,
+    Expression<String>? name,
+    Expression<String>? customer,
+    Expression<String>? location,
+    Expression<String>? jobNumber,
+    Expression<String>? status,
+    Expression<String>? notes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (originDeviceId != null) 'origin_device_id': originDeviceId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (modifiedAt != null) 'modified_at': modifiedAt,
+      if (revision != null) 'revision': revision,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (name != null) 'name': name,
+      if (customer != null) 'customer': customer,
+      if (location != null) 'location': location,
+      if (jobNumber != null) 'job_number': jobNumber,
+      if (status != null) 'status': status,
+      if (notes != null) 'notes': notes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? originDeviceId,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? modifiedAt,
+    Value<int>? revision,
+    Value<DateTime?>? deletedAt,
+    Value<String>? name,
+    Value<String?>? customer,
+    Value<String?>? location,
+    Value<String?>? jobNumber,
+    Value<String>? status,
+    Value<String?>? notes,
+    Value<int>? rowid,
+  }) {
+    return JobsCompanion(
+      id: id ?? this.id,
+      originDeviceId: originDeviceId ?? this.originDeviceId,
+      createdAt: createdAt ?? this.createdAt,
+      modifiedAt: modifiedAt ?? this.modifiedAt,
+      revision: revision ?? this.revision,
+      deletedAt: deletedAt ?? this.deletedAt,
+      name: name ?? this.name,
+      customer: customer ?? this.customer,
+      location: location ?? this.location,
+      jobNumber: jobNumber ?? this.jobNumber,
+      status: status ?? this.status,
+      notes: notes ?? this.notes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (originDeviceId.present) {
+      map['origin_device_id'] = Variable<String>(originDeviceId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (modifiedAt.present) {
+      map['modified_at'] = Variable<DateTime>(modifiedAt.value);
+    }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (customer.present) {
+      map['customer'] = Variable<String>(customer.value);
+    }
+    if (location.present) {
+      map['location'] = Variable<String>(location.value);
+    }
+    if (jobNumber.present) {
+      map['job_number'] = Variable<String>(jobNumber.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobsCompanion(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('name: $name, ')
+          ..write('customer: $customer, ')
+          ..write('location: $location, ')
+          ..write('jobNumber: $jobNumber, ')
+          ..write('status: $status, ')
+          ..write('notes: $notes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLinesTable extends JobLines with TableInfo<$JobLinesTable, JobLine> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLinesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originDeviceIdMeta = const VerificationMeta(
+    'originDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> originDeviceId = GeneratedColumn<String>(
+    'origin_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _modifiedAtMeta = const VerificationMeta(
+    'modifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> modifiedAt = GeneratedColumn<DateTime>(
+    'modified_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _jobIdMeta = const VerificationMeta('jobId');
+  @override
+  late final GeneratedColumn<String> jobId = GeneratedColumn<String>(
+    'job_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _partIdMeta = const VerificationMeta('partId');
+  @override
+  late final GeneratedColumn<String> partId = GeneratedColumn<String>(
+    'part_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _customNameMeta = const VerificationMeta(
+    'customName',
+  );
+  @override
+  late final GeneratedColumn<String> customName = GeneratedColumn<String>(
+    'custom_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _customNotesMeta = const VerificationMeta(
+    'customNotes',
+  );
+  @override
+  late final GeneratedColumn<String> customNotes = GeneratedColumn<String>(
+    'custom_notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _brandVersionIdMeta = const VerificationMeta(
+    'brandVersionId',
+  );
+  @override
+  late final GeneratedColumn<String> brandVersionId = GeneratedColumn<String>(
+    'brand_version_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _neededQtyMeta = const VerificationMeta(
+    'neededQty',
+  );
+  @override
+  late final GeneratedColumn<double> neededQty = GeneratedColumn<double>(
+    'needed_qty',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shopPullQtyMeta = const VerificationMeta(
+    'shopPullQty',
+  );
+  @override
+  late final GeneratedColumn<double> shopPullQty = GeneratedColumn<double>(
+    'shop_pull_qty',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0.0),
+  );
+  static const VerificationMeta _uomMeta = const VerificationMeta('uom');
+  @override
+  late final GeneratedColumn<String> uom = GeneratedColumn<String>(
+    'uom',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    jobId,
+    partId,
+    customName,
+    customNotes,
+    brandVersionId,
+    neededQty,
+    shopPullQty,
+    uom,
+    notes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_lines';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLine> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('origin_device_id')) {
+      context.handle(
+        _originDeviceIdMeta,
+        originDeviceId.isAcceptableOrUnknown(
+          data['origin_device_id']!,
+          _originDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originDeviceIdMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('modified_at')) {
+      context.handle(
+        _modifiedAtMeta,
+        modifiedAt.isAcceptableOrUnknown(data['modified_at']!, _modifiedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_modifiedAtMeta);
+    }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('job_id')) {
+      context.handle(
+        _jobIdMeta,
+        jobId.isAcceptableOrUnknown(data['job_id']!, _jobIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jobIdMeta);
+    }
+    if (data.containsKey('part_id')) {
+      context.handle(
+        _partIdMeta,
+        partId.isAcceptableOrUnknown(data['part_id']!, _partIdMeta),
+      );
+    }
+    if (data.containsKey('custom_name')) {
+      context.handle(
+        _customNameMeta,
+        customName.isAcceptableOrUnknown(data['custom_name']!, _customNameMeta),
+      );
+    }
+    if (data.containsKey('custom_notes')) {
+      context.handle(
+        _customNotesMeta,
+        customNotes.isAcceptableOrUnknown(
+          data['custom_notes']!,
+          _customNotesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('brand_version_id')) {
+      context.handle(
+        _brandVersionIdMeta,
+        brandVersionId.isAcceptableOrUnknown(
+          data['brand_version_id']!,
+          _brandVersionIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('needed_qty')) {
+      context.handle(
+        _neededQtyMeta,
+        neededQty.isAcceptableOrUnknown(data['needed_qty']!, _neededQtyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_neededQtyMeta);
+    }
+    if (data.containsKey('shop_pull_qty')) {
+      context.handle(
+        _shopPullQtyMeta,
+        shopPullQty.isAcceptableOrUnknown(
+          data['shop_pull_qty']!,
+          _shopPullQtyMeta,
+        ),
+      );
+    }
+    if (data.containsKey('uom')) {
+      context.handle(
+        _uomMeta,
+        uom.isAcceptableOrUnknown(data['uom']!, _uomMeta),
+      );
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  JobLine map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLine(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      originDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_device_id'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      modifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}modified_at'],
+      )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      jobId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_id'],
+      )!,
+      partId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}part_id'],
+      ),
+      customName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}custom_name'],
+      ),
+      customNotes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}custom_notes'],
+      ),
+      brandVersionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}brand_version_id'],
+      ),
+      neededQty: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}needed_qty'],
+      )!,
+      shopPullQty: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}shop_pull_qty'],
+      )!,
+      uom: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}uom'],
+      ),
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
+    );
+  }
+
+  @override
+  $JobLinesTable createAlias(String alias) {
+    return $JobLinesTable(attachedDatabase, alias);
+  }
+}
+
+class JobLine extends DataClass implements Insertable<JobLine> {
+  final String id;
+  final String originDeviceId;
+  final DateTime createdAt;
+  final DateTime modifiedAt;
+  final int revision;
+  final DateTime? deletedAt;
+  final String jobId;
+  final String? partId;
+  final String? customName;
+  final String? customNotes;
+  final String? brandVersionId;
+  final double neededQty;
+  final double shopPullQty;
+  final String? uom;
+  final String? notes;
+  const JobLine({
+    required this.id,
+    required this.originDeviceId,
+    required this.createdAt,
+    required this.modifiedAt,
+    required this.revision,
+    this.deletedAt,
+    required this.jobId,
+    this.partId,
+    this.customName,
+    this.customNotes,
+    this.brandVersionId,
+    required this.neededQty,
+    required this.shopPullQty,
+    this.uom,
+    this.notes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['origin_device_id'] = Variable<String>(originDeviceId);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['modified_at'] = Variable<DateTime>(modifiedAt);
+    map['revision'] = Variable<int>(revision);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['job_id'] = Variable<String>(jobId);
+    if (!nullToAbsent || partId != null) {
+      map['part_id'] = Variable<String>(partId);
+    }
+    if (!nullToAbsent || customName != null) {
+      map['custom_name'] = Variable<String>(customName);
+    }
+    if (!nullToAbsent || customNotes != null) {
+      map['custom_notes'] = Variable<String>(customNotes);
+    }
+    if (!nullToAbsent || brandVersionId != null) {
+      map['brand_version_id'] = Variable<String>(brandVersionId);
+    }
+    map['needed_qty'] = Variable<double>(neededQty);
+    map['shop_pull_qty'] = Variable<double>(shopPullQty);
+    if (!nullToAbsent || uom != null) {
+      map['uom'] = Variable<String>(uom);
+    }
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
+    return map;
+  }
+
+  JobLinesCompanion toCompanion(bool nullToAbsent) {
+    return JobLinesCompanion(
+      id: Value(id),
+      originDeviceId: Value(originDeviceId),
+      createdAt: Value(createdAt),
+      modifiedAt: Value(modifiedAt),
+      revision: Value(revision),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      jobId: Value(jobId),
+      partId: partId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(partId),
+      customName: customName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customName),
+      customNotes: customNotes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customNotes),
+      brandVersionId: brandVersionId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(brandVersionId),
+      neededQty: Value(neededQty),
+      shopPullQty: Value(shopPullQty),
+      uom: uom == null && nullToAbsent ? const Value.absent() : Value(uom),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
+    );
+  }
+
+  factory JobLine.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLine(
+      id: serializer.fromJson<String>(json['id']),
+      originDeviceId: serializer.fromJson<String>(json['originDeviceId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      modifiedAt: serializer.fromJson<DateTime>(json['modifiedAt']),
+      revision: serializer.fromJson<int>(json['revision']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      jobId: serializer.fromJson<String>(json['jobId']),
+      partId: serializer.fromJson<String?>(json['partId']),
+      customName: serializer.fromJson<String?>(json['customName']),
+      customNotes: serializer.fromJson<String?>(json['customNotes']),
+      brandVersionId: serializer.fromJson<String?>(json['brandVersionId']),
+      neededQty: serializer.fromJson<double>(json['neededQty']),
+      shopPullQty: serializer.fromJson<double>(json['shopPullQty']),
+      uom: serializer.fromJson<String?>(json['uom']),
+      notes: serializer.fromJson<String?>(json['notes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'originDeviceId': serializer.toJson<String>(originDeviceId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'modifiedAt': serializer.toJson<DateTime>(modifiedAt),
+      'revision': serializer.toJson<int>(revision),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'jobId': serializer.toJson<String>(jobId),
+      'partId': serializer.toJson<String?>(partId),
+      'customName': serializer.toJson<String?>(customName),
+      'customNotes': serializer.toJson<String?>(customNotes),
+      'brandVersionId': serializer.toJson<String?>(brandVersionId),
+      'neededQty': serializer.toJson<double>(neededQty),
+      'shopPullQty': serializer.toJson<double>(shopPullQty),
+      'uom': serializer.toJson<String?>(uom),
+      'notes': serializer.toJson<String?>(notes),
+    };
+  }
+
+  JobLine copyWith({
+    String? id,
+    String? originDeviceId,
+    DateTime? createdAt,
+    DateTime? modifiedAt,
+    int? revision,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    String? jobId,
+    Value<String?> partId = const Value.absent(),
+    Value<String?> customName = const Value.absent(),
+    Value<String?> customNotes = const Value.absent(),
+    Value<String?> brandVersionId = const Value.absent(),
+    double? neededQty,
+    double? shopPullQty,
+    Value<String?> uom = const Value.absent(),
+    Value<String?> notes = const Value.absent(),
+  }) => JobLine(
+    id: id ?? this.id,
+    originDeviceId: originDeviceId ?? this.originDeviceId,
+    createdAt: createdAt ?? this.createdAt,
+    modifiedAt: modifiedAt ?? this.modifiedAt,
+    revision: revision ?? this.revision,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    jobId: jobId ?? this.jobId,
+    partId: partId.present ? partId.value : this.partId,
+    customName: customName.present ? customName.value : this.customName,
+    customNotes: customNotes.present ? customNotes.value : this.customNotes,
+    brandVersionId: brandVersionId.present
+        ? brandVersionId.value
+        : this.brandVersionId,
+    neededQty: neededQty ?? this.neededQty,
+    shopPullQty: shopPullQty ?? this.shopPullQty,
+    uom: uom.present ? uom.value : this.uom,
+    notes: notes.present ? notes.value : this.notes,
+  );
+  JobLine copyWithCompanion(JobLinesCompanion data) {
+    return JobLine(
+      id: data.id.present ? data.id.value : this.id,
+      originDeviceId: data.originDeviceId.present
+          ? data.originDeviceId.value
+          : this.originDeviceId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      modifiedAt: data.modifiedAt.present
+          ? data.modifiedAt.value
+          : this.modifiedAt,
+      revision: data.revision.present ? data.revision.value : this.revision,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      jobId: data.jobId.present ? data.jobId.value : this.jobId,
+      partId: data.partId.present ? data.partId.value : this.partId,
+      customName: data.customName.present
+          ? data.customName.value
+          : this.customName,
+      customNotes: data.customNotes.present
+          ? data.customNotes.value
+          : this.customNotes,
+      brandVersionId: data.brandVersionId.present
+          ? data.brandVersionId.value
+          : this.brandVersionId,
+      neededQty: data.neededQty.present ? data.neededQty.value : this.neededQty,
+      shopPullQty: data.shopPullQty.present
+          ? data.shopPullQty.value
+          : this.shopPullQty,
+      uom: data.uom.present ? data.uom.value : this.uom,
+      notes: data.notes.present ? data.notes.value : this.notes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLine(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('jobId: $jobId, ')
+          ..write('partId: $partId, ')
+          ..write('customName: $customName, ')
+          ..write('customNotes: $customNotes, ')
+          ..write('brandVersionId: $brandVersionId, ')
+          ..write('neededQty: $neededQty, ')
+          ..write('shopPullQty: $shopPullQty, ')
+          ..write('uom: $uom, ')
+          ..write('notes: $notes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    jobId,
+    partId,
+    customName,
+    customNotes,
+    brandVersionId,
+    neededQty,
+    shopPullQty,
+    uom,
+    notes,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLine &&
+          other.id == this.id &&
+          other.originDeviceId == this.originDeviceId &&
+          other.createdAt == this.createdAt &&
+          other.modifiedAt == this.modifiedAt &&
+          other.revision == this.revision &&
+          other.deletedAt == this.deletedAt &&
+          other.jobId == this.jobId &&
+          other.partId == this.partId &&
+          other.customName == this.customName &&
+          other.customNotes == this.customNotes &&
+          other.brandVersionId == this.brandVersionId &&
+          other.neededQty == this.neededQty &&
+          other.shopPullQty == this.shopPullQty &&
+          other.uom == this.uom &&
+          other.notes == this.notes);
+}
+
+class JobLinesCompanion extends UpdateCompanion<JobLine> {
+  final Value<String> id;
+  final Value<String> originDeviceId;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> modifiedAt;
+  final Value<int> revision;
+  final Value<DateTime?> deletedAt;
+  final Value<String> jobId;
+  final Value<String?> partId;
+  final Value<String?> customName;
+  final Value<String?> customNotes;
+  final Value<String?> brandVersionId;
+  final Value<double> neededQty;
+  final Value<double> shopPullQty;
+  final Value<String?> uom;
+  final Value<String?> notes;
+  final Value<int> rowid;
+  const JobLinesCompanion({
+    this.id = const Value.absent(),
+    this.originDeviceId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.modifiedAt = const Value.absent(),
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.jobId = const Value.absent(),
+    this.partId = const Value.absent(),
+    this.customName = const Value.absent(),
+    this.customNotes = const Value.absent(),
+    this.brandVersionId = const Value.absent(),
+    this.neededQty = const Value.absent(),
+    this.shopPullQty = const Value.absent(),
+    this.uom = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLinesCompanion.insert({
+    required String id,
+    required String originDeviceId,
+    required DateTime createdAt,
+    required DateTime modifiedAt,
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    required String jobId,
+    this.partId = const Value.absent(),
+    this.customName = const Value.absent(),
+    this.customNotes = const Value.absent(),
+    this.brandVersionId = const Value.absent(),
+    required double neededQty,
+    this.shopPullQty = const Value.absent(),
+    this.uom = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       originDeviceId = Value(originDeviceId),
+       createdAt = Value(createdAt),
+       modifiedAt = Value(modifiedAt),
+       jobId = Value(jobId),
+       neededQty = Value(neededQty);
+  static Insertable<JobLine> custom({
+    Expression<String>? id,
+    Expression<String>? originDeviceId,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? modifiedAt,
+    Expression<int>? revision,
+    Expression<DateTime>? deletedAt,
+    Expression<String>? jobId,
+    Expression<String>? partId,
+    Expression<String>? customName,
+    Expression<String>? customNotes,
+    Expression<String>? brandVersionId,
+    Expression<double>? neededQty,
+    Expression<double>? shopPullQty,
+    Expression<String>? uom,
+    Expression<String>? notes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (originDeviceId != null) 'origin_device_id': originDeviceId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (modifiedAt != null) 'modified_at': modifiedAt,
+      if (revision != null) 'revision': revision,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (jobId != null) 'job_id': jobId,
+      if (partId != null) 'part_id': partId,
+      if (customName != null) 'custom_name': customName,
+      if (customNotes != null) 'custom_notes': customNotes,
+      if (brandVersionId != null) 'brand_version_id': brandVersionId,
+      if (neededQty != null) 'needed_qty': neededQty,
+      if (shopPullQty != null) 'shop_pull_qty': shopPullQty,
+      if (uom != null) 'uom': uom,
+      if (notes != null) 'notes': notes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLinesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? originDeviceId,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? modifiedAt,
+    Value<int>? revision,
+    Value<DateTime?>? deletedAt,
+    Value<String>? jobId,
+    Value<String?>? partId,
+    Value<String?>? customName,
+    Value<String?>? customNotes,
+    Value<String?>? brandVersionId,
+    Value<double>? neededQty,
+    Value<double>? shopPullQty,
+    Value<String?>? uom,
+    Value<String?>? notes,
+    Value<int>? rowid,
+  }) {
+    return JobLinesCompanion(
+      id: id ?? this.id,
+      originDeviceId: originDeviceId ?? this.originDeviceId,
+      createdAt: createdAt ?? this.createdAt,
+      modifiedAt: modifiedAt ?? this.modifiedAt,
+      revision: revision ?? this.revision,
+      deletedAt: deletedAt ?? this.deletedAt,
+      jobId: jobId ?? this.jobId,
+      partId: partId ?? this.partId,
+      customName: customName ?? this.customName,
+      customNotes: customNotes ?? this.customNotes,
+      brandVersionId: brandVersionId ?? this.brandVersionId,
+      neededQty: neededQty ?? this.neededQty,
+      shopPullQty: shopPullQty ?? this.shopPullQty,
+      uom: uom ?? this.uom,
+      notes: notes ?? this.notes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (originDeviceId.present) {
+      map['origin_device_id'] = Variable<String>(originDeviceId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (modifiedAt.present) {
+      map['modified_at'] = Variable<DateTime>(modifiedAt.value);
+    }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (jobId.present) {
+      map['job_id'] = Variable<String>(jobId.value);
+    }
+    if (partId.present) {
+      map['part_id'] = Variable<String>(partId.value);
+    }
+    if (customName.present) {
+      map['custom_name'] = Variable<String>(customName.value);
+    }
+    if (customNotes.present) {
+      map['custom_notes'] = Variable<String>(customNotes.value);
+    }
+    if (brandVersionId.present) {
+      map['brand_version_id'] = Variable<String>(brandVersionId.value);
+    }
+    if (neededQty.present) {
+      map['needed_qty'] = Variable<double>(neededQty.value);
+    }
+    if (shopPullQty.present) {
+      map['shop_pull_qty'] = Variable<double>(shopPullQty.value);
+    }
+    if (uom.present) {
+      map['uom'] = Variable<String>(uom.value);
+    }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLinesCompanion(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('jobId: $jobId, ')
+          ..write('partId: $partId, ')
+          ..write('customName: $customName, ')
+          ..write('customNotes: $customNotes, ')
+          ..write('brandVersionId: $brandVersionId, ')
+          ..write('neededQty: $neededQty, ')
+          ..write('shopPullQty: $shopPullQty, ')
+          ..write('uom: $uom, ')
+          ..write('notes: $notes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $OrderSplitsTable extends OrderSplits
+    with TableInfo<$OrderSplitsTable, OrderSplit> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OrderSplitsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originDeviceIdMeta = const VerificationMeta(
+    'originDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> originDeviceId = GeneratedColumn<String>(
+    'origin_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _modifiedAtMeta = const VerificationMeta(
+    'modifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> modifiedAt = GeneratedColumn<DateTime>(
+    'modified_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _jobLineIdMeta = const VerificationMeta(
+    'jobLineId',
+  );
+  @override
+  late final GeneratedColumn<String> jobLineId = GeneratedColumn<String>(
+    'job_line_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _supplierIdMeta = const VerificationMeta(
+    'supplierId',
+  );
+  @override
+  late final GeneratedColumn<String> supplierId = GeneratedColumn<String>(
+    'supplier_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _quantityMeta = const VerificationMeta(
+    'quantity',
+  );
+  @override
+  late final GeneratedColumn<double> quantity = GeneratedColumn<double>(
+    'quantity',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    jobLineId,
+    supplierId,
+    quantity,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'order_splits';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OrderSplit> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('origin_device_id')) {
+      context.handle(
+        _originDeviceIdMeta,
+        originDeviceId.isAcceptableOrUnknown(
+          data['origin_device_id']!,
+          _originDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originDeviceIdMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('modified_at')) {
+      context.handle(
+        _modifiedAtMeta,
+        modifiedAt.isAcceptableOrUnknown(data['modified_at']!, _modifiedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_modifiedAtMeta);
+    }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('job_line_id')) {
+      context.handle(
+        _jobLineIdMeta,
+        jobLineId.isAcceptableOrUnknown(data['job_line_id']!, _jobLineIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jobLineIdMeta);
+    }
+    if (data.containsKey('supplier_id')) {
+      context.handle(
+        _supplierIdMeta,
+        supplierId.isAcceptableOrUnknown(data['supplier_id']!, _supplierIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_supplierIdMeta);
+    }
+    if (data.containsKey('quantity')) {
+      context.handle(
+        _quantityMeta,
+        quantity.isAcceptableOrUnknown(data['quantity']!, _quantityMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_quantityMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  OrderSplit map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OrderSplit(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      originDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_device_id'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      modifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}modified_at'],
+      )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      jobLineId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_line_id'],
+      )!,
+      supplierId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}supplier_id'],
+      )!,
+      quantity: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}quantity'],
+      )!,
+    );
+  }
+
+  @override
+  $OrderSplitsTable createAlias(String alias) {
+    return $OrderSplitsTable(attachedDatabase, alias);
+  }
+}
+
+class OrderSplit extends DataClass implements Insertable<OrderSplit> {
+  final String id;
+  final String originDeviceId;
+  final DateTime createdAt;
+  final DateTime modifiedAt;
+  final int revision;
+  final DateTime? deletedAt;
+  final String jobLineId;
+  final String supplierId;
+  final double quantity;
+  const OrderSplit({
+    required this.id,
+    required this.originDeviceId,
+    required this.createdAt,
+    required this.modifiedAt,
+    required this.revision,
+    this.deletedAt,
+    required this.jobLineId,
+    required this.supplierId,
+    required this.quantity,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['origin_device_id'] = Variable<String>(originDeviceId);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['modified_at'] = Variable<DateTime>(modifiedAt);
+    map['revision'] = Variable<int>(revision);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['job_line_id'] = Variable<String>(jobLineId);
+    map['supplier_id'] = Variable<String>(supplierId);
+    map['quantity'] = Variable<double>(quantity);
+    return map;
+  }
+
+  OrderSplitsCompanion toCompanion(bool nullToAbsent) {
+    return OrderSplitsCompanion(
+      id: Value(id),
+      originDeviceId: Value(originDeviceId),
+      createdAt: Value(createdAt),
+      modifiedAt: Value(modifiedAt),
+      revision: Value(revision),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      jobLineId: Value(jobLineId),
+      supplierId: Value(supplierId),
+      quantity: Value(quantity),
+    );
+  }
+
+  factory OrderSplit.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OrderSplit(
+      id: serializer.fromJson<String>(json['id']),
+      originDeviceId: serializer.fromJson<String>(json['originDeviceId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      modifiedAt: serializer.fromJson<DateTime>(json['modifiedAt']),
+      revision: serializer.fromJson<int>(json['revision']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      jobLineId: serializer.fromJson<String>(json['jobLineId']),
+      supplierId: serializer.fromJson<String>(json['supplierId']),
+      quantity: serializer.fromJson<double>(json['quantity']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'originDeviceId': serializer.toJson<String>(originDeviceId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'modifiedAt': serializer.toJson<DateTime>(modifiedAt),
+      'revision': serializer.toJson<int>(revision),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'jobLineId': serializer.toJson<String>(jobLineId),
+      'supplierId': serializer.toJson<String>(supplierId),
+      'quantity': serializer.toJson<double>(quantity),
+    };
+  }
+
+  OrderSplit copyWith({
+    String? id,
+    String? originDeviceId,
+    DateTime? createdAt,
+    DateTime? modifiedAt,
+    int? revision,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    String? jobLineId,
+    String? supplierId,
+    double? quantity,
+  }) => OrderSplit(
+    id: id ?? this.id,
+    originDeviceId: originDeviceId ?? this.originDeviceId,
+    createdAt: createdAt ?? this.createdAt,
+    modifiedAt: modifiedAt ?? this.modifiedAt,
+    revision: revision ?? this.revision,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    jobLineId: jobLineId ?? this.jobLineId,
+    supplierId: supplierId ?? this.supplierId,
+    quantity: quantity ?? this.quantity,
+  );
+  OrderSplit copyWithCompanion(OrderSplitsCompanion data) {
+    return OrderSplit(
+      id: data.id.present ? data.id.value : this.id,
+      originDeviceId: data.originDeviceId.present
+          ? data.originDeviceId.value
+          : this.originDeviceId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      modifiedAt: data.modifiedAt.present
+          ? data.modifiedAt.value
+          : this.modifiedAt,
+      revision: data.revision.present ? data.revision.value : this.revision,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      jobLineId: data.jobLineId.present ? data.jobLineId.value : this.jobLineId,
+      supplierId: data.supplierId.present
+          ? data.supplierId.value
+          : this.supplierId,
+      quantity: data.quantity.present ? data.quantity.value : this.quantity,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OrderSplit(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('jobLineId: $jobLineId, ')
+          ..write('supplierId: $supplierId, ')
+          ..write('quantity: $quantity')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    jobLineId,
+    supplierId,
+    quantity,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OrderSplit &&
+          other.id == this.id &&
+          other.originDeviceId == this.originDeviceId &&
+          other.createdAt == this.createdAt &&
+          other.modifiedAt == this.modifiedAt &&
+          other.revision == this.revision &&
+          other.deletedAt == this.deletedAt &&
+          other.jobLineId == this.jobLineId &&
+          other.supplierId == this.supplierId &&
+          other.quantity == this.quantity);
+}
+
+class OrderSplitsCompanion extends UpdateCompanion<OrderSplit> {
+  final Value<String> id;
+  final Value<String> originDeviceId;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> modifiedAt;
+  final Value<int> revision;
+  final Value<DateTime?> deletedAt;
+  final Value<String> jobLineId;
+  final Value<String> supplierId;
+  final Value<double> quantity;
+  final Value<int> rowid;
+  const OrderSplitsCompanion({
+    this.id = const Value.absent(),
+    this.originDeviceId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.modifiedAt = const Value.absent(),
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.jobLineId = const Value.absent(),
+    this.supplierId = const Value.absent(),
+    this.quantity = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  OrderSplitsCompanion.insert({
+    required String id,
+    required String originDeviceId,
+    required DateTime createdAt,
+    required DateTime modifiedAt,
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    required String jobLineId,
+    required String supplierId,
+    required double quantity,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       originDeviceId = Value(originDeviceId),
+       createdAt = Value(createdAt),
+       modifiedAt = Value(modifiedAt),
+       jobLineId = Value(jobLineId),
+       supplierId = Value(supplierId),
+       quantity = Value(quantity);
+  static Insertable<OrderSplit> custom({
+    Expression<String>? id,
+    Expression<String>? originDeviceId,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? modifiedAt,
+    Expression<int>? revision,
+    Expression<DateTime>? deletedAt,
+    Expression<String>? jobLineId,
+    Expression<String>? supplierId,
+    Expression<double>? quantity,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (originDeviceId != null) 'origin_device_id': originDeviceId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (modifiedAt != null) 'modified_at': modifiedAt,
+      if (revision != null) 'revision': revision,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (jobLineId != null) 'job_line_id': jobLineId,
+      if (supplierId != null) 'supplier_id': supplierId,
+      if (quantity != null) 'quantity': quantity,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  OrderSplitsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? originDeviceId,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? modifiedAt,
+    Value<int>? revision,
+    Value<DateTime?>? deletedAt,
+    Value<String>? jobLineId,
+    Value<String>? supplierId,
+    Value<double>? quantity,
+    Value<int>? rowid,
+  }) {
+    return OrderSplitsCompanion(
+      id: id ?? this.id,
+      originDeviceId: originDeviceId ?? this.originDeviceId,
+      createdAt: createdAt ?? this.createdAt,
+      modifiedAt: modifiedAt ?? this.modifiedAt,
+      revision: revision ?? this.revision,
+      deletedAt: deletedAt ?? this.deletedAt,
+      jobLineId: jobLineId ?? this.jobLineId,
+      supplierId: supplierId ?? this.supplierId,
+      quantity: quantity ?? this.quantity,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (originDeviceId.present) {
+      map['origin_device_id'] = Variable<String>(originDeviceId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (modifiedAt.present) {
+      map['modified_at'] = Variable<DateTime>(modifiedAt.value);
+    }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (jobLineId.present) {
+      map['job_line_id'] = Variable<String>(jobLineId.value);
+    }
+    if (supplierId.present) {
+      map['supplier_id'] = Variable<String>(supplierId.value);
+    }
+    if (quantity.present) {
+      map['quantity'] = Variable<double>(quantity.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OrderSplitsCompanion(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('jobLineId: $jobLineId, ')
+          ..write('supplierId: $supplierId, ')
+          ..write('quantity: $quantity, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -6290,9 +8429,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SupplierListingsTable supplierListings = $SupplierListingsTable(
     this,
   );
+  late final $JobsTable jobs = $JobsTable(this);
+  late final $JobLinesTable jobLines = $JobLinesTable(this);
+  late final $OrderSplitsTable orderSplits = $OrderSplitsTable(this);
   late final SettingsDao settingsDao = SettingsDao(this as AppDatabase);
   late final TaxonomyDao taxonomyDao = TaxonomyDao(this as AppDatabase);
   late final PartsDao partsDao = PartsDao(this as AppDatabase);
+  late final JobsDao jobsDao = JobsDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -6310,6 +8453,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     partDevices,
     brandVersions,
     supplierListings,
+    jobs,
+    jobLines,
+    orderSplits,
   ];
 }
 
@@ -9455,6 +11601,1013 @@ typedef $$SupplierListingsTableProcessedTableManager =
       SupplierListing,
       PrefetchHooks Function()
     >;
+typedef $$JobsTableCreateCompanionBuilder =
+    JobsCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<String?> customer,
+      Value<String?> location,
+      Value<String?> jobNumber,
+      Value<String> status,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+typedef $$JobsTableUpdateCompanionBuilder =
+    JobsCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<String?> customer,
+      Value<String?> location,
+      Value<String?> jobNumber,
+      Value<String> status,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+
+class $$JobsTableFilterComposer extends Composer<_$AppDatabase, $JobsTable> {
+  $$JobsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customer => $composableBuilder(
+    column: $table.customer,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get location => $composableBuilder(
+    column: $table.location,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jobNumber => $composableBuilder(
+    column: $table.jobNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobsTableOrderingComposer extends Composer<_$AppDatabase, $JobsTable> {
+  $$JobsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get customer => $composableBuilder(
+    column: $table.customer,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get location => $composableBuilder(
+    column: $table.location,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jobNumber => $composableBuilder(
+    column: $table.jobNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobsTable> {
+  $$JobsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get customer =>
+      $composableBuilder(column: $table.customer, builder: (column) => column);
+
+  GeneratedColumn<String> get location =>
+      $composableBuilder(column: $table.location, builder: (column) => column);
+
+  GeneratedColumn<String> get jobNumber =>
+      $composableBuilder(column: $table.jobNumber, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
+}
+
+class $$JobsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobsTable,
+          Job,
+          $$JobsTableFilterComposer,
+          $$JobsTableOrderingComposer,
+          $$JobsTableAnnotationComposer,
+          $$JobsTableCreateCompanionBuilder,
+          $$JobsTableUpdateCompanionBuilder,
+          (Job, BaseReferences<_$AppDatabase, $JobsTable, Job>),
+          Job,
+          PrefetchHooks Function()
+        > {
+  $$JobsTableTableManager(_$AppDatabase db, $JobsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> originDeviceId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> modifiedAt = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String?> customer = const Value.absent(),
+                Value<String?> location = const Value.absent(),
+                Value<String?> jobNumber = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobsCompanion(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                name: name,
+                customer: customer,
+                location: location,
+                jobNumber: jobNumber,
+                status: status,
+                notes: notes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String originDeviceId,
+                required DateTime createdAt,
+                required DateTime modifiedAt,
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                required String name,
+                Value<String?> customer = const Value.absent(),
+                Value<String?> location = const Value.absent(),
+                Value<String?> jobNumber = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobsCompanion.insert(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                name: name,
+                customer: customer,
+                location: location,
+                jobNumber: jobNumber,
+                status: status,
+                notes: notes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobsTable,
+      Job,
+      $$JobsTableFilterComposer,
+      $$JobsTableOrderingComposer,
+      $$JobsTableAnnotationComposer,
+      $$JobsTableCreateCompanionBuilder,
+      $$JobsTableUpdateCompanionBuilder,
+      (Job, BaseReferences<_$AppDatabase, $JobsTable, Job>),
+      Job,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLinesTableCreateCompanionBuilder =
+    JobLinesCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String jobId,
+      Value<String?> partId,
+      Value<String?> customName,
+      Value<String?> customNotes,
+      Value<String?> brandVersionId,
+      required double neededQty,
+      Value<double> shopPullQty,
+      Value<String?> uom,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+typedef $$JobLinesTableUpdateCompanionBuilder =
+    JobLinesCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> jobId,
+      Value<String?> partId,
+      Value<String?> customName,
+      Value<String?> customNotes,
+      Value<String?> brandVersionId,
+      Value<double> neededQty,
+      Value<double> shopPullQty,
+      Value<String?> uom,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+
+class $$JobLinesTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLinesTable> {
+  $$JobLinesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get partId => $composableBuilder(
+    column: $table.partId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customName => $composableBuilder(
+    column: $table.customName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customNotes => $composableBuilder(
+    column: $table.customNotes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get brandVersionId => $composableBuilder(
+    column: $table.brandVersionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get neededQty => $composableBuilder(
+    column: $table.neededQty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get shopPullQty => $composableBuilder(
+    column: $table.shopPullQty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get uom => $composableBuilder(
+    column: $table.uom,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLinesTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLinesTable> {
+  $$JobLinesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get partId => $composableBuilder(
+    column: $table.partId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get customName => $composableBuilder(
+    column: $table.customName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get customNotes => $composableBuilder(
+    column: $table.customNotes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get brandVersionId => $composableBuilder(
+    column: $table.brandVersionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get neededQty => $composableBuilder(
+    column: $table.neededQty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get shopPullQty => $composableBuilder(
+    column: $table.shopPullQty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get uom => $composableBuilder(
+    column: $table.uom,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLinesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLinesTable> {
+  $$JobLinesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get jobId =>
+      $composableBuilder(column: $table.jobId, builder: (column) => column);
+
+  GeneratedColumn<String> get partId =>
+      $composableBuilder(column: $table.partId, builder: (column) => column);
+
+  GeneratedColumn<String> get customName => $composableBuilder(
+    column: $table.customName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get customNotes => $composableBuilder(
+    column: $table.customNotes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get brandVersionId => $composableBuilder(
+    column: $table.brandVersionId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get neededQty =>
+      $composableBuilder(column: $table.neededQty, builder: (column) => column);
+
+  GeneratedColumn<double> get shopPullQty => $composableBuilder(
+    column: $table.shopPullQty,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get uom =>
+      $composableBuilder(column: $table.uom, builder: (column) => column);
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
+}
+
+class $$JobLinesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLinesTable,
+          JobLine,
+          $$JobLinesTableFilterComposer,
+          $$JobLinesTableOrderingComposer,
+          $$JobLinesTableAnnotationComposer,
+          $$JobLinesTableCreateCompanionBuilder,
+          $$JobLinesTableUpdateCompanionBuilder,
+          (JobLine, BaseReferences<_$AppDatabase, $JobLinesTable, JobLine>),
+          JobLine,
+          PrefetchHooks Function()
+        > {
+  $$JobLinesTableTableManager(_$AppDatabase db, $JobLinesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLinesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLinesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLinesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> originDeviceId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> modifiedAt = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<String> jobId = const Value.absent(),
+                Value<String?> partId = const Value.absent(),
+                Value<String?> customName = const Value.absent(),
+                Value<String?> customNotes = const Value.absent(),
+                Value<String?> brandVersionId = const Value.absent(),
+                Value<double> neededQty = const Value.absent(),
+                Value<double> shopPullQty = const Value.absent(),
+                Value<String?> uom = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLinesCompanion(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                jobId: jobId,
+                partId: partId,
+                customName: customName,
+                customNotes: customNotes,
+                brandVersionId: brandVersionId,
+                neededQty: neededQty,
+                shopPullQty: shopPullQty,
+                uom: uom,
+                notes: notes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String originDeviceId,
+                required DateTime createdAt,
+                required DateTime modifiedAt,
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                required String jobId,
+                Value<String?> partId = const Value.absent(),
+                Value<String?> customName = const Value.absent(),
+                Value<String?> customNotes = const Value.absent(),
+                Value<String?> brandVersionId = const Value.absent(),
+                required double neededQty,
+                Value<double> shopPullQty = const Value.absent(),
+                Value<String?> uom = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLinesCompanion.insert(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                jobId: jobId,
+                partId: partId,
+                customName: customName,
+                customNotes: customNotes,
+                brandVersionId: brandVersionId,
+                neededQty: neededQty,
+                shopPullQty: shopPullQty,
+                uom: uom,
+                notes: notes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLinesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLinesTable,
+      JobLine,
+      $$JobLinesTableFilterComposer,
+      $$JobLinesTableOrderingComposer,
+      $$JobLinesTableAnnotationComposer,
+      $$JobLinesTableCreateCompanionBuilder,
+      $$JobLinesTableUpdateCompanionBuilder,
+      (JobLine, BaseReferences<_$AppDatabase, $JobLinesTable, JobLine>),
+      JobLine,
+      PrefetchHooks Function()
+    >;
+typedef $$OrderSplitsTableCreateCompanionBuilder =
+    OrderSplitsCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String jobLineId,
+      required String supplierId,
+      required double quantity,
+      Value<int> rowid,
+    });
+typedef $$OrderSplitsTableUpdateCompanionBuilder =
+    OrderSplitsCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> jobLineId,
+      Value<String> supplierId,
+      Value<double> quantity,
+      Value<int> rowid,
+    });
+
+class $$OrderSplitsTableFilterComposer
+    extends Composer<_$AppDatabase, $OrderSplitsTable> {
+  $$OrderSplitsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jobLineId => $composableBuilder(
+    column: $table.jobLineId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get supplierId => $composableBuilder(
+    column: $table.supplierId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OrderSplitsTableOrderingComposer
+    extends Composer<_$AppDatabase, $OrderSplitsTable> {
+  $$OrderSplitsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jobLineId => $composableBuilder(
+    column: $table.jobLineId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get supplierId => $composableBuilder(
+    column: $table.supplierId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OrderSplitsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $OrderSplitsTable> {
+  $$OrderSplitsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get jobLineId =>
+      $composableBuilder(column: $table.jobLineId, builder: (column) => column);
+
+  GeneratedColumn<String> get supplierId => $composableBuilder(
+    column: $table.supplierId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get quantity =>
+      $composableBuilder(column: $table.quantity, builder: (column) => column);
+}
+
+class $$OrderSplitsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $OrderSplitsTable,
+          OrderSplit,
+          $$OrderSplitsTableFilterComposer,
+          $$OrderSplitsTableOrderingComposer,
+          $$OrderSplitsTableAnnotationComposer,
+          $$OrderSplitsTableCreateCompanionBuilder,
+          $$OrderSplitsTableUpdateCompanionBuilder,
+          (
+            OrderSplit,
+            BaseReferences<_$AppDatabase, $OrderSplitsTable, OrderSplit>,
+          ),
+          OrderSplit,
+          PrefetchHooks Function()
+        > {
+  $$OrderSplitsTableTableManager(_$AppDatabase db, $OrderSplitsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OrderSplitsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OrderSplitsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OrderSplitsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> originDeviceId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> modifiedAt = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<String> jobLineId = const Value.absent(),
+                Value<String> supplierId = const Value.absent(),
+                Value<double> quantity = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OrderSplitsCompanion(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                jobLineId: jobLineId,
+                supplierId: supplierId,
+                quantity: quantity,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String originDeviceId,
+                required DateTime createdAt,
+                required DateTime modifiedAt,
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                required String jobLineId,
+                required String supplierId,
+                required double quantity,
+                Value<int> rowid = const Value.absent(),
+              }) => OrderSplitsCompanion.insert(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                jobLineId: jobLineId,
+                supplierId: supplierId,
+                quantity: quantity,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OrderSplitsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $OrderSplitsTable,
+      OrderSplit,
+      $$OrderSplitsTableFilterComposer,
+      $$OrderSplitsTableOrderingComposer,
+      $$OrderSplitsTableAnnotationComposer,
+      $$OrderSplitsTableCreateCompanionBuilder,
+      $$OrderSplitsTableUpdateCompanionBuilder,
+      (
+        OrderSplit,
+        BaseReferences<_$AppDatabase, $OrderSplitsTable, OrderSplit>,
+      ),
+      OrderSplit,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -9483,4 +12636,9 @@ class $AppDatabaseManager {
       $$BrandVersionsTableTableManager(_db, _db.brandVersions);
   $$SupplierListingsTableTableManager get supplierListings =>
       $$SupplierListingsTableTableManager(_db, _db.supplierListings);
+  $$JobsTableTableManager get jobs => $$JobsTableTableManager(_db, _db.jobs);
+  $$JobLinesTableTableManager get jobLines =>
+      $$JobLinesTableTableManager(_db, _db.jobLines);
+  $$OrderSplitsTableTableManager get orderSplits =>
+      $$OrderSplitsTableTableManager(_db, _db.orderSplits);
 }
