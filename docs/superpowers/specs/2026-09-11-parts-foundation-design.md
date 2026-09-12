@@ -95,6 +95,8 @@ App services (Jobs · Catalog · PIN · Media · Backup · Sync orchestrator)
 | `revision_number` | Monotonic per-record revision |
 | `deleted_at` | Tombstone when set; row not hard-deleted while peers may still sync |
 
+Sync metadata lives **on each syncable row** (no separate change-log table in Phase 1). `AppSettings` (PIN hash, device prefs) is local-only for now; making settings sync-shaped is Phase 5 prep.
+
 ### Taxonomy (editable, not hard-coded)
 
 - Category → Style → Type
@@ -239,11 +241,11 @@ UI polish (outdoor/glove targets, photo/voice capture, Smart Cards, etc.) follow
 
 Aligned with `roadmap.md`:
 
-1. **Local core** — schema, jobs, catalog, PIN, job lines with pulls + order splits  
-2. **Search, filters, media** — photos; custom → catalog promote  
+1. **Local core** — schema with per-row sync metadata, jobs, catalog, PIN, job lines with pulls + order splits  
+2. **Search, filters, media** — photos; custom → catalog promote; part taxonomy/device assignment UI  
 3. **Backup** — encrypted export/import  
 4. **Nearby link** — pair + one-way test transfer (dev stepping stone only)
-5. **Two-way sync** — single Sync Now exchanges changes both ways (not two one-way syncs); deltas, tombstones, conflicts, photo policy
+5. **Two-way sync** — single Sync Now exchanges changes both ways (not two one-way syncs); deltas, tombstones, conflicts, photo policy; optional AppSettings sync shape  
 6. **Hardening** — performance, recovery, multi-device tests
 7. **Later** — auto/background nearby sync (see roadmap Phase 7)
 

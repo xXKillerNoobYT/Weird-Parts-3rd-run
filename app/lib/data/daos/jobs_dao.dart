@@ -38,9 +38,10 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
   Future<void> archiveJob(String id) async {
     final now = DateTime.now().toUtc();
     await (update(jobs)..where((t) => t.id.equals(id))).write(
-      JobsCompanion(
-        status: const Value('archived'),
-        modifiedAt: Value(now),
+      JobsCompanion.custom(
+        status: const Constant('archived'),
+        modifiedAt: Variable(now),
+        revision: jobs.revision + const Constant(1),
       ),
     );
   }
@@ -92,7 +93,7 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     return id;
   }
 
-  /// Rewrites identity/qty fields, including clearing nullables with [Value(null)].
+  /// Rewrites identity/qty fields, including clearing nullables with [Variable(null)].
   Future<void> updateJobLine({
     required String id,
     required String? partId,
@@ -106,16 +107,17 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
   }) async {
     final now = DateTime.now().toUtc();
     await (update(jobLines)..where((t) => t.id.equals(id))).write(
-      JobLinesCompanion(
-        partId: Value(partId),
-        brandVersionId: Value(brandVersionId),
-        customName: Value(customName),
-        customNotes: Value(customNotes),
-        neededQty: Value(neededQty),
-        shopPullQty: Value(shopPullQty),
-        uom: Value(uom),
-        notes: Value(notes),
-        modifiedAt: Value(now),
+      JobLinesCompanion.custom(
+        partId: Variable(partId),
+        brandVersionId: Variable(brandVersionId),
+        customName: Variable(customName),
+        customNotes: Variable(customNotes),
+        neededQty: Variable(neededQty),
+        shopPullQty: Variable(shopPullQty),
+        uom: Variable(uom),
+        notes: Variable(notes),
+        modifiedAt: Variable(now),
+        revision: jobLines.revision + const Constant(1),
       ),
     );
   }
@@ -123,11 +125,39 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
   Future<void> setShopPull(String lineId, double qty) async {
     final now = DateTime.now().toUtc();
     await (update(jobLines)..where((t) => t.id.equals(lineId))).write(
-      JobLinesCompanion(
-        shopPullQty: Value(qty),
-        modifiedAt: Value(now),
+      JobLinesCompanion.custom(
+        shopPullQty: Variable(qty),
+        modifiedAt: Variable(now),
+        revision: jobLines.revision + const Constant(1),
       ),
     );
+  }
+
+  /// Soft-deletes a job line (and its active order splits) with revision bumps.
+  Future<void> softDeleteJobLine(String id) async {
+    await transaction(() async {
+      final now = DateTime.now().toUtc();
+      await (update(orderSplits)
+            ..where(
+              (t) => t.jobLineId.equals(id) & t.deletedAt.isNull(),
+            ))
+          .write(
+        OrderSplitsCompanion.custom(
+          deletedAt: Variable(now),
+          modifiedAt: Variable(now),
+          revision: orderSplits.revision + const Constant(1),
+        ),
+      );
+      await (update(jobLines)
+            ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+          .write(
+        JobLinesCompanion.custom(
+          deletedAt: Variable(now),
+          modifiedAt: Variable(now),
+          revision: jobLines.revision + const Constant(1),
+        ),
+      );
+    });
   }
 
   Future<String> insertOrderSplit({
@@ -165,9 +195,10 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
               (t) => t.jobLineId.equals(lineId) & t.deletedAt.isNull(),
             ))
           .write(
-        OrderSplitsCompanion(
-          deletedAt: Value(now),
-          modifiedAt: Value(now),
+        OrderSplitsCompanion.custom(
+          deletedAt: Variable(now),
+          modifiedAt: Variable(now),
+          revision: orderSplits.revision + const Constant(1),
         ),
       );
       for (final split in splits) {

@@ -64,16 +64,18 @@ Reference drafts (rough, not binding detail yet):
 ### Phase 1 — Local core
 
 - [x] Flutter multi-platform project
-- [x] SQLite schema: jobs, job lines, catalog (part / brand version / supplier), taxonomy, device ID, change log, tombstones
-- [x] Jobs CRUD + job parts list (general part by default; optional brand; needed · shop pull · **order splits** by supplier)
-- [x] Catalog browse/add/edit + maintenance (categories, styles, types, devices, brands, suppliers)
+- [x] SQLite schema: jobs, job lines, catalog (part / brand version / supplier), taxonomy, device ID, sync metadata columns (`revision`, `modifiedAt`, `deletedAt` tombstones) — no separate change-log table
+- [x] Jobs CRUD + job parts list (general part by default; optional brand; needed · shop pull · **order splits** by supplier; soft-delete remove)
+- [x] Catalog browse/add/edit (name / description / UOM / default supplier / active) + brand versions / listings; taxonomy maintenance (categories, styles, types, devices, brands, suppliers)
 - [x] Editor PIN gate for catalog writes
+- Note: `AppSettings` (PIN hash, etc.) is **local-only** in Phase 1; sync-shaped settings / PIN sync are Phase 5 prep — do not overbuild now.
 
 ### Phase 2 — Search, filters, media
 
 - [ ] Search / filter catalog and jobs
 - [ ] Part photos (compress, store, attach)
 - [ ] Custom part → promote to catalog (editor)
+- [ ] Part category / style / type assignment UI + PartDevices (compatible devices) wiring
 
 ### Phase 3 — Backup
 
@@ -91,6 +93,7 @@ Reference drafts (rough, not binding detail yet):
 - [ ] Change-set sync, tombstones, sync receipts
 - [ ] Conflict rules + Sync Issues screen
 - [ ] Photo sync policy (Wi‑Fi preferred)
+- [ ] Prep: decide whether `AppSettings` / PIN material becomes syncable (Phase 1 keeps it local-only)
 
 ### Phase 6 — Hardening
 

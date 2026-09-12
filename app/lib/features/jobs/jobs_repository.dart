@@ -84,6 +84,10 @@ class JobsRepository {
     return _db.jobsDao.setShopPull(lineId, qty);
   }
 
+  Future<void> removeLine(String lineId) {
+    return _db.jobsDao.softDeleteJobLine(lineId);
+  }
+
   Future<void> replaceOrderSplits(
     String lineId,
     List<({String supplierId, double qty})> splits,

@@ -164,13 +164,12 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _refreshSupplierChoices() async {
     List<Supplier> choices;
     if (_brandVersionId != null) {
+      // Brand version selected: only suppliers with listings on that version
+      // (may be empty — do not fall back to all suppliers).
       final listings =
           await _catalog.listingsForBrandVersion(_brandVersionId!);
       final ids = listings.map((l) => l.supplierId).toSet();
       choices = _allSuppliers.where((s) => ids.contains(s.id)).toList();
-      if (choices.isEmpty) {
-        choices = List.of(_allSuppliers);
-      }
     } else if (_partId != null) {
       final part = await _catalog.getPart(_partId!);
       final preferred = part?.defaultSupplierId;
@@ -207,6 +206,38 @@ class _JobLineEditorState extends State<JobLineEditor> {
     setState(() {
       _splits.removeAt(index).dispose();
     });
+  }
+
+  Future<void> _removeLine() async {
+    if (!_isEditing || _saving) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove line?'),
+        content: const Text('This removes the line from the job.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await _jobs.removeLine(widget.lineId!);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      _toast('Remove failed: $e');
+      setState(() => _saving = false);
+    }
   }
 
   Future<void> _save() async {
@@ -313,6 +344,11 @@ class _JobLineEditorState extends State<JobLineEditor> {
       appBar: AppBar(
         title: Text(_isEditing ? 'Edit line' : 'Add line'),
         actions: [
+          if (_isEditing)
+            TextButton(
+              onPressed: _saving || _loading ? null : _removeLine,
+              child: const Text('Remove'),
+            ),
           TextButton(
             onPressed: _saving || _loading ? null : _save,
             child: _saving

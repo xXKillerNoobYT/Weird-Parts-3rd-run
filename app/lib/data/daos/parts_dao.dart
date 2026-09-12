@@ -89,13 +89,14 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
   }) async {
     final now = DateTime.now().toUtc();
     await (update(parts)..where((t) => t.id.equals(id))).write(
-      PartsCompanion(
-        name: Value(name),
-        description: Value(description),
-        uom: Value(uom),
-        defaultSupplierId: Value(defaultSupplierId),
-        active: Value(active),
-        modifiedAt: Value(now),
+      PartsCompanion.custom(
+        name: Variable(name),
+        description: Variable(description),
+        uom: Variable(uom),
+        defaultSupplierId: Variable(defaultSupplierId),
+        active: Variable(active),
+        modifiedAt: Variable(now),
+        revision: parts.revision + const Constant(1),
       ),
     );
   }

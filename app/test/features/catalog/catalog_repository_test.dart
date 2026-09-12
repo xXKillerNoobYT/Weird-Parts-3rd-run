@@ -59,5 +59,6 @@ void main() {
     expect(part!.name, 'Relay 24V');
     expect(part.description, 'Control relay');
     expect(part.defaultSupplierId, supplierId);
+    expect(part.revision, 2);
   });
 }

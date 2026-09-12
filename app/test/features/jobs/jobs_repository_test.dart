@@ -44,6 +44,9 @@ void main() {
       neededQty: 10,
       shopPullQty: 4,
     );
+    final created = await jobs.getJobLine(lineId);
+    expect(created!.revision, 1);
+
     await jobs.replaceOrderSplits(lineId, [
       (supplierId: s1, qty: 3),
       (supplierId: s2, qty: 3),
@@ -55,6 +58,7 @@ void main() {
     expect(lines.first.shopPullQty, 4);
     final splits = await jobs.orderSplitsForLine(lineId);
     expect(splits.map((s) => s.quantity).fold<double>(0, (a, b) => a + b), 6);
+    expect(splits.every((s) => s.revision == 1), isTrue);
 
     await jobs.updateLine(
       lineId: lineId,
@@ -67,8 +71,29 @@ void main() {
     final updated = await jobs.getJobLine(lineId);
     expect(updated!.partId, isNull);
     expect(updated.customName, 'Custom valve');
+    expect(updated.revision, 2);
+
+    await jobs.setShopPull(lineId, 5);
+    final pulled = await jobs.getJobLine(lineId);
+    expect(pulled!.shopPullQty, 5);
+    expect(pulled.revision, 3);
+
+    await jobs.replaceOrderSplits(lineId, [
+      (supplierId: s1, qty: 2),
+    ]);
+    final replaced = await jobs.orderSplitsForLine(lineId);
+    expect(replaced, hasLength(1));
+    expect(replaced.first.revision, 1);
+
+    await jobs.removeLine(lineId);
+    expect(await jobs.listLinesForJob(jobId), isEmpty);
+    expect(await jobs.getJobLine(lineId), isNull);
 
     await jobs.archiveJob(jobId);
+    final job = await (db.select(db.jobs)..where((t) => t.id.equals(jobId)))
+        .getSingle();
+    expect(job.status, 'archived');
+    expect(job.revision, 2);
     final after = await jobs.listActiveJobs();
     expect(after.map((j) => j.id), isNot(contains(jobId)));
   });

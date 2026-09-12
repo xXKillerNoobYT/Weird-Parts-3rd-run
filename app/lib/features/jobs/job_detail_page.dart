@@ -77,6 +77,29 @@ class _JobDetailPageState extends State<JobDetailPage> {
     await _reload();
   }
 
+  Future<void> _removeLine(_LineRow row) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove line?'),
+        content: Text('Remove "${row.label}" from this job?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _jobs.removeLine(row.line.id);
+    await _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -101,6 +124,11 @@ class _JobDetailPageState extends State<JobDetailPage> {
                         ' · Ordered ${_fmt(row.orderedQty)}',
                       ),
                       onTap: () => _openEditor(lineId: line.id),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: 'Remove line',
+                        onPressed: () => _removeLine(row),
+                      ),
                     );
                   },
                 ),
