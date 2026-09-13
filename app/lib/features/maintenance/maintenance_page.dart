@@ -201,6 +201,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
         final extra = n > 0
             ? ' It is on $n job line(s); those lines stay on jobs.'
             : '';
+        if (!mounted) return;
         final ok = await confirmAction(
           context,
           title: 'Remove part?',
