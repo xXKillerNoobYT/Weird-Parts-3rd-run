@@ -532,10 +532,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
         styleId: styleId,
         typeId: typeId,
       );
-      final needed = double.tryParse(_neededController.text.trim()) ?? 1;
-      final pull = double.tryParse(_pullController.text.trim()) ?? 0;
-      final neededQty = needed < 0 ? 1 : needed;
-      final shopPullQty = pull < 0 ? 0 : pull;
+      final needed = double.tryParse(_neededController.text.trim()) ?? 1.0;
+      final pull = double.tryParse(_pullController.text.trim()) ?? 0.0;
+      final neededQty = needed < 0 ? 1.0 : needed;
+      final shopPullQty = pull < 0 ? 0.0 : pull;
       final splits = _previewSplits();
       if (_lineId != null) {
         await _jobs.attachCatalogPart(
