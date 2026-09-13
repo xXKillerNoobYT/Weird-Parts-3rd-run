@@ -145,13 +145,18 @@ void main() {
   });
 
   test('delete part is PIN-gated and tombstones the row', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-del-tombstone-');
+    addTearDown(() => dir.deleteSync(recursive: true));
     final id = await catalog.createGeneralPart(name: 'Scrap');
     await pin.setPin('2468');
-    await expectLater(catalog.deletePart(id), throwsA(isA<StateError>()));
+    await expectLater(
+      catalog.deletePart(id, root: dir),
+      throwsA(isA<StateError>()),
+    );
     expect(await catalog.getPart(id), isNotNull);
 
     await pin.unlock('2468');
-    await catalog.deletePart(id);
+    await catalog.deletePart(id, root: dir);
     expect(await catalog.getPart(id), isNull);
     expect(
       (await catalog.listParts(activeOnly: false)).map((p) => p.id),
@@ -228,6 +233,8 @@ void main() {
   });
 
   test('deleted part stays off the catalog but job lines remain', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-del-jobline-');
+    addTearDown(() => dir.deleteSync(recursive: true));
     final partId = await catalog.createGeneralPart(name: 'On a job');
     final jobId = await db.jobsDao.insertJob(
       id: newId(),
@@ -244,7 +251,7 @@ void main() {
       deviceId: deviceId,
     );
     expect(await catalog.countJobLinesForPart(partId), 1);
-    await catalog.deletePart(partId);
+    await catalog.deletePart(partId, root: dir);
     expect(await catalog.getPart(partId), isNull);
     expect(await catalog.countJobLinesForPart(partId), 1);
   });
