@@ -59,7 +59,10 @@ class AppDatabase extends _$AppDatabase {
 
 LazyDatabase _open() {
   return LazyDatabase(() async {
-    final dir = await getApplicationDocumentsDirectory();
+    // Prefer Application Support over Documents: OneDrive-backed Documents
+    // on Windows can fail SQLite open (SQLITE_CANTOPEN / code 14).
+    final dir = await getApplicationSupportDirectory();
+    await dir.create(recursive: true);
     final file = File(p.join(dir.path, 'wired_parts.sqlite'));
     return NativeDatabase.createInBackground(file);
   });
