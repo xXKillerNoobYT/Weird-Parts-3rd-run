@@ -105,7 +105,9 @@ class _Tile extends StatelessWidget {
 
     if (_useExpansion) {
       return ExpansionTile(
-        key: view.expandAll ? null : PageStorageKey<String>(node.id),
+        key: view.expandAll
+            ? ValueKey<String>('search-${node.id}')
+            : PageStorageKey<String>(node.id),
         initiallyExpanded: view.expandAll,
         tilePadding: pad,
         shape: const Border(),
