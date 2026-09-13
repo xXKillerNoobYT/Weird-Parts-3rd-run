@@ -45,4 +45,18 @@ void main() {
     expect(file.path, absolute.path);
     expect(file.existsSync(), isTrue);
   });
+
+  test('resolveFile falls back to copied basename when absolute path is gone',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('wp-photo-restore-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    File(p.join(dir.path, 'part-1-1.jpg')).writeAsBytesSync(const [9, 9]);
+    final file = await const PartPhotoStore().resolveFile(
+      r'C:\Users\old\part_photos\part-1-1.jpg',
+      root: dir,
+    );
+    expect(p.basename(file.path), 'part-1-1.jpg');
+    expect(file.existsSync(), isTrue);
+    expect(file.readAsBytesSync(), [9, 9]);
+  });
 }
