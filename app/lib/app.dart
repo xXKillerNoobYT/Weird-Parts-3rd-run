@@ -92,33 +92,43 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
         password,
       );
       await _db.close();
+      AppDatabase? next;
       try {
         await BackupStore(
           supportDir: widget.reset.supportDir,
           photosDir: widget.reset.photosDir,
         ).replaceWithPayload(payload: payload, reset: widget.reset);
+        next = widget.reopenDatabase?.call() ?? AppDatabase();
+        await next.settingsDao.keepLocalDeviceId(keepDeviceId);
+        await next.partsDao.relativizeAbsolutePhotoPaths();
+        await next.settingsDao.setSetting(
+          kLastBackupAtKey,
+          payload.createdAt.toUtc().toIso8601String(),
+        );
+        await next.settingsDao.setSetting(
+          kLastBackupSourceKey,
+          payload.sourceDeviceId,
+        );
+        if (!mounted) return;
+        setState(() {
+          _db = next!;
+          _pin = PinService(next.settingsDao);
+          _deviceId = keepDeviceId;
+          _generation++;
+        });
       } catch (e) {
-        await _reopen();
+        if (next != null && mounted) {
+          setState(() {
+            _db = next!;
+            _pin = PinService(next.settingsDao);
+            _deviceId = keepDeviceId;
+            _generation++;
+          });
+        } else {
+          await _reopen();
+        }
         rethrow;
       }
-      final next = widget.reopenDatabase?.call() ?? AppDatabase();
-      await next.settingsDao.keepLocalDeviceId(keepDeviceId);
-      await next.partsDao.relativizeAbsolutePhotoPaths();
-      await next.settingsDao.setSetting(
-        kLastBackupAtKey,
-        payload.createdAt.toUtc().toIso8601String(),
-      );
-      await next.settingsDao.setSetting(
-        kLastBackupSourceKey,
-        payload.sourceDeviceId,
-      );
-      if (!mounted) return;
-      setState(() {
-        _db = next;
-        _pin = PinService(next.settingsDao);
-        _deviceId = keepDeviceId;
-        _generation++;
-      });
     } finally {
       _wiping = false;
     }
