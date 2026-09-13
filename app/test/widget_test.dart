@@ -113,6 +113,7 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Editor PIN'), findsNothing);
-    expect(find.text('Change PIN'), findsOneWidget);
+    expect(find.text('New PIN'), findsOneWidget);
+    expect(find.text('Confirm PIN'), findsOneWidget);
   });
 }
