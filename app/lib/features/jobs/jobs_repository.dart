@@ -88,6 +88,26 @@ class JobsRepository {
     return _db.jobsDao.softDeleteJobLine(lineId);
   }
 
+  /// Point a custom line at a catalog part and drop the custom name.
+  Future<void> attachCatalogPart({
+    required String lineId,
+    required String partId,
+  }) async {
+    final line = await getJobLine(lineId);
+    if (line == null) return;
+    await updateLine(
+      lineId: lineId,
+      partId: partId,
+      brandVersionId: null,
+      customName: null,
+      customNotes: line.customNotes,
+      neededQty: line.neededQty,
+      shopPullQty: line.shopPullQty,
+      uom: line.uom,
+      notes: line.notes,
+    );
+  }
+
   Future<void> replaceOrderSplits(
     String lineId,
     List<({String supplierId, double qty})> splits,

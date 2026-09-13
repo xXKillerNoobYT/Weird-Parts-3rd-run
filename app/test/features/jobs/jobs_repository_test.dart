@@ -97,4 +97,48 @@ void main() {
     final after = await jobs.listActiveJobs();
     expect(after.map((j) => j.id), isNot(contains(jobId)));
   });
+
+  test('promote custom line attaches catalog part and keeps qty', () async {
+    final jobId = await jobs.createJob('Panel');
+    final lineId = await jobs.addLine(
+      jobId: jobId,
+      customName: 'temp valve',
+      neededQty: 10,
+      shopPullQty: 4,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'temp valve',
+      deviceId: deviceId,
+    );
+    await jobs.attachCatalogPart(lineId: lineId, partId: partId);
+    final line = await jobs.getJobLine(lineId);
+    expect(line!.partId, partId);
+    expect(line.customName, isNull);
+    expect(line.neededQty, 10);
+    expect(line.shopPullQty, 4);
+  });
+
+  test('job line still names an inactive catalog part', () async {
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Old breaker',
+      deviceId: deviceId,
+    );
+    await db.partsDao.updatePart(
+      id: partId,
+      name: 'Old breaker',
+      description: '',
+      uom: 'ea',
+      defaultSupplierId: null,
+      active: false,
+      categoryId: null,
+      styleId: null,
+      typeId: null,
+    );
+    final activeOnly = await db.partsDao.listParts();
+    expect(activeOnly.map((p) => p.id), isNot(contains(partId)));
+    final all = await db.partsDao.listParts(activeOnly: false);
+    expect(all.firstWhere((p) => p.id == partId).name, 'Old breaker');
+  });
 }

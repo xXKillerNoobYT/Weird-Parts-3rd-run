@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'daos/jobs_dao.dart';
@@ -11,6 +10,7 @@ import 'daos/settings_dao.dart';
 import 'daos/taxonomy_dao.dart';
 import 'tables/app_settings.dart';
 import 'tables/device_profile.dart';
+import 'sqlite_file.dart';
 import 'tables/jobs.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
@@ -61,9 +61,17 @@ LazyDatabase _open() {
   return LazyDatabase(() async {
     // Prefer Application Support over Documents: OneDrive-backed Documents
     // on Windows can fail SQLite open (SQLITE_CANTOPEN / code 14).
-    final dir = await getApplicationSupportDirectory();
-    await dir.create(recursive: true);
-    final file = File(p.join(dir.path, 'wired_parts.sqlite'));
+    final support = await getApplicationSupportDirectory();
+    Directory? documents;
+    try {
+      documents = await getApplicationDocumentsDirectory();
+    } on MissingPlatformDirectoryException {
+      documents = null;
+    }
+    final file = resolveSqliteFile(
+      supportDir: support,
+      documentsDir: documents,
+    );
     return NativeDatabase.createInBackground(file);
   });
 }

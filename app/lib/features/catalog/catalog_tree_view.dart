@@ -91,7 +91,9 @@ class _Tile extends StatelessWidget {
       return Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          key: PageStorageKey<String>(node.id),
+          key: view.expandAll
+              ? ValueKey<String>('search-${node.id}')
+              : PageStorageKey<String>(node.id),
           initiallyExpanded: view.expandAll,
           tilePadding: pad,
           leading: Icon(icon),
