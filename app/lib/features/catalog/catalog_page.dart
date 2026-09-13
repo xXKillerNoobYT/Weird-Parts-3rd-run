@@ -249,6 +249,7 @@ class _CatalogPageState extends State<CatalogPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'catalog-fab',
         onPressed: _addPart,
         tooltip: 'New part',
         child: const Icon(Icons.add),

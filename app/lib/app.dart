@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'data/app_database.dart';
+import 'features/backup/backup_codec.dart';
+import 'features/backup/backup_store.dart';
 import 'features/pin/pin_service.dart';
 import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
@@ -11,6 +15,7 @@ class AppScope extends InheritedWidget {
     required this.pin,
     required this.deviceId,
     required this.wipeLocalData,
+    required this.restoreFromBackup,
     required super.child,
     super.key,
   });
@@ -19,6 +24,8 @@ class AppScope extends InheritedWidget {
   final PinService pin;
   final String deviceId;
   final Future<void> Function() wipeLocalData;
+  final Future<void> Function(List<int> fileBytes, String password)
+      restoreFromBackup;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;
@@ -69,7 +76,34 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     try {
       await _db.close();
       await widget.reset.wipeFiles();
+      await _reopen();
+    } finally {
+      _wiping = false;
+    }
+  }
+
+  Future<void> _restoreFromBackup(List<int> fileBytes, String password) async {
+    if (_wiping) return;
+    _wiping = true;
+    try {
+      final payload = await BackupCodec().decrypt(
+        Uint8List.fromList(fileBytes),
+        password,
+      );
+      await _db.close();
+      await BackupStore(
+        supportDir: widget.reset.supportDir,
+        photosDir: widget.reset.photosDir,
+      ).replaceWithPayload(payload: payload, reset: widget.reset);
       final next = widget.reopenDatabase?.call() ?? AppDatabase();
+      await next.settingsDao.setSetting(
+        kLastBackupAtKey,
+        payload.createdAt.toUtc().toIso8601String(),
+      );
+      await next.settingsDao.setSetting(
+        kLastBackupSourceKey,
+        payload.sourceDeviceId,
+      );
       final deviceId = await next.settingsDao.ensureDeviceId();
       if (!mounted) return;
       setState(() {
@@ -83,6 +117,18 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     }
   }
 
+  Future<void> _reopen() async {
+    final next = widget.reopenDatabase?.call() ?? AppDatabase();
+    final deviceId = await next.settingsDao.ensureDeviceId();
+    if (!mounted) return;
+    setState(() {
+      _db = next;
+      _pin = PinService(next.settingsDao);
+      _deviceId = deviceId;
+      _generation++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScope(
@@ -90,6 +136,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       pin: _pin,
       deviceId: _deviceId,
       wipeLocalData: _wipeLocalData,
+      restoreFromBackup: _restoreFromBackup,
       child: MaterialApp(
         title: 'Wired Parts',
         theme: ThemeData(
