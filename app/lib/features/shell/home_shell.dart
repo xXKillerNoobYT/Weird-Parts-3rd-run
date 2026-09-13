@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../backup/backup_page.dart';
+import '../backup/backup_store.dart';
 import '../catalog/catalog_page.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../jobs/jobs_page.dart';
@@ -64,6 +66,8 @@ class _MoreTabState extends State<_MoreTab> {
   bool? _pinSet;
   bool _unlocked = false;
   var _didInitPin = false;
+  String? _lastBackupAt;
+  String? _lastBackupSource;
 
   @override
   void didChangeDependencies() {
@@ -74,12 +78,18 @@ class _MoreTabState extends State<_MoreTab> {
   }
 
   Future<void> _refreshPinState() async {
-    final pin = AppScope.of(context).pin;
+    final scope = AppScope.of(context);
+    final pin = scope.pin;
+    final db = scope.db;
     final set = await pin.isPinSet();
+    final at = await db.settingsDao.getSetting(kLastBackupAtKey);
+    final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
     if (!mounted) return;
     setState(() {
       _pinSet = set;
       _unlocked = pin.isUnlocked;
+      _lastBackupAt = at;
+      _lastBackupSource = source;
     });
   }
 
@@ -167,6 +177,14 @@ class _MoreTabState extends State<_MoreTab> {
     await _refreshPinState();
   }
 
+  void _openBackup() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const BackupPage()))
+        .then((_) {
+      if (mounted) _refreshPinState();
+    });
+  }
+
   void _openMaintenance() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const MaintenancePage()),
@@ -206,6 +224,10 @@ class _MoreTabState extends State<_MoreTab> {
             ? 'No PIN set'
             : (_unlocked ? 'Unlocked' : 'Locked');
 
+    final backupSubtitle = _lastBackupAt == null
+        ? 'No backup on this device yet'
+        : '${_formatBackupStamp(_lastBackupAt!)} · ${_lastBackupSource ?? 'unknown'}';
+
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
       body: ListView(
@@ -215,6 +237,12 @@ class _MoreTabState extends State<_MoreTab> {
             title: const Text('Maintenance'),
             subtitle: const Text('Types tree, brands, suppliers'),
             onTap: _openMaintenance,
+          ),
+          ListTile(
+            leading: const Icon(Icons.cloud_download_outlined),
+            title: const Text('Backup & restore'),
+            subtitle: Text(backupSubtitle),
+            onTap: _openBackup,
           ),
           ListTile(
             leading: const Icon(Icons.pin_outlined),
@@ -238,4 +266,15 @@ class _MoreTabState extends State<_MoreTab> {
       ),
     );
   }
+}
+
+String _formatBackupStamp(String iso) {
+  final dt = DateTime.tryParse(iso)?.toLocal();
+  if (dt == null) return iso;
+  final y = dt.year.toString().padLeft(4, '0');
+  final m = dt.month.toString().padLeft(2, '0');
+  final d = dt.day.toString().padLeft(2, '0');
+  final h = dt.hour.toString().padLeft(2, '0');
+  final min = dt.minute.toString().padLeft(2, '0');
+  return '$y-$m-$d $h:$min';
 }

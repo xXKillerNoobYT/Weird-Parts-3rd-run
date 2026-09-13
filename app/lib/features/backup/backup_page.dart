@@ -1,0 +1,279 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+
+import '../../app.dart';
+import '../catalog/tree_edit_prompts.dart';
+import '../pin/pin_gate.dart';
+import 'backup_codec.dart';
+import 'backup_store.dart';
+
+typedef BackupSavePicker = Future<String?> Function({required String suggestedName});
+typedef BackupOpenPicker = Future<String?> Function();
+
+class BackupPage extends StatefulWidget {
+  const BackupPage({
+    this.codec,
+    this.store,
+    this.pickSavePath,
+    this.pickOpenPath,
+    super.key,
+  });
+
+  final BackupCodec? codec;
+  final BackupStore? store;
+  final BackupSavePicker? pickSavePath;
+  final BackupOpenPicker? pickOpenPath;
+
+  @override
+  State<BackupPage> createState() => _BackupPageState();
+}
+
+class _BackupPageState extends State<BackupPage> {
+  String? _lastAt;
+  String? _lastSource;
+  var _busy = false;
+  var _didLoadMeta = false;
+
+  BackupCodec get _codec => widget.codec ?? BackupCodec();
+  BackupStore get _store => widget.store ?? const BackupStore();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didLoadMeta) return;
+    _didLoadMeta = true;
+    _reloadMeta();
+  }
+
+  Future<void> _reloadMeta() async {
+    final db = AppScope.of(context).db;
+    final at = await db.settingsDao.getSetting(kLastBackupAtKey);
+    final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
+    if (!mounted) return;
+    setState(() {
+      _lastAt = at;
+      _lastSource = source;
+    });
+  }
+
+  Future<String?> _savePath() async {
+    if (widget.pickSavePath != null) {
+      return widget.pickSavePath!(suggestedName: 'wired-parts-backup.wpbackup');
+    }
+    final location = await getSaveLocation(
+      suggestedName: 'wired-parts-backup.wpbackup',
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Wired Parts backup', extensions: ['wpbackup']),
+      ],
+    );
+    return location?.path;
+  }
+
+  Future<String?> _openPath() async {
+    if (widget.pickOpenPath != null) return widget.pickOpenPath!();
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Wired Parts backup', extensions: ['wpbackup']),
+      ],
+    );
+    return file?.path;
+  }
+
+  Future<void> _export() async {
+    if (_busy) return;
+    final scope = AppScope.of(context);
+    if (!await ensurePinUnlocked(context, scope.pin)) return;
+    if (!mounted) return;
+    final password = await _promptPassword(
+      title: 'Encrypt backup',
+      confirm: true,
+    );
+    if (password == null || !mounted) return;
+    final path = await _savePath();
+    if (path == null || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await scope.db.customStatement('PRAGMA wal_checkpoint(FULL);');
+      final sqliteFile = await _store.sqliteFile();
+      if (!await sqliteFile.exists()) {
+        throw const BackupFormatException('No local database to export');
+      }
+      final payload = await _store.collect(
+        sourceDeviceId: scope.deviceId,
+        createdAt: DateTime.now().toUtc(),
+        sqliteBytes: await sqliteFile.readAsBytes(),
+      );
+      final bytes = await _codec.encrypt(payload, password);
+      await File(path).writeAsBytes(bytes, flush: true);
+      await scope.db.settingsDao.setSetting(
+        kLastBackupAtKey,
+        payload.createdAt.toIso8601String(),
+      );
+      await scope.db.settingsDao.setSetting(
+        kLastBackupSourceKey,
+        payload.sourceDeviceId,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup saved')),
+      );
+      await _reloadMeta();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backup failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restore() async {
+    if (_busy) return;
+    final path = await _openPath();
+    if (path == null || !mounted) return;
+    final fileBytes = await File(path).readAsBytes();
+    BackupHeader header;
+    try {
+      header = BackupCodec.peekHeader(Uint8List.fromList(fileBytes));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Not a valid backup: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final confirmed = await confirmAction(
+      context,
+      title: 'Restore this backup?',
+      body:
+          'Replaces all catalog, jobs, photos, and PIN on this device with the '
+          'backup from ${header.sourceDeviceId} '
+          '(${_formatStamp(header.createdAt.toIso8601String())}). Cannot undo.',
+      confirmLabel: 'Restore',
+    );
+    if (!confirmed || !mounted) return;
+    final password = await _promptPassword(title: 'Decrypt backup');
+    if (password == null || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await AppScope.of(context).restoreFromBackup(fileBytes, password);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup restored')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Restore failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _promptPassword({
+    required String title,
+    bool confirm = false,
+  }) async {
+    final password = TextEditingController();
+    final again = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: password,
+                obscureText: true,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Backup password'),
+              ),
+              if (confirm) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: again,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Confirm password'),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final a = password.text;
+                if (a.isEmpty) return;
+                if (confirm && a != again.text) return;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+    final value = password.text;
+    password.dispose();
+    again.dispose();
+    if (ok == true && value.isNotEmpty) return value;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = _lastAt == null
+        ? 'No backup on this device yet'
+        : '${_formatStamp(_lastAt!)} · source ${_lastSource ?? 'unknown'}';
+    return Scaffold(
+      appBar: AppBar(title: const Text('Backup & restore')),
+      body: ListView(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Last backup'),
+            subtitle: Text(subtitle),
+          ),
+          ListTile(
+            leading: const Icon(Icons.save_alt),
+            title: const Text('Export encrypted backup'),
+            subtitle: const Text('PIN if set, then a backup password'),
+            enabled: !_busy,
+            onTap: _export,
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings_backup_restore),
+            title: const Text('Restore encrypted backup'),
+            subtitle: const Text('Replaces this device with the backup shop'),
+            enabled: !_busy,
+            onTap: _restore,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatStamp(String iso) {
+  final dt = DateTime.tryParse(iso)?.toLocal();
+  if (dt == null) return iso;
+  final y = dt.year.toString().padLeft(4, '0');
+  final m = dt.month.toString().padLeft(2, '0');
+  final d = dt.day.toString().padLeft(2, '0');
+  final h = dt.hour.toString().padLeft(2, '0');
+  final min = dt.minute.toString().padLeft(2, '0');
+  return '$y-$m-$d $h:$min';
+}
