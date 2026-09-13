@@ -183,10 +183,92 @@ void main() {
 
     expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
   });
+
+  test('leftover bak is not rolled back over the current shop', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-stale-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([0]);
+
+    await BackupStore(
+      supportDir: dest,
+      afterLiveSwap: () async {
+        throw StateError('leave bak');
+      },
+    ).replaceWithPayload(
+      payload: BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13),
+        sourceDeviceId: 'dev-a',
+        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        photos: {'part-1-1.jpg': Uint8List.fromList([7, 8])},
+      ),
+      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    final leftoverBak = File(p.join(dest.path, '$kSqliteFileName.restore-bak'));
+    expect(leftoverBak.existsSync(), isTrue);
+    leftoverBak.deleteSync();
+    Directory(leftoverBak.path).createSync();
+    File(p.join(leftoverBak.path, 'blocked')).writeAsStringSync('nope');
+    final leftoverPhotos = Directory(p.join(dest.path, 'part_photos.restore-bak'));
+    if (leftoverPhotos.existsSync()) {
+      leftoverPhotos.deleteSync(recursive: true);
+    }
+    leftoverPhotos.createSync();
+    File(p.join(leftoverPhotos.path, 'blocked')).writeAsStringSync('nope');
+
+    await expectLater(
+      BackupStore(supportDir: dest).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-b',
+          sqliteBytes: Uint8List.fromList([4, 4, 4]),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(
+      File(p.join(dest.path, 'part_photos', 'part-1-1.jpg')).readAsBytesSync(),
+      [7, 8],
+    );
+  });
+
+  test('sidecar delete failure during rollback still restores parked sqlite',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-side-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+
+    await expectLater(
+      BackupStore(supportDir: dest, failSidecarDelete: true).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: Uint8List.fromList([9, 9, 9]),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isTrue);
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [1, 2, 3]);
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName.restore-bak')).existsSync(),
+      isFalse,
+    );
+  });
 }
 
 class _ThrowingDocsReset extends LocalDataReset {
-  const _ThrowingDocsReset({super.supportDir, super.documentsDir, super.photosDir});
+  const _ThrowingDocsReset({super.supportDir, super.documentsDir});
 
   @override
   Future<void> clearDocumentsLeftover() async {

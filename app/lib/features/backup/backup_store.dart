@@ -16,6 +16,7 @@ class BackupStore {
     this.supportDir,
     this.photosDir,
     this.afterLiveSwap,
+    this.failSidecarDelete = false,
   });
 
   final Directory? supportDir;
@@ -23,6 +24,9 @@ class BackupStore {
 
   /// Test hook: runs after the restored files are live, before bak cleanup.
   final Future<void> Function()? afterLiveSwap;
+
+  /// Test hook: pretend WAL/SHM delete failed.
+  final bool failSidecarDelete;
 
   Future<Directory> _support() async =>
       supportDir ?? await getApplicationSupportDirectory();
@@ -126,15 +130,28 @@ class BackupStore {
     final bakSqlite = File(p.join(live.path, '$kSqliteFileName.restore-bak'));
     final bakPhotos = Directory(p.join(live.path, 'part_photos.restore-bak'));
 
+    var parkedSqlite = false;
+    var parkedPhotos = false;
+
     Future<void> rollback() async {
-      if (await bakSqlite.exists()) {
-        if (await liveSqlite.exists()) await liveSqlite.delete();
-        await _deleteSqliteSidecars(liveSqlite);
+      // Only restore bak files this swap parked. Leftover `.restore-bak`
+      // from a previous committed swap is not this shop's backup.
+      if (parkedSqlite && await bakSqlite.exists()) {
+        if (await liveSqlite.exists()) {
+          try {
+            await liveSqlite.delete();
+          } catch (_) {}
+        }
+        try {
+          await _deleteSqliteSidecars(liveSqlite);
+        } catch (_) {}
         await bakSqlite.rename(liveSqlite.path);
       }
-      if (await bakPhotos.exists()) {
+      if (parkedPhotos && await bakPhotos.exists()) {
         if (await livePhotos.exists()) {
-          await livePhotos.delete(recursive: true);
+          try {
+            await livePhotos.delete(recursive: true);
+          } catch (_) {}
         }
         await bakPhotos.rename(livePhotos.path);
       }
@@ -143,11 +160,17 @@ class BackupStore {
     try {
       if (await bakSqlite.exists()) await bakSqlite.delete();
       if (await bakPhotos.exists()) await bakPhotos.delete(recursive: true);
-      if (await liveSqlite.exists()) await liveSqlite.rename(bakSqlite.path);
+      if (await liveSqlite.exists()) {
+        await liveSqlite.rename(bakSqlite.path);
+        parkedSqlite = true;
+      }
       // Rename does not move WAL/SHM; leftover sidecars would attach to the
       // restored file and can look corrupt when Drift reopens in WAL mode.
       await _deleteSqliteSidecars(liveSqlite);
-      if (await livePhotos.exists()) await livePhotos.rename(bakPhotos.path);
+      if (await livePhotos.exists()) {
+        await livePhotos.rename(bakPhotos.path);
+        parkedPhotos = true;
+      }
       await stagedSqlite.rename(liveSqlite.path);
       await _deleteSqliteSidecars(liveSqlite);
       if (await stagedPhotos.exists()) {
@@ -166,11 +189,14 @@ class BackupStore {
       // Swap already committed. Leftover bak files are leftover disk.
     }
   }
-}
 
-Future<void> _deleteSqliteSidecars(File sqlite) async {
-  for (final suffix in const ['-wal', '-shm', '-journal']) {
-    final side = File('${sqlite.path}$suffix');
-    if (await side.exists()) await side.delete();
+  Future<void> _deleteSqliteSidecars(File sqlite) async {
+    if (failSidecarDelete) {
+      throw const FileSystemException('Failed to delete sqlite sidecars');
+    }
+    for (final suffix in const ['-wal', '-shm', '-journal']) {
+      final side = File('${sqlite.path}$suffix');
+      if (await side.exists()) await side.delete();
+    }
   }
 }
