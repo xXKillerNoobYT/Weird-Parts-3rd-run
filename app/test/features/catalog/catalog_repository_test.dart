@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:path/path.dart' as p;
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
+import 'package:wired_parts/features/catalog/part_photo_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 void main() {
@@ -101,19 +103,43 @@ void main() {
     final bytes = Uint8List.fromList(img.encodePng(raw));
 
     final id = await catalog.createGeneralPart(name: 'With photo');
-    final path = await catalog.attachPhoto(
+    final stored = await catalog.attachPhoto(
       partId: id,
       bytes: bytes,
       root: dir,
     );
     final part = await catalog.getPart(id);
-    expect(part!.photoPath, path);
-    expect(File(path).existsSync(), isTrue);
+    expect(part!.photoPath, stored);
+    expect(p.isAbsolute(stored), isFalse);
+    final file = await const PartPhotoStore().resolveFile(stored, root: dir);
+    expect(file.existsSync(), isTrue);
 
     await pin.setPin('2468');
     await expectLater(
       catalog.attachPhoto(partId: id, bytes: bytes, root: dir),
       throwsA(isA<StateError>()),
+    );
+  });
+
+  test('replacing a photo stores a new relative file and deletes the old one', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-repo-photo-replace-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final bytes = Uint8List.fromList(
+      img.encodePng(img.Image(width: 8, height: 8)),
+    );
+    final id = await catalog.createGeneralPart(name: 'Swap photo');
+    final first = await catalog.attachPhoto(partId: id, bytes: bytes, root: dir);
+    await Future<void>.delayed(const Duration(milliseconds: 2));
+    final second = await catalog.attachPhoto(partId: id, bytes: bytes, root: dir);
+    expect(second, isNot(first));
+    expect(p.isAbsolute(second), isFalse);
+    expect(
+      (await const PartPhotoStore().resolveFile(first, root: dir)).existsSync(),
+      isFalse,
+    );
+    expect(
+      (await const PartPhotoStore().resolveFile(second, root: dir)).existsSync(),
+      isTrue,
     );
   });
 }

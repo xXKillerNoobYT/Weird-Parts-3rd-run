@@ -80,7 +80,7 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 - [x] Job line: **Requested**, Split (shop / Supply A / Supply B / …), **Left to Pull/Order**
 - [x] Search / filter that respects the tree
 - [x] Part photos (compress, store, attach) — after the tree
-- [x] Custom part → promote to catalog (editor) — after the tree
+- [ ] Custom part → promote to catalog (editor) — after the tree (#6)
 
 ### Phase 3 — Backup
 

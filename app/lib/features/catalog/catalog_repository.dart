@@ -35,25 +35,31 @@ class CatalogRepository {
     Directory? root,
   }) async {
     await _pin.requireUnlocked();
-    final path = await store.saveForPart(
+    final part = await _db.partsDao.getPart(partId);
+    final previous = part?.photoPath;
+    final stored = await store.saveForPart(
       partId: partId,
       bytes: bytes,
       root: root,
     );
-    await _db.partsDao.setPhotoPath(partId, path);
-    return path;
+    await _db.partsDao.setPhotoPath(partId, stored);
+    if (previous != null && previous.isNotEmpty && previous != stored) {
+      await store.deleteAt(previous, root: root);
+    }
+    return stored;
   }
 
   Future<void> clearPhoto(
     String partId, {
     PartPhotoStore store = const PartPhotoStore(),
+    Directory? root,
   }) async {
     await _pin.requireUnlocked();
     final part = await _db.partsDao.getPart(partId);
     final existing = part?.photoPath;
     await _db.partsDao.setPhotoPath(partId, null);
     if (existing != null && existing.isNotEmpty) {
-      await store.deleteAt(existing);
+      await store.deleteAt(existing, root: root);
     }
   }
 

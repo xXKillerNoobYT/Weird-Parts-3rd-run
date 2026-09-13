@@ -62,10 +62,13 @@ class _MoreTab extends StatefulWidget {
 class _MoreTabState extends State<_MoreTab> {
   bool? _pinSet;
   bool _unlocked = false;
+  var _didInitPin = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_didInitPin) return;
+    _didInitPin = true;
     _refreshPinState();
   }
 

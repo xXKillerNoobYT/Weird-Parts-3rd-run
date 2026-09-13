@@ -7,6 +7,7 @@ import '../../app.dart';
 import '../../data/app_database.dart';
 import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
+import 'part_photo_store.dart';
 
 class PartDetailPage extends StatefulWidget {
   const PartDetailPage({
@@ -134,6 +135,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       );
     }
 
+    final photoPath = await _resolvedPhotoPath(part.photoPath);
     if (!mounted) return;
     setState(() {
       _nameController.text = part.name;
@@ -143,7 +145,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       _categoryId = part.categoryId;
       _styleId = part.styleId;
       _typeId = part.typeId;
-      _photoPath = part.photoPath;
+      _photoPath = photoPath;
       _active = part.active;
       _suppliers = suppliers;
       _brands = brands;
@@ -178,23 +180,62 @@ class _PartDetailPageState extends State<PartDetailPage> {
     return ensurePinUnlocked(context, scope.pin);
   }
 
+  bool get _photoFileExists =>
+      _photoPath != null && File(_photoPath!).existsSync();
+
+  bool get _canUseCamera => Platform.isAndroid || Platform.isIOS;
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<String?> _resolvedPhotoPath(String? stored) async {
+    if (stored == null || stored.isEmpty) return null;
+    final file = await const PartPhotoStore().resolveFile(stored);
+    if (await file.exists()) return file.path;
+    return stored;
+  }
+
+  /// Refresh only the photo preview so unsaved name/tree edits stay in the form.
+  Future<void> _refreshPhotoPreview() async {
+    final part = await _catalog.getPart(widget.partId);
+    final path = await _resolvedPhotoPath(part?.photoPath);
+    if (path != null) {
+      await FileImage(File(path)).evict();
+    }
+    if (!mounted) return;
+    setState(() => _photoPath = path);
+  }
+
   Future<void> _pickPhoto(ImageSource source) async {
     if (!await _gate() || !mounted) return;
-    final picked = await ImagePicker().pickImage(source: source);
-    if (picked == null || !mounted) return;
     try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: PartPhotoStore.maxEdge.toDouble(),
+        maxHeight: PartPhotoStore.maxEdge.toDouble(),
+        imageQuality: PartPhotoStore.jpegQuality,
+      );
+      if (picked == null || !mounted) return;
       final bytes = await picked.readAsBytes();
       await _catalog.attachPhoto(partId: widget.partId, bytes: bytes);
-      await _reload();
+      await _refreshPhotoPreview();
+      if (!mounted) return;
+      _toast('Photo saved on this device');
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      _toast(e.message);
     } on FormatException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
+      _toast(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      _toast(
+        source == ImageSource.camera
+            ? 'Camera is not available here. Use Choose photo.'
+            : 'Could not open a photo. Try another file.',
       );
     }
   }
@@ -203,12 +244,12 @@ class _PartDetailPageState extends State<PartDetailPage> {
     if (!await _gate() || !mounted) return;
     try {
       await _catalog.clearPhoto(widget.partId);
-      await _reload();
+      await _refreshPhotoPreview();
+      if (!mounted) return;
+      _toast('Photo removed');
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      _toast(e.message);
     }
   }
 
@@ -223,13 +264,15 @@ class _PartDetailPageState extends State<PartDetailPage> {
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
                 title: const Text('Choose photo'),
+                subtitle: const Text('Windows / Mac: pick a file'),
                 onTap: () => Navigator.pop(ctx, 'gallery'),
               ),
-              ListTile(
-                leading: const Icon(Icons.photo_camera_outlined),
-                title: const Text('Take photo'),
-                onTap: () => Navigator.pop(ctx, 'camera'),
-              ),
+              if (_canUseCamera)
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_outlined),
+                  title: const Text('Take photo'),
+                  onTap: () => Navigator.pop(ctx, 'camera'),
+                ),
               if (_photoPath != null)
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
@@ -244,6 +287,60 @@ class _PartDetailPageState extends State<PartDetailPage> {
     if (choice == 'gallery') await _pickPhoto(ImageSource.gallery);
     if (choice == 'camera') await _pickPhoto(ImageSource.camera);
     if (choice == 'remove') await _removePhoto();
+  }
+
+  Widget _photoSection() {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Photo', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Compressed and stored on this device. PIN required to change.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        if (_photoFileExists)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              File(_photoPath!),
+              key: ValueKey(_photoPath),
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          )
+        else
+          Material(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: _photoMenu,
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                height: 120,
+                child: Center(
+                  child: Text(
+                    _photoPath == null
+                        ? 'No photo yet — tap to add'
+                        : 'Photo file missing — tap to replace',
+                  ),
+                ),
+              ),
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _photoMenu,
+            icon: const Icon(Icons.add_a_photo_outlined),
+            label: Text(_photoPath == null ? 'Add photo' : 'Change photo'),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _save() async {
@@ -514,26 +611,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
                   textCapitalization: TextCapitalization.sentences,
                 ),
                 const SizedBox(height: 12),
-                if (_photoPath != null && File(_photoPath!).existsSync())
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(
-                      File(_photoPath!),
-                      height: 180,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  )
-                else
-                  const Text('No photo'),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: _photoMenu,
-                    icon: const Icon(Icons.add_a_photo_outlined),
-                    label: Text(_photoPath == null ? 'Add photo' : 'Change photo'),
-                  ),
-                ),
+                _photoSection(),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _descriptionController,
