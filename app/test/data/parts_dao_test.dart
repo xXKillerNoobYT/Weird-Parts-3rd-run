@@ -87,4 +87,20 @@ void main() {
     expect(await db.partsDao.listBrandVersionsForPart(partId), isEmpty);
     expect(await db.partsDao.listingsForBrandVersion(bvId), isEmpty);
   });
+
+  test('relativizeAbsolutePhotoPaths keeps basename after restore', () async {
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Valve',
+      deviceId: deviceId,
+    );
+    await db.partsDao.setPhotoPath(
+      partId,
+      r'C:\Users\weird\AppData\part_photos\part-1-1.jpg',
+    );
+    await db.partsDao.relativizeAbsolutePhotoPaths();
+    final part = await db.partsDao.getPart(partId);
+    expect(part!.photoPath, 'part-1-1.jpg');
+  });
 }

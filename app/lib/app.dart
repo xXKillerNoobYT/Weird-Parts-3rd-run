@@ -85,17 +85,25 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
   Future<void> _restoreFromBackup(List<int> fileBytes, String password) async {
     if (_wiping) return;
     _wiping = true;
+    final keepDeviceId = _deviceId;
     try {
       final payload = await BackupCodec().decrypt(
         Uint8List.fromList(fileBytes),
         password,
       );
       await _db.close();
-      await BackupStore(
-        supportDir: widget.reset.supportDir,
-        photosDir: widget.reset.photosDir,
-      ).replaceWithPayload(payload: payload, reset: widget.reset);
+      try {
+        await BackupStore(
+          supportDir: widget.reset.supportDir,
+          photosDir: widget.reset.photosDir,
+        ).replaceWithPayload(payload: payload, reset: widget.reset);
+      } catch (e) {
+        await _reopen();
+        rethrow;
+      }
       final next = widget.reopenDatabase?.call() ?? AppDatabase();
+      await next.settingsDao.keepLocalDeviceId(keepDeviceId);
+      await next.partsDao.relativizeAbsolutePhotoPaths();
       await next.settingsDao.setSetting(
         kLastBackupAtKey,
         payload.createdAt.toUtc().toIso8601String(),
@@ -104,12 +112,11 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
         kLastBackupSourceKey,
         payload.sourceDeviceId,
       );
-      final deviceId = await next.settingsDao.ensureDeviceId();
       if (!mounted) return;
       setState(() {
         _db = next;
         _pin = PinService(next.settingsDao);
-        _deviceId = deviceId;
+        _deviceId = keepDeviceId;
         _generation++;
       });
     } finally {

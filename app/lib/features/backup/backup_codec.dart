@@ -8,6 +8,7 @@ import 'package:cryptography/cryptography.dart';
 /// Payload is AES-256-GCM; key is PBKDF2-HMAC-SHA256 of the backup password.
 const kBackupMagic = [0x57, 0x50, 0x42, 0x31];
 const kDefaultPbkdf2Iterations = 120000;
+const kMaxPbkdf2Iterations = 250000;
 
 class BackupFormatException implements Exception {
   const BackupFormatException(this.message);
@@ -185,6 +186,7 @@ BackupHeader parseHeaderBytes(Uint8List headerBytes) {
       kdf != 'pbkdf2-sha256' ||
       iterations is! int ||
       iterations < 1000 ||
+      iterations > kMaxPbkdf2Iterations ||
       saltB64 == null ||
       nonceB64 == null) {
     throw const BackupFormatException('Invalid backup header');

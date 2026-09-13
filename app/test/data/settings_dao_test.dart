@@ -17,4 +17,10 @@ void main() {
     expect(a, equals(b));
     expect(a.isNotEmpty, isTrue);
   });
+
+  test('keepLocalDeviceId replaces restored source id', () async {
+    await db.settingsDao.ensureDeviceId();
+    await db.settingsDao.keepLocalDeviceId('keep-dest');
+    expect(await db.settingsDao.ensureDeviceId(), 'keep-dest');
+  });
 }

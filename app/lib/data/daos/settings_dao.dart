@@ -36,4 +36,15 @@ class SettingsDao extends DatabaseAccessor<AppDatabase>
         .getSingleOrNull();
     return row?.value;
   }
+
+  /// Keep this install's device id after a restore (backup carries the source).
+  Future<void> keepLocalDeviceId(String id) async {
+    await delete(deviceProfiles).go();
+    await into(deviceProfiles).insert(
+      DeviceProfilesCompanion.insert(
+        id: id,
+        createdAt: DateTime.now().toUtc(),
+      ),
+    );
+  }
 }

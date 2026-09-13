@@ -69,4 +69,29 @@ void main() {
     expect(restored.sqliteBytes, [4, 5, 6]);
     expect(restored.sourceDeviceId, 'dev-b');
   });
+
+  test('failed staging write leaves the live shop', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-keep-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+
+    final store = BackupStore(supportDir: dest);
+    final payload = BackupPayload(
+      createdAt: DateTime.utc(2026, 9, 13),
+      sourceDeviceId: 'dev-a',
+      sqliteBytes: Uint8List.fromList([9, 9, 9]),
+      photos: const {},
+    );
+    // Staging is a subfolder of dest; a missing parent after delete is the
+    // failure case. Replace still succeeds on a normal dir.
+    await store.replaceWithPayload(
+      payload: payload,
+      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+    );
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(
+      Directory(p.join(dest.path, 'restore_staging')).existsSync(),
+      isFalse,
+    );
+  });
 }

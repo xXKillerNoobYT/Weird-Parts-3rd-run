@@ -134,36 +134,29 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _restore() async {
     if (_busy) return;
-    final path = await _openPath();
-    if (path == null || !mounted) return;
-    final fileBytes = await File(path).readAsBytes();
-    BackupHeader header;
-    try {
-      header = BackupCodec.peekHeader(Uint8List.fromList(fileBytes));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Not a valid backup: $e')),
-      );
-      return;
-    }
+    final scope = AppScope.of(context);
+    if (!await ensurePinUnlocked(context, scope.pin)) return;
     if (!mounted) return;
-    final confirmed = await confirmAction(
-      context,
-      title: 'Restore this backup?',
-      body:
-          'Replaces all catalog, jobs, photos, and PIN on this device with the '
-          'backup from ${header.sourceDeviceId} '
-          '(${_formatStamp(header.createdAt.toIso8601String())}). Cannot undo.',
-      confirmLabel: 'Restore',
-    );
-    if (!confirmed || !mounted) return;
-    final password = await _promptPassword(title: 'Decrypt backup');
-    if (password == null || !mounted) return;
-
     setState(() => _busy = true);
     try {
-      await AppScope.of(context).restoreFromBackup(fileBytes, password);
+      final path = await _openPath();
+      if (path == null || !mounted) return;
+      final fileBytes = await File(path).readAsBytes();
+      final header = BackupCodec.peekHeader(Uint8List.fromList(fileBytes));
+      if (!mounted) return;
+      final confirmed = await confirmAction(
+        context,
+        title: 'Restore this backup?',
+        body:
+            'Replaces all catalog, jobs, photos, and PIN on this device with the '
+            'backup from ${header.sourceDeviceId} '
+            '(${_formatStamp(header.createdAt.toIso8601String())}). Cannot undo.',
+        confirmLabel: 'Restore',
+      );
+      if (!confirmed || !mounted) return;
+      final password = await _promptPassword(title: 'Decrypt backup');
+      if (password == null || !mounted) return;
+      await scope.restoreFromBackup(fileBytes, password);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Backup restored')),
