@@ -47,9 +47,12 @@ class PartPhotoStore {
   }
 
   Future<File> resolveFile(String stored, {Directory? root}) async {
-    if (p.isAbsolute(stored)) return File(stored);
+    if (_looksAbsolutePath(stored)) {
+      final abs = File(stored);
+      if (await abs.exists()) return abs;
+    }
     final dir = root ?? await photosDirectory();
-    return File(p.join(dir.path, p.basename(stored)));
+    return File(p.join(dir.path, _photoBasename(stored)));
   }
 
   Future<void> deleteAt(String stored, {Directory? root}) async {
@@ -76,4 +79,14 @@ class PartPhotoStore {
     final support = await getApplicationSupportDirectory();
     return Directory(p.join(support.path, 'part_photos'));
   }
+}
+
+bool _looksAbsolutePath(String stored) {
+  if (p.posix.isAbsolute(stored) || p.windows.isAbsolute(stored)) return true;
+  return stored.contains('\\') || stored.contains('/');
+}
+
+String _photoBasename(String stored) {
+  if (stored.contains('\\')) return p.windows.basename(stored);
+  return p.posix.basename(stored);
 }

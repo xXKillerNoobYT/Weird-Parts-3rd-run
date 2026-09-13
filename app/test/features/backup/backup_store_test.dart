@@ -32,6 +32,8 @@ void main() {
     File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1]);
     Directory(p.join(dest.path, 'part_photos')).createSync();
     File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([0]);
+    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([2, 2]);
+    File(p.join(dest.path, '$kSqliteFileName-shm')).writeAsBytesSync([3]);
 
     await BackupStore(supportDir: dest).replaceWithPayload(
       payload: payload,
@@ -48,6 +50,14 @@ void main() {
     );
     expect(
       File(p.join(dest.path, 'part_photos', 'old.jpg')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-shm')).existsSync(),
       isFalse,
     );
   });
@@ -94,4 +104,92 @@ void main() {
       isFalse,
     );
   });
+
+  test('leftover WAL sidecars are deleted around the live swap', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-wal-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([4]);
+    File(p.join(dest.path, '$kSqliteFileName-shm')).writeAsBytesSync([5]);
+    File(p.join(dest.path, '$kSqliteFileName-journal')).writeAsBytesSync([6]);
+
+    await BackupStore(supportDir: dest).replaceWithPayload(
+      payload: BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13),
+        sourceDeviceId: 'dev-a',
+        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        photos: const {},
+      ),
+      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    for (final suffix in const ['-wal', '-shm', '-journal']) {
+      expect(
+        File(p.join(dest.path, '$kSqliteFileName$suffix')).existsSync(),
+        isFalse,
+      );
+    }
+  });
+
+  test('bak cleanup failure does not roll the restored shop back', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-cleanup-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([0]);
+
+    await BackupStore(
+      supportDir: dest,
+      afterLiveSwap: () async {
+        throw StateError('bak cleanup');
+      },
+    ).replaceWithPayload(
+      payload: BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13),
+        sourceDeviceId: 'dev-a',
+        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        photos: {'part-1-1.jpg': Uint8List.fromList([7, 8])},
+      ),
+      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(
+      File(p.join(dest.path, 'part_photos', 'part-1-1.jpg')).readAsBytesSync(),
+      [7, 8],
+    );
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).existsSync(),
+      isFalse,
+    );
+  });
+
+  test('documents leftover cleanup failure still leaves the restored shop',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-docs-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1]);
+
+    await BackupStore(supportDir: dest).replaceWithPayload(
+      payload: BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13),
+        sourceDeviceId: 'dev-source',
+        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        photos: const {},
+      ),
+      reset: _ThrowingDocsReset(supportDir: dest, documentsDir: dest),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+  });
+}
+
+class _ThrowingDocsReset extends LocalDataReset {
+  const _ThrowingDocsReset({super.supportDir, super.documentsDir, super.photosDir});
+
+  @override
+  Future<void> clearDocumentsLeftover() async {
+    throw StateError('leftover cleanup');
+  }
 }

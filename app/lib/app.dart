@@ -86,20 +86,22 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     if (_wiping) return;
     _wiping = true;
     final keepDeviceId = _deviceId;
+    var closed = false;
+    AppDatabase? next;
     try {
       final payload = await BackupCodec().decrypt(
         Uint8List.fromList(fileBytes),
         password,
       );
       await _db.close();
-      AppDatabase? next;
+      closed = true;
+      await BackupStore(
+        supportDir: widget.reset.supportDir,
+        photosDir: widget.reset.photosDir,
+      ).replaceWithPayload(payload: payload, reset: widget.reset);
+      next = widget.reopenDatabase?.call() ?? AppDatabase();
+      await next.settingsDao.keepLocalDeviceId(keepDeviceId);
       try {
-        await BackupStore(
-          supportDir: widget.reset.supportDir,
-          photosDir: widget.reset.photosDir,
-        ).replaceWithPayload(payload: payload, reset: widget.reset);
-        next = widget.reopenDatabase?.call() ?? AppDatabase();
-        await next.settingsDao.keepLocalDeviceId(keepDeviceId);
         await next.partsDao.relativizeAbsolutePhotoPaths();
         await next.settingsDao.setSetting(
           kLastBackupAtKey,
@@ -109,41 +111,39 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
           kLastBackupSourceKey,
           payload.sourceDeviceId,
         );
-        if (!mounted) return;
-        setState(() {
-          _db = next!;
-          _pin = PinService(next.settingsDao);
-          _deviceId = keepDeviceId;
-          _generation++;
-        });
-      } catch (e) {
-        if (next != null && mounted) {
-          setState(() {
-            _db = next!;
-            _pin = PinService(next.settingsDao);
-            _deviceId = keepDeviceId;
-            _generation++;
-          });
-        } else {
-          await _reopen();
-        }
-        rethrow;
+      } catch (_) {
+        // Swap already committed and this device's id is kept.
       }
+      if (!mounted) return;
+      setState(() => _bindLive(next!, keepDeviceId));
+    } catch (e) {
+      if (closed) {
+        next ??= widget.reopenDatabase?.call() ?? AppDatabase();
+        try {
+          await next.settingsDao.keepLocalDeviceId(keepDeviceId);
+        } catch (_) {}
+        if (mounted) {
+          setState(() => _bindLive(next!, keepDeviceId));
+        }
+      }
+      rethrow;
     } finally {
       _wiping = false;
     }
+  }
+
+  void _bindLive(AppDatabase next, String deviceId) {
+    _db = next;
+    _pin = PinService(next.settingsDao);
+    _deviceId = deviceId;
+    _generation++;
   }
 
   Future<void> _reopen() async {
     final next = widget.reopenDatabase?.call() ?? AppDatabase();
     final deviceId = await next.settingsDao.ensureDeviceId();
     if (!mounted) return;
-    setState(() {
-      _db = next;
-      _pin = PinService(next.settingsDao);
-      _deviceId = deviceId;
-      _generation++;
-    });
+    setState(() => _bindLive(next, deviceId));
   }
 
   @override
