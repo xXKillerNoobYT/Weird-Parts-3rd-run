@@ -116,7 +116,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   Future<void> _bootstrap() async {
-    final parts = await _catalog.listParts(activeOnly: false);
+    final parts = await _catalog.listParts(
+      activeOnly: false,
+      includeDeleted: true,
+    );
     final brands = await _db.taxonomyDao.listBrands();
     final suppliers = await _db.taxonomyDao.listSuppliers();
 
@@ -152,7 +155,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
     List<BrandVersion> versions = [];
     if (partId != null) {
-      versions = await _catalog.listBrandVersionsForPart(partId);
+      versions = await _catalog.listBrandVersionsForPart(
+        partId,
+        includeDeleted: true,
+      );
     }
 
     final tree = buildCatalogTree(
@@ -178,7 +184,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _loading = false;
     });
     _refreshPickLabel();
-    await _refreshSupplierChoices();
+    await _refreshSupplierChoices(preserveExistingSplits: true);
   }
 
   void _refreshPickLabel() {
@@ -235,17 +241,28 @@ class _JobLineEditorState extends State<JobLineEditor> {
     await _applyPick(pick);
   }
 
-  Future<void> _refreshSupplierChoices() async {
+  Future<void> _refreshSupplierChoices({
+    bool preserveExistingSplits = false,
+  }) async {
     List<Supplier> choices;
     if (_brandVersionId != null) {
-      // Brand version selected: only suppliers with listings on that version
-      // (may be empty — do not fall back to all suppliers).
-      final listings =
-          await _catalog.listingsForBrandVersion(_brandVersionId!);
-      final ids = listings.map((l) => l.supplierId).toSet();
+      // Include tombstoned listings so a deleted catalog part cannot
+      // look like it has no suppliers and wipe saved splits.
+      final listings = await _catalog.listingsForBrandVersion(
+        _brandVersionId!,
+        includeDeleted: true,
+      );
+      final ids = jobLineEditorSupplierIds(
+        listingSupplierIds: listings.map((l) => l.supplierId),
+        existingSplitSupplierIds: _splits.map((s) => s.supplierId),
+        preserveExistingSplits: preserveExistingSplits,
+      );
       choices = _allSuppliers.where((s) => ids.contains(s.id)).toList();
     } else if (_partId != null) {
-      final part = await _catalog.getPart(_partId!);
+      final part = await _catalog.getPart(
+        _partId!,
+        includeDeleted: true,
+      );
       final preferred = part?.defaultSupplierId;
       choices = List.of(_allSuppliers);
       if (preferred != null) {
@@ -479,7 +496,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
       }
 
       final versions = await _catalog.listBrandVersionsForPart(partId);
-      final parts = await _catalog.listParts(activeOnly: false);
+      final parts = await _catalog.listParts(
+        activeOnly: false,
+        includeDeleted: true,
+      );
       final tree = buildCatalogTree(
         await _catalog.loadTreeSnapshot(activeOnly: true),
       );

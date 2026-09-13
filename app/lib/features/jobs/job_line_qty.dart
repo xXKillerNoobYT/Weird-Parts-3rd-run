@@ -41,3 +41,20 @@ String formatQty(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
   return value.toString();
 }
+
+/// Supplier ids the job-line editor may keep selected.
+///
+/// Live (or tombstoned) catalog listings, plus ids already saved on the
+/// line when [preserveExistingSplits] is true so opening a deleted part
+/// cannot blank supplier splits.
+Set<String> jobLineEditorSupplierIds({
+  required Iterable<String> listingSupplierIds,
+  required Iterable<String?> existingSplitSupplierIds,
+  bool preserveExistingSplits = false,
+}) {
+  final ids = listingSupplierIds.toSet();
+  if (preserveExistingSplits) {
+    ids.addAll(existingSplitSupplierIds.whereType<String>());
+  }
+  return ids;
+}

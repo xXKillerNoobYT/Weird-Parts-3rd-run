@@ -14,16 +14,35 @@ class CatalogRepository {
   final PinService _pin;
   final String _deviceId;
 
-  Future<List<Part>> listParts({bool activeOnly = true}) =>
-      _db.partsDao.listParts(activeOnly: activeOnly);
+  Future<List<Part>> listParts({
+    bool activeOnly = true,
+    bool includeDeleted = false,
+  }) =>
+      _db.partsDao.listParts(
+        activeOnly: activeOnly,
+        includeDeleted: includeDeleted,
+      );
 
-  Future<Part?> getPart(String partId) => _db.partsDao.getPart(partId);
+  Future<Part?> getPart(String partId, {bool includeDeleted = false}) =>
+      _db.partsDao.getPart(partId, includeDeleted: includeDeleted);
 
-  Future<List<BrandVersion>> listBrandVersionsForPart(String partId) =>
-      _db.partsDao.listBrandVersionsForPart(partId);
+  Future<List<BrandVersion>> listBrandVersionsForPart(
+    String partId, {
+    bool includeDeleted = false,
+  }) =>
+      _db.partsDao.listBrandVersionsForPart(
+        partId,
+        includeDeleted: includeDeleted,
+      );
 
-  Future<List<SupplierListing>> listingsForBrandVersion(String bvId) =>
-      _db.partsDao.listingsForBrandVersion(bvId);
+  Future<List<SupplierListing>> listingsForBrandVersion(
+    String bvId, {
+    bool includeDeleted = false,
+  }) =>
+      _db.partsDao.listingsForBrandVersion(
+        bvId,
+        includeDeleted: includeDeleted,
+      );
 
   Future<CatalogTreeSnapshot> loadTreeSnapshot({bool activeOnly = false}) =>
       loadCatalogTreeSnapshot(_db, activeOnly: activeOnly);

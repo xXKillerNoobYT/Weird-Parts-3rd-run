@@ -18,6 +18,28 @@ void main() {
     expect(qty.listSubtitle, contains('Left to Pull/Order 0'));
   });
 
+  test('tombstoned listings still keep saved split supplier ids', () {
+    const supplierId = 'supply-a';
+    final wiped = jobLineEditorSupplierIds(
+      listingSupplierIds: const [],
+      existingSplitSupplierIds: const [supplierId],
+    );
+    expect(wiped, isEmpty);
+
+    final kept = jobLineEditorSupplierIds(
+      listingSupplierIds: const [],
+      existingSplitSupplierIds: const [supplierId],
+      preserveExistingSplits: true,
+    );
+    expect(kept, contains(supplierId));
+
+    final fromListings = jobLineEditorSupplierIds(
+      listingSupplierIds: const [supplierId],
+      existingSplitSupplierIds: const [supplierId],
+    );
+    expect(fromListings, contains(supplierId));
+  });
+
   test('over-split shows a negative left', () {
     const qty = JobLineQty(
       requested: 10,
