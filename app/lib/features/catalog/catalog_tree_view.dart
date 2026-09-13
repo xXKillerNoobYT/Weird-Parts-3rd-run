@@ -12,6 +12,7 @@ class CatalogTreeView extends StatelessWidget {
     this.onPick,
     this.onAddChild,
     this.onRename,
+    this.onRemove,
     this.selectedPartId,
     this.selectedBrandVersionId,
     this.expandAll = false,
@@ -24,6 +25,7 @@ class CatalogTreeView extends StatelessWidget {
   final void Function(CatalogTreeNode node)? onPick;
   final void Function(CatalogTreeNode parent)? onAddChild;
   final void Function(CatalogTreeNode node)? onRename;
+  final void Function(CatalogTreeNode node)? onRemove;
   final String? selectedPartId;
   final String? selectedBrandVersionId;
   final bool expandAll;
@@ -159,7 +161,8 @@ class _Tile extends StatelessWidget {
     }
     if (view.mode != CatalogTreeMode.editor &&
         view.onAddChild == null &&
-        view.onRename == null) {
+        view.onRename == null &&
+        view.onRemove == null) {
       return null;
     }
     final items = <PopupMenuEntry<String>>[
@@ -169,12 +172,15 @@ class _Tile extends StatelessWidget {
         const PopupMenuItem(value: 'rename', child: Text('Rename')),
       if (view.onAddChild != null && _canAdd(node.kind))
         PopupMenuItem(value: 'add', child: Text(_addLabel(node.kind))),
+      if (view.onRemove != null && _canRemove(node))
+        PopupMenuItem(value: 'remove', child: Text(_removeLabel(node.kind))),
     ];
     if (items.isEmpty) return null;
     return PopupMenuButton<String>(
       onSelected: (value) {
         if (value == 'rename') view.onRename?.call(node);
         if (value == 'add') view.onAddChild?.call(node);
+        if (value == 'remove') view.onRemove?.call(node);
       },
       itemBuilder: (_) => items,
     );
@@ -208,6 +214,16 @@ bool _canAdd(CatalogTreeKind kind) {
       kind == CatalogTreeKind.brand;
 }
 
+bool _canRemove(CatalogTreeNode node) {
+  if (node.kind == CatalogTreeKind.part) return true;
+  if (node.kind == CatalogTreeKind.category ||
+      node.kind == CatalogTreeKind.type ||
+      node.kind == CatalogTreeKind.variant) {
+    return node.children.isEmpty;
+  }
+  return false;
+}
+
 String _addLabel(CatalogTreeKind kind) {
   switch (kind) {
     case CatalogTreeKind.category:
@@ -223,4 +239,8 @@ String _addLabel(CatalogTreeKind kind) {
     default:
       return 'Add';
   }
+}
+
+String _removeLabel(CatalogTreeKind kind) {
+  return kind == CatalogTreeKind.part ? 'Remove part' : 'Remove folder';
 }

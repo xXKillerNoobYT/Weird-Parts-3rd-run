@@ -8,6 +8,7 @@ import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:path/path.dart' as p;
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
+import 'package:wired_parts/features/catalog/catalog_tree.dart';
 import 'package:wired_parts/features/catalog/part_photo_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
@@ -141,5 +142,110 @@ void main() {
       (await const PartPhotoStore().resolveFile(second, root: dir)).existsSync(),
       isTrue,
     );
+  });
+
+  test('delete part is PIN-gated and tombstones the row', () async {
+    final id = await catalog.createGeneralPart(name: 'Scrap');
+    await pin.setPin('2468');
+    await expectLater(catalog.deletePart(id), throwsA(isA<StateError>()));
+    expect(await catalog.getPart(id), isNotNull);
+
+    await pin.unlock('2468');
+    await catalog.deletePart(id);
+    expect(await catalog.getPart(id), isNull);
+    expect(
+      (await catalog.listParts(activeOnly: false)).map((p) => p.id),
+      isNot(contains(id)),
+    );
+  });
+
+  test('delete part removes photo files', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-repo-photo-del-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final bytes = Uint8List.fromList(
+      img.encodePng(img.Image(width: 8, height: 8)),
+    );
+    final id = await catalog.createGeneralPart(name: 'With photo');
+    final stored = await catalog.attachPhoto(
+      partId: id,
+      bytes: bytes,
+      root: dir,
+    );
+    await catalog.deletePart(id, root: dir);
+    expect(
+      (await const PartPhotoStore().resolveFile(stored, root: dir)).existsSync(),
+      isFalse,
+    );
+  });
+
+  test('empty folder deletes; occupied folder is refused', () async {
+    final emptyId = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Empty',
+      deviceId: deviceId,
+    );
+    final occupiedId = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Occupied',
+      deviceId: deviceId,
+    );
+    await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: occupiedId,
+      name: 'Type',
+      deviceId: deviceId,
+    );
+
+    await catalog.deleteEmptyFolder(
+      kind: CatalogTreeKind.category,
+      id: emptyId,
+    );
+    expect(
+      (await db.taxonomyDao.listCategories()).map((c) => c.id),
+      isNot(contains(emptyId)),
+    );
+
+    await expectLater(
+      catalog.deleteEmptyFolder(
+        kind: CatalogTreeKind.category,
+        id: occupiedId,
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      (await db.taxonomyDao.listCategories()).map((c) => c.id),
+      contains(occupiedId),
+    );
+
+    await pin.setPin('2468');
+    await expectLater(
+      catalog.deleteEmptyFolder(
+        kind: CatalogTreeKind.category,
+        id: occupiedId,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('deleted part stays off the catalog but job lines remain', () async {
+    final partId = await catalog.createGeneralPart(name: 'On a job');
+    final jobId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Job',
+      deviceId: deviceId,
+    );
+    await db.jobsDao.insertJobLine(
+      id: newId(),
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: null,
+      neededQty: 2,
+      shopPullQty: 0,
+      deviceId: deviceId,
+    );
+    expect(await catalog.countJobLinesForPart(partId), 1);
+    await catalog.deletePart(partId);
+    expect(await catalog.getPart(partId), isNull);
+    expect(await catalog.countJobLinesForPart(partId), 1);
   });
 }

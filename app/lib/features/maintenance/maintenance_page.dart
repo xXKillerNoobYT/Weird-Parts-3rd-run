@@ -193,6 +193,36 @@ class _MaintenancePageState extends State<MaintenancePage> {
     }
   }
 
+  Future<void> _removeNode(CatalogTreeNode node) async {
+    if (!await _gate() || !mounted) return;
+    try {
+      if (node.kind == CatalogTreeKind.part) {
+        final n = await _catalog.countJobLinesForPart(node.id);
+        final extra = n > 0
+            ? ' It is on $n job line(s); those lines stay on jobs.'
+            : '';
+        final ok = await confirmAction(
+          context,
+          title: 'Remove part?',
+          body: 'Remove "${node.label}" from the catalog.$extra',
+        );
+        if (!ok || !mounted) return;
+        await _catalog.deletePart(node.id);
+      } else {
+        final ok = await confirmAction(
+          context,
+          title: 'Remove folder?',
+          body: 'Remove empty folder "${node.label}"?',
+        );
+        if (!ok || !mounted) return;
+        await _catalog.deleteEmptyFolder(kind: node.kind, id: node.id);
+      }
+      await _reload();
+    } on StateError catch (e) {
+      _showMessage(e.message);
+    }
+  }
+
   Future<void> _openPart(CatalogTreeNode node) async {
     if (node.partId == null) return;
     await Navigator.of(context).push(
@@ -260,6 +290,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
                         onOpenPart: _openPart,
                         onAddChild: _addChild,
                         onRename: _rename,
+                        onRemove: _removeNode,
                       )
                     : _rows.isEmpty
                         ? Center(

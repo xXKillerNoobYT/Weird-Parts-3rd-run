@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../catalog/catalog_page.dart';
+import '../catalog/tree_edit_prompts.dart';
 import '../jobs/jobs_page.dart';
 import '../maintenance/maintenance_page.dart';
 import '../pin/pin_gate.dart';
@@ -172,6 +173,28 @@ class _MoreTabState extends State<_MoreTab> {
     );
   }
 
+  Future<void> _wipeAllData() async {
+    final confirmed = await confirmAction(
+      context,
+      title: 'Wipe all local data?',
+      body:
+          'This deletes the catalog, jobs, photos, and PIN on this device and '
+          'leaves an empty shop. Cannot undo.',
+      confirmLabel: 'Wipe everything',
+    );
+    if (!confirmed || !mounted) return;
+    if (!await ensurePinUnlocked(context, AppScope.of(context).pin)) return;
+    if (!mounted) return;
+    try {
+      await AppScope.of(context).wipeLocalData();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Wipe failed: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pinLabel = _pinSet == null
@@ -204,6 +227,12 @@ class _MoreTabState extends State<_MoreTab> {
             title: const Text('Lock catalog'),
             subtitle: const Text('Require PIN for catalog edits'),
             onTap: _lockCatalog,
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_forever_outlined),
+            title: const Text('Reset / wipe all data'),
+            subtitle: const Text('Empty shop — catalog, jobs, photos, PIN'),
+            onTap: _wipeAllData,
           ),
         ],
       ),

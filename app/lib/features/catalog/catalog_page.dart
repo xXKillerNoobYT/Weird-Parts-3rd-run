@@ -176,6 +176,36 @@ class _CatalogPageState extends State<CatalogPage> {
     }
   }
 
+  Future<void> _removeNode(CatalogTreeNode node) async {
+    if (!await _gate() || !mounted) return;
+    try {
+      if (node.kind == CatalogTreeKind.part) {
+        final n = await _catalog.countJobLinesForPart(node.id);
+        final extra = n > 0
+            ? ' It is on $n job line(s); those lines stay on jobs.'
+            : '';
+        final ok = await confirmAction(
+          context,
+          title: 'Remove part?',
+          body: 'Remove "${node.label}" from the catalog.$extra',
+        );
+        if (!ok || !mounted) return;
+        await _catalog.deletePart(node.id);
+      } else {
+        final ok = await confirmAction(
+          context,
+          title: 'Remove folder?',
+          body: 'Remove empty folder "${node.label}"?',
+        );
+        if (!ok || !mounted) return;
+        await _catalog.deleteEmptyFolder(kind: node.kind, id: node.id);
+      }
+      await _reload();
+    } on StateError catch (e) {
+      _toast(e.message);
+    }
+  }
+
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -212,6 +242,7 @@ class _CatalogPageState extends State<CatalogPage> {
                     onOpenPart: _openNode,
                     onAddChild: _addChild,
                     onRename: _rename,
+                    onRemove: _removeNode,
                   ),
           ),
         ],

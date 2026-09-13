@@ -81,6 +81,7 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 - [x] Search / filter that respects the tree
 - [x] Part photos (compress, store, attach) — after the tree
 - [x] Custom part → promote to catalog (editor) — after the tree (#6)
+- [x] Catalog remove (parts + empty folders, PIN) + local reset / wipe all data
 
 ### Phase 3 — Backup
 
