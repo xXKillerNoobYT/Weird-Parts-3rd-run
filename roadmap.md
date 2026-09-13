@@ -55,7 +55,7 @@ Reference drafts (rough, not binding detail yet):
 - [x] App scaffold
 - [x] **Phase 1 — Local core** complete (`feature/phase-1-local-core`)
 
-**Current focus:** Phase 2 — search, filters, and media.
+**Current focus:** Phase 2 — file-tree catalog, Variance under Brands, job Requested / Split / Left to Pull/Order.
 
 ---
 
@@ -70,12 +70,17 @@ Reference drafts (rough, not binding detail yet):
 - [x] Editor PIN gate for catalog writes
 - Note: `AppSettings` (PIN hash, etc.) is **local-only** in Phase 1; sync-shaped settings / PIN sync are Phase 5 prep — do not overbuild now.
 
-### Phase 2 — Search, filters, media
+### Phase 2 — Catalog tree, Variance, job qty
 
-- [ ] Search / filter catalog and jobs
-- [ ] Part photos (compress, store, attach)
-- [ ] Custom part → promote to catalog (editor)
-- [ ] Part category / style / type assignment UI + PartDevices (compatible devices) wiring
+Isaac’s shop walk (approved plan). Old “search, filters, media” wording is replaced.
+
+- [x] File-tree catalog + Types listing share one tree (Category → Type → Variant → brand or general → Variance → part number)
+- [x] Category is a folder, not a part; hang general parts on the tree (no brand)
+- [x] Devices chip gone; **Variance under Brands** (main + other options; colors per brand + own MPN)
+- [x] Job line: **Requested**, Split (shop / Supply A / Supply B / …), **Left to Pull/Order**
+- [x] Search / filter that respects the tree
+- [ ] Part photos (compress, store, attach) — after the tree
+- [ ] Custom part → promote to catalog (editor) — after the tree
 
 ### Phase 3 — Backup
 

@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import '../../app.dart';
 import '../../data/app_database.dart';
 import '../catalog/catalog_repository.dart';
+import '../catalog/catalog_tree.dart';
+import '../catalog/catalog_tree_picker.dart';
+import 'job_line_qty.dart';
 import 'jobs_repository.dart';
 
 class JobLineEditor extends StatefulWidget {
@@ -44,9 +47,11 @@ class _JobLineEditorState extends State<JobLineEditor> {
   List<Brand> _brands = [];
   List<Supplier> _allSuppliers = [];
   List<Supplier> _supplierChoices = [];
+  List<CatalogTreeNode> _tree = [];
 
   String? _partId;
   String? _brandVersionId;
+  String _pickLabel = 'Pick from catalog tree';
   final List<_SplitDraft> _splits = [];
 
   bool _useCustom = false;
@@ -77,6 +82,29 @@ class _JobLineEditorState extends State<JobLineEditor> {
       s.dispose();
     }
     super.dispose();
+  }
+
+  JobLineQty get _previewQty {
+    final requested = double.tryParse(_neededController.text.trim()) ?? 0;
+    final shop = double.tryParse(_pullController.text.trim()) ?? 0;
+    final supplierSplits = <JobSupplierSplit>[];
+    for (final draft in _splits) {
+      final qty = double.tryParse(draft.qtyController.text.trim());
+      if (draft.supplierId == null || qty == null || qty <= 0) continue;
+      String name = 'Supply';
+      for (final s in _allSuppliers) {
+        if (s.id == draft.supplierId) {
+          name = s.name;
+          break;
+        }
+      }
+      supplierSplits.add(JobSupplierSplit(supplierName: name, qty: qty));
+    }
+    return JobLineQty(
+      requested: requested,
+      shop: shop,
+      supplierSplits: supplierSplits,
+    );
   }
 
   Future<void> _bootstrap() async {
@@ -119,11 +147,14 @@ class _JobLineEditorState extends State<JobLineEditor> {
       versions = await _catalog.listBrandVersionsForPart(partId);
     }
 
+    final tree = buildCatalogTree(await _catalog.loadTreeSnapshot());
+
     if (!mounted) return;
     setState(() {
       _parts = parts;
       _brands = brands;
       _allSuppliers = suppliers;
+      _tree = tree;
       _partId = partId;
       _brandVersionId = brandVersionId;
       _useCustom = useCustom;
@@ -136,29 +167,62 @@ class _JobLineEditorState extends State<JobLineEditor> {
         ..addAll(splitDrafts);
       _loading = false;
     });
+    _refreshPickLabel();
     await _refreshSupplierChoices();
   }
 
-  Future<void> _onPartChanged(String? partId) async {
-    setState(() {
-      _partId = partId;
-      _brandVersionId = null;
-      _useCustom = false;
-      _brandVersions = [];
-    });
-    if (partId == null) {
-      await _refreshSupplierChoices();
+  void _refreshPickLabel() {
+    if (_partId == null) {
+      _pickLabel = 'Pick from catalog tree';
       return;
     }
-    final versions = await _catalog.listBrandVersionsForPart(partId);
+    String name = 'Part';
+    for (final p in _parts) {
+      if (p.id == _partId) {
+        name = p.name;
+        break;
+      }
+    }
+    if (_brandVersionId == null) {
+      _pickLabel = name;
+      return;
+    }
+    BrandVersion? version;
+    for (final v in _brandVersions) {
+      if (v.id == _brandVersionId) {
+        version = v;
+        break;
+      }
+    }
+    if (version == null) {
+      _pickLabel = name;
+      return;
+    }
+    _pickLabel = '$name · ${_brandVersionLabel(version)}';
+  }
+
+  Future<void> _applyPick(CatalogTreePick pick) async {
+    final versions = await _catalog.listBrandVersionsForPart(pick.partId);
     if (!mounted) return;
-    setState(() => _brandVersions = versions);
+    setState(() {
+      _useCustom = false;
+      _partId = pick.partId;
+      _brandVersionId = pick.brandVersionId;
+      _brandVersions = versions;
+    });
+    _refreshPickLabel();
     await _refreshSupplierChoices();
   }
 
-  Future<void> _onBrandVersionChanged(String? bvId) async {
-    setState(() => _brandVersionId = bvId);
-    await _refreshSupplierChoices();
+  Future<void> _pickFromTree() async {
+    final pick = await pickFromCatalogTree(
+      context,
+      tree: _tree,
+      selectedPartId: _partId,
+      selectedBrandVersionId: _brandVersionId,
+    );
+    if (pick == null || !mounted) return;
+    await _applyPick(pick);
   }
 
   Future<void> _refreshSupplierChoices() async {
@@ -244,11 +308,11 @@ class _JobLineEditorState extends State<JobLineEditor> {
     final needed = double.tryParse(_neededController.text.trim());
     final pull = double.tryParse(_pullController.text.trim());
     if (needed == null || needed < 0) {
-      _toast('Enter a valid needed quantity');
+      _toast('Enter a valid requested quantity');
       return;
     }
     if (pull == null || pull < 0) {
-      _toast('Enter a valid shop pull quantity');
+      _toast('Enter a valid shop quantity');
       return;
     }
 
@@ -397,49 +461,14 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     ),
                     textCapitalization: TextCapitalization.sentences,
                   )
-                else ...[
-                  DropdownButtonFormField<String>(
-                    // ignore: deprecated_member_use
-                    value: _partId,
-                    decoration: const InputDecoration(
-                      labelText: 'Part',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: _parts
-                        .map(
-                          (p) => DropdownMenuItem(
-                            value: p.id,
-                            child: Text(p.name),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _onPartChanged,
+                else
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Catalog part'),
+                    subtitle: Text(_pickLabel),
+                    trailing: const Icon(Icons.account_tree_outlined),
+                    onTap: _pickFromTree,
                   ),
-                  if (_brandVersions.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String?>(
-                      // ignore: deprecated_member_use
-                      value: _brandVersionId,
-                      decoration: const InputDecoration(
-                        labelText: 'Brand version (optional)',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('None'),
-                        ),
-                        ..._brandVersions.map(
-                          (bv) => DropdownMenuItem<String?>(
-                            value: bv.id,
-                            child: Text(_brandVersionLabel(bv)),
-                          ),
-                        ),
-                      ],
-                      onChanged: _onBrandVersionChanged,
-                    ),
-                  ],
-                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -447,7 +476,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                       child: TextField(
                         controller: _neededController,
                         decoration: const InputDecoration(
-                          labelText: 'Needed qty',
+                          labelText: 'Requested',
                           border: OutlineInputBorder(),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(
@@ -458,6 +487,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                             RegExp(r'[0-9.]'),
                           ),
                         ],
+                        onChanged: (_) => setState(() {}),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -465,7 +495,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                       child: TextField(
                         controller: _pullController,
                         decoration: const InputDecoration(
-                          labelText: 'Shop pull qty',
+                          labelText: 'Shop',
                           border: OutlineInputBorder(),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(
@@ -476,15 +506,26 @@ class _JobLineEditorState extends State<JobLineEditor> {
                             RegExp(r'[0-9.]'),
                           ),
                         ],
+                        onChanged: (_) => setState(() {}),
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Left to Pull/Order ${formatQty(_previewQty.leftToPullOrder)}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Split: ${_previewQty.splitSummary}',
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 24),
                 Row(
                   children: [
                     Text(
-                      'Order splits',
+                      'Split — suppliers',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const Spacer(),
@@ -495,6 +536,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     ),
                   ],
                 ),
+                const Text(
+                  'Shop is the shop slice. Each row is one supplier (Supply A, Supply B, …).',
+                ),
+                const SizedBox(height: 8),
                 ...List.generate(_splits.length, (index) {
                   final split = _splits[index];
                   return Padding(
@@ -543,6 +588,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                                 RegExp(r'[0-9.]'),
                               ),
                             ],
+                            onChanged: (_) => setState(() {}),
                           ),
                         ),
                         IconButton(
@@ -556,6 +602,11 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     ),
                   );
                 }),
+                const SizedBox(height: 16),
+                Text(
+                  'Delivered and Brought to the Job — later.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
     );

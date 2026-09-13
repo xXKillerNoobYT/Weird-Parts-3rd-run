@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
-import '../../data/app_database.dart';
+import '../maintenance/maintenance_repository.dart';
 import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
+import 'catalog_tree.dart';
+import 'catalog_tree_view.dart';
 import 'part_detail_page.dart';
+import 'tree_edit_prompts.dart';
 
 class CatalogPage extends StatefulWidget {
   const CatalogPage({super.key});
@@ -16,7 +19,8 @@ class CatalogPage extends StatefulWidget {
 class _CatalogPageState extends State<CatalogPage> {
   final _searchController = TextEditingController();
   late final CatalogRepository _catalog;
-  List<Part> _parts = [];
+  late final MaintenanceRepository _maintenance;
+  List<CatalogTreeNode> _tree = [];
   bool _loading = true;
   bool _initialized = false;
 
@@ -27,6 +31,7 @@ class _CatalogPageState extends State<CatalogPage> {
     _initialized = true;
     final scope = AppScope.of(context);
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
+    _maintenance = MaintenanceRepository(scope.db, scope.pin, scope.deviceId);
     _reload();
   }
 
@@ -38,72 +43,34 @@ class _CatalogPageState extends State<CatalogPage> {
 
   Future<void> _reload() async {
     setState(() => _loading = true);
-    final all = await _catalog.listParts(activeOnly: false);
+    final snap = await _catalog.loadTreeSnapshot();
     if (!mounted) return;
     setState(() {
-      _parts = all;
+      _tree = buildCatalogTree(snap);
       _loading = false;
     });
   }
 
-  List<Part> get _filtered {
-    final q = _searchController.text.trim().toLowerCase();
-    if (q.isEmpty) return _parts;
-    return _parts
-        .where(
-          (p) =>
-              p.name.toLowerCase().contains(q) ||
-              p.description.toLowerCase().contains(q),
-        )
-        .toList(growable: false);
+  List<CatalogTreeNode> get _visible {
+    return filterCatalogTree(_tree, _searchController.text);
   }
 
-  Future<void> _addPart() async {
+  Future<bool> _gate() async {
     final scope = AppScope.of(context);
-    final unlocked = await ensurePinUnlocked(context, scope.pin);
-    if (!unlocked || !mounted) return;
+    return ensurePinUnlocked(context, scope.pin);
+  }
 
-    final nameController = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('New part'),
-          content: TextField(
-            controller: nameController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Name',
-              hintText: 'General part name',
-            ),
-            textCapitalization: TextCapitalization.sentences,
-            onSubmitted: (_) {
-              final v = nameController.text.trim();
-              if (v.isNotEmpty) Navigator.of(ctx).pop(v);
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final v = nameController.text.trim();
-                if (v.isEmpty) return;
-                Navigator.of(ctx).pop(v);
-              },
-              child: const Text('Create'),
-            ),
-          ],
-        );
-      },
-    );
-    nameController.dispose();
+  Future<void> _addPart({CatalogTreeNode? parent}) async {
+    if (!await _gate() || !mounted) return;
+    final name = await promptName(context, title: 'New part');
     if (name == null || name.isEmpty || !mounted) return;
-
     try {
-      final id = await _catalog.createGeneralPart(name: name);
+      final id = await _catalog.createGeneralPart(
+        name: name,
+        categoryId: parent?.categoryId,
+        styleId: parent?.styleId,
+        typeId: parent?.typeId,
+      );
       await _reload();
       if (!mounted) return;
       await Navigator.of(context).push(
@@ -113,25 +80,111 @@ class _CatalogPageState extends State<CatalogPage> {
       );
       await _reload();
     } on StateError catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      _toast(e.message);
     }
   }
 
-  Future<void> _openPart(Part part) async {
+  Future<void> _openNode(CatalogTreeNode node) async {
+    final partId = node.partId;
+    if (partId == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PartDetailPage(partId: part.id),
+        builder: (_) => PartDetailPage(partId: partId),
       ),
     );
     await _reload();
   }
 
+  Future<void> _addChild(CatalogTreeNode parent) async {
+    if (!await _gate() || !mounted) return;
+    try {
+      switch (parent.kind) {
+        case CatalogTreeKind.category:
+          final name = await promptName(context, title: 'Add type');
+          if (name == null || name.isEmpty) return;
+          await _maintenance.createStyle(
+            categoryId: parent.id,
+            name: name,
+          );
+        case CatalogTreeKind.type:
+          final name = await promptName(context, title: 'Add variant');
+          if (name == null || name.isEmpty) return;
+          await _maintenance.createType(styleId: parent.id, name: name);
+        case CatalogTreeKind.variant:
+          await _addPart(parent: parent);
+          return;
+        case CatalogTreeKind.part:
+        case CatalogTreeKind.brand:
+          if (parent.partId == null) return;
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PartDetailPage(
+                partId: parent.partId!,
+                focusBrandId: parent.brandId,
+              ),
+            ),
+          );
+        default:
+          return;
+      }
+      await _reload();
+    } on StateError catch (e) {
+      _toast(e.message);
+    }
+  }
+
+  Future<void> _rename(CatalogTreeNode node) async {
+    if (!await _gate() || !mounted) return;
+    final name = await promptName(
+      context,
+      title: 'Rename',
+      initial: node.label,
+    );
+    if (name == null || name.isEmpty) return;
+    try {
+      switch (node.kind) {
+        case CatalogTreeKind.category:
+          await _maintenance.renameCategory(node.id, name);
+        case CatalogTreeKind.type:
+          await _maintenance.renameStyle(node.id, name);
+        case CatalogTreeKind.variant:
+          await _maintenance.renameType(node.id, name);
+        case CatalogTreeKind.part:
+          final part = await _catalog.getPart(node.id);
+          if (part == null) return;
+          await _catalog.updatePart(
+            partId: part.id,
+            name: name,
+            description: part.description,
+            uom: part.uom,
+            defaultSupplierId: part.defaultSupplierId,
+            active: part.active,
+            categoryId: part.categoryId,
+            styleId: part.styleId,
+            typeId: part.typeId,
+          );
+        case CatalogTreeKind.brand:
+          if (node.brandId != null) {
+            await _maintenance.renameBrand(node.brandId!, name);
+          }
+        default:
+          return;
+      }
+      await _reload();
+    } on StateError catch (e) {
+      _toast(e.message);
+    }
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final items = _filtered;
+    final items = _visible;
+    final searching = _searchController.text.trim().isNotEmpty;
     return Scaffold(
       appBar: AppBar(title: const Text('Catalog')),
       body: Column(
@@ -142,7 +195,7 @@ class _CatalogPageState extends State<CatalogPage> {
               controller: _searchController,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: 'Search parts',
+                hintText: 'Search the tree',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -152,24 +205,14 @@ class _CatalogPageState extends State<CatalogPage> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : items.isEmpty
-                    ? const Center(child: Text('No parts yet'))
-                    : ListView.builder(
-                        itemCount: items.length,
-                        itemBuilder: (context, index) {
-                          final part = items[index];
-                          return ListTile(
-                            title: Text(part.name),
-                            subtitle: Text(
-                              [
-                                if (part.uom.isNotEmpty) part.uom,
-                                if (!part.active) 'Inactive',
-                              ].join(' · '),
-                            ),
-                            onTap: () => _openPart(part),
-                          );
-                        },
-                      ),
+                : CatalogTreeView(
+                    nodes: items,
+                    mode: CatalogTreeMode.editor,
+                    expandAll: searching,
+                    onOpenPart: _openNode,
+                    onAddChild: _addChild,
+                    onRename: _rename,
+                  ),
           ),
         ],
       ),

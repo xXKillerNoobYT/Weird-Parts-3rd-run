@@ -43,12 +43,26 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(brandVersions, brandVersions.varianceName);
+            await m.addColumn(brandVersions, brandVersions.isMain);
+          }
+        },
+      );
 }
 
 LazyDatabase _open() {
   return LazyDatabase(() async {
-    final dir = await getApplicationDocumentsDirectory();
+    // Prefer Application Support over Documents: OneDrive-backed Documents
+    // on Windows can fail SQLite open (SQLITE_CANTOPEN / code 14).
+    final dir = await getApplicationSupportDirectory();
+    await dir.create(recursive: true);
     final file = File(p.join(dir.path, 'wired_parts.sqlite'));
     return NativeDatabase.createInBackground(file);
   });

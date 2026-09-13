@@ -1,6 +1,7 @@
 import '../../core/new_id.dart';
 import '../../data/app_database.dart';
 import '../pin/pin_service.dart';
+import 'catalog_tree.dart';
 
 class CatalogRepository {
   CatalogRepository(this._db, this._pin, this._deviceId);
@@ -20,9 +21,15 @@ class CatalogRepository {
   Future<List<SupplierListing>> listingsForBrandVersion(String bvId) =>
       _db.partsDao.listingsForBrandVersion(bvId);
 
+  Future<CatalogTreeSnapshot> loadTreeSnapshot() =>
+      loadCatalogTreeSnapshot(_db);
+
   Future<String> createGeneralPart({
     required String name,
     String? defaultSupplierId,
+    String? categoryId,
+    String? styleId,
+    String? typeId,
   }) async {
     await _pin.requireUnlocked();
     return _db.partsDao.insertGeneralPart(
@@ -30,6 +37,9 @@ class CatalogRepository {
       name: name,
       deviceId: _deviceId,
       defaultSupplierId: defaultSupplierId,
+      categoryId: categoryId,
+      styleId: styleId,
+      typeId: typeId,
     );
   }
 
@@ -40,6 +50,9 @@ class CatalogRepository {
     required String uom,
     String? defaultSupplierId,
     required bool active,
+    String? categoryId,
+    String? styleId,
+    String? typeId,
   }) async {
     await _pin.requireUnlocked();
     await _db.partsDao.updatePart(
@@ -49,6 +62,9 @@ class CatalogRepository {
       uom: uom,
       defaultSupplierId: defaultSupplierId,
       active: active,
+      categoryId: categoryId,
+      styleId: styleId,
+      typeId: typeId,
     );
   }
 
@@ -56,6 +72,8 @@ class CatalogRepository {
     required String partId,
     required String brandId,
     required String mpn,
+    String varianceName = '',
+    bool isMain = false,
   }) async {
     await _pin.requireUnlocked();
     return _db.partsDao.insertBrandVersion(
@@ -64,6 +82,23 @@ class CatalogRepository {
       brandId: brandId,
       mpn: mpn,
       deviceId: _deviceId,
+      varianceName: varianceName,
+      isMain: isMain,
+    );
+  }
+
+  Future<void> updateBrandVersion({
+    required String id,
+    required String mpn,
+    required String varianceName,
+    required bool isMain,
+  }) async {
+    await _pin.requireUnlocked();
+    await _db.partsDao.updateBrandVersion(
+      id: id,
+      mpn: mpn,
+      varianceName: varianceName,
+      isMain: isMain,
     );
   }
 
