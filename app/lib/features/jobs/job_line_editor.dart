@@ -60,8 +60,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
   bool _loading = true;
   bool _saving = false;
   bool _initialized = false;
+  String? _lineId;
 
-  bool get _isEditing => widget.lineId != null;
+  bool get _isEditing => _lineId != null;
 
   @override
   void didChangeDependencies() {
@@ -72,6 +73,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     _db = scope.db;
     _jobs = JobsRepository(scope.db, scope.deviceId);
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
+    _lineId = widget.lineId;
     _bootstrap();
   }
 
@@ -298,7 +300,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (confirmed != true || !mounted) return;
     setState(() => _saving = true);
     try {
-      await _jobs.removeLine(widget.lineId!);
+      await _jobs.removeLine(_lineId!);
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
@@ -359,7 +361,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     try {
       late final String lineId;
       if (_isEditing) {
-        lineId = widget.lineId!;
+        lineId = _lineId!;
         await _jobs.updateLine(
           lineId: lineId,
           partId: partId,
@@ -389,143 +391,161 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   Future<void> _promoteToCatalog() async {
+    if (_saving || _loading) return;
     final name = _customNameController.text.trim();
     if (name.isEmpty) {
       _toast('Custom name is required');
       return;
     }
-    final scope = AppScope.of(context);
-    if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
 
-    final categories = await _db.taxonomyDao.listCategories();
-    final styles = await _db.taxonomyDao.listStyles();
-    final variants = await _db.taxonomyDao.listTypes();
-    if (!mounted) return;
-
-    String? categoryId;
-    String? styleId;
-    String? typeId;
-    final nameController = TextEditingController(text: name);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            final typesForCat = styles
-                .where((s) => categoryId != null && s.categoryId == categoryId)
-                .toList();
-            final variantsForType = variants
-                .where((t) => styleId != null && t.styleId == styleId)
-                .toList();
-            return AlertDialog(
-              title: const Text('Promote to catalog'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Part name',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String?>(
-                      // ignore: deprecated_member_use
-                      value: categoryId,
-                      decoration: const InputDecoration(
-                        labelText: 'Category (folder)',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('Unassigned'),
-                        ),
-                        for (final c in categories)
-                          DropdownMenuItem(value: c.id, child: Text(c.name)),
-                      ],
-                      onChanged: (v) => setLocal(() {
-                        categoryId = v;
-                        styleId = null;
-                        typeId = null;
-                      }),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String?>(
-                      // ignore: deprecated_member_use
-                      value: styleId,
-                      decoration: const InputDecoration(
-                        labelText: 'Type',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('None'),
-                        ),
-                        for (final s in typesForCat)
-                          DropdownMenuItem(value: s.id, child: Text(s.name)),
-                      ],
-                      onChanged: (v) => setLocal(() {
-                        styleId = v;
-                        typeId = null;
-                      }),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String?>(
-                      // ignore: deprecated_member_use
-                      value: typeId,
-                      decoration: const InputDecoration(
-                        labelText: 'Variant',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('None'),
-                        ),
-                        for (final t in variantsForType)
-                          DropdownMenuItem(value: t.id, child: Text(t.name)),
-                      ],
-                      onChanged: (v) => setLocal(() => typeId = v),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    if (nameController.text.trim().isEmpty) return;
-                    Navigator.pop(ctx, true);
-                  },
-                  child: const Text('Promote'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    final partName = nameController.text.trim();
-    nameController.dispose();
-    if (ok != true || partName.isEmpty || !mounted) return;
-
+    setState(() => _saving = true);
     try {
+      final scope = AppScope.of(context);
+      if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
+
+      final categories = await _db.taxonomyDao.listCategories();
+      final styles = await _db.taxonomyDao.listStyles();
+      final variants = await _db.taxonomyDao.listTypes();
+      if (!mounted) return;
+
+      String? categoryId;
+      String? styleId;
+      String? typeId;
+      final nameController = TextEditingController(text: name);
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (ctx, setLocal) {
+              final typesForCat = styles
+                  .where((s) => categoryId != null && s.categoryId == categoryId)
+                  .toList();
+              final variantsForType = variants
+                  .where((t) => styleId != null && t.styleId == styleId)
+                  .toList();
+              return AlertDialog(
+                title: const Text('Promote to catalog'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.',
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Part name',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        // ignore: deprecated_member_use
+                        value: categoryId,
+                        decoration: const InputDecoration(
+                          labelText: 'Category (folder)',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Unassigned'),
+                          ),
+                          for (final c in categories)
+                            DropdownMenuItem(value: c.id, child: Text(c.name)),
+                        ],
+                        onChanged: (v) => setLocal(() {
+                          categoryId = v;
+                          styleId = null;
+                          typeId = null;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        // ignore: deprecated_member_use
+                        value: styleId,
+                        decoration: const InputDecoration(
+                          labelText: 'Type',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None'),
+                          ),
+                          for (final s in typesForCat)
+                            DropdownMenuItem(value: s.id, child: Text(s.name)),
+                        ],
+                        onChanged: (v) => setLocal(() {
+                          styleId = v;
+                          typeId = null;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        // ignore: deprecated_member_use
+                        value: typeId,
+                        decoration: const InputDecoration(
+                          labelText: 'Variant',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None'),
+                          ),
+                          for (final t in variantsForType)
+                            DropdownMenuItem(value: t.id, child: Text(t.name)),
+                        ],
+                        onChanged: (v) => setLocal(() => typeId = v),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      if (nameController.text.trim().isEmpty) return;
+                      Navigator.pop(ctx, true);
+                    },
+                    child: const Text('Promote'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      final partName = nameController.text.trim();
+      nameController.dispose();
+      if (ok != true || partName.isEmpty || !mounted) return;
+
       final partId = await _catalog.createGeneralPart(
         name: partName,
         categoryId: categoryId,
         styleId: styleId,
         typeId: typeId,
       );
-      if (_isEditing) {
-        await _jobs.attachCatalogPart(lineId: widget.lineId!, partId: partId);
+      final needed = double.tryParse(_neededController.text.trim()) ?? 1;
+      final pull = double.tryParse(_pullController.text.trim()) ?? 0;
+      if (_lineId != null) {
+        await _jobs.attachCatalogPart(lineId: _lineId!, partId: partId);
+      } else {
+        _lineId = await _jobs.addLine(
+          jobId: widget.jobId,
+          partId: partId,
+          neededQty: needed < 0 ? 1 : needed,
+          shopPullQty: pull < 0 ? 0 : pull,
+        );
+        await _jobs.replaceOrderSplits(_lineId!, _previewSplits());
       }
+
       final versions = await _catalog.listBrandVersionsForPart(partId);
       final parts = await _catalog.listParts(activeOnly: false);
       final tree = buildCatalogTree(
@@ -543,14 +563,22 @@ class _JobLineEditorState extends State<JobLineEditor> {
       });
       _refreshPickLabel();
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => PartDetailPage(partId: partId),
-        ),
-      );
+      _toast('On this job as a catalog part. Back out when you are done.');
     } on StateError catch (e) {
-      _toast(e.message);
+      if (mounted) _toast(e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
+  }
+
+  List<({String supplierId, double qty})> _previewSplits() {
+    final splits = <({String supplierId, double qty})>[];
+    for (final draft in _splits) {
+      final qty = double.tryParse(draft.qtyController.text.trim());
+      if (draft.supplierId == null || qty == null || qty <= 0) continue;
+      splits.add((supplierId: draft.supplierId!, qty: qty));
+    }
+    return splits;
   }
 
   void _toast(String message) {
@@ -605,7 +633,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     ButtonSegment(value: true, label: Text('Custom')),
                   ],
                   selected: {_useCustom},
-                  onSelectionChanged: (sel) async {
+                  onSelectionChanged: _saving
+                      ? null
+                      : (sel) async {
                     final custom = sel.first;
                     setState(() {
                       _useCustom = custom;
@@ -638,14 +668,35 @@ class _JobLineEditorState extends State<JobLineEditor> {
                       label: const Text('Promote to catalog'),
                     ),
                   ),
-                ] else
+                  const Text(
+                    'PIN required. Puts this name on the catalog tree and on this job.',
+                  ),
+                ] else ...[
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Catalog part'),
                     subtitle: Text(_pickLabel),
                     trailing: const Icon(Icons.account_tree_outlined),
-                    onTap: _pickFromTree,
+                    onTap: _saving ? null : _pickFromTree,
                   ),
+                  if (_partId != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        PartDetailPage(partId: _partId!),
+                                  ),
+                                );
+                              },
+                        child: const Text('Open catalog part'),
+                      ),
+                    ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [

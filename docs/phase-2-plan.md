@@ -12,22 +12,17 @@ Isaac’s shop walk (approved). Replaces the older “search / filters / media�
 6. Tree search keeps matching leaves and their ancestor folders.
 7. PIN still gates catalog / tree writes. Jobs still do not ask for a PIN.
 8. **Part photos** — compress to JPEG (max edge 1600), store under Application Support, attach on the part screen (PIN).
+9. **Custom job line → catalog promote** — PIN editor creates a general part, hangs it on the tree, and points the job line at it (including add-mode).
 
-## In this photos PR
+## In this promote PR
 
-- PIN unlock no longer crashes catalog folders (`ExpansionTile` Theme left dependents when the PIN keyboard rebuilt the still-mounted Catalog tab).
-- Wrong PIN stays on the dialog with an error instead of silently closing.
-- Mac sandbox can open the user-selected file picker (`files.user-selected.read-only`).
-- Desktop hides **Take photo** (no camera delegate); Choose photo is the Win/Mac path.
-- Photo add/replace/remove does not wipe unsaved name / tree / active edits.
-- Stored photo id is a relative filename; replace uses a new filename so the preview is not a stale `Image.file` cache.
-- JPEG compress runs off the UI isolate.
+- Promote sets `_saving` so Save cannot race and overwrite the new catalog link.
+- Promote from **Add line** (no `lineId` yet) creates the job line as a catalog part — backing out does not drop a custom-only leftover.
 
 ## Still other Phase 2 PRs (not this one)
 
-- Custom job line → catalog promote ([#6](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/6))
 - Documents sqlite → Application Support copy ([#7](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/7))
-- Search expands matching folders ([#8](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/8)) — tree identity in this PR also unblocks expand-on-search
+- Search expands matching folders ([#8](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/8))
 
 ## Out of Phase 2
 
@@ -44,3 +39,4 @@ Isaac’s shop walk (approved). Replaces the older “search / filters / media�
 - Cannot add a category folder as a job line
 - Catalog or More → edit → PIN **1234** unlocks (no red screen)
 - Attach / replace / remove a part photo (Windows: Choose photo; phone: camera OK)
+- Promote a custom job line (including from Add line before the first Save); it stays on the job as a catalog part

@@ -119,6 +119,25 @@ void main() {
     expect(line.shopPullQty, 4);
   });
 
+  test('add-mode promote persists a catalog job line', () async {
+    final jobId = await jobs.createJob('Panel');
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'temp valve',
+      deviceId: deviceId,
+    );
+    final lineId = await jobs.addLine(
+      jobId: jobId,
+      partId: partId,
+      neededQty: 10,
+      shopPullQty: 4,
+    );
+    final line = await jobs.getJobLine(lineId);
+    expect(line!.partId, partId);
+    expect(line.customName, isNull);
+    expect(await jobs.listLinesForJob(jobId), hasLength(1));
+  });
+
   test('job line still names an inactive catalog part', () async {
     final partId = await db.partsDao.insertGeneralPart(
       id: newId(),
