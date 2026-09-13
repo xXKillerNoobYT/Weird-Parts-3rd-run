@@ -198,4 +198,36 @@ void main() {
     expect(rows.first.isMain, isTrue);
     expect(rows.where((r) => r.isMain), hasLength(1));
   });
+
+  test('job picker tree omits inactive parts; catalog tree keeps them', () async {
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Retired clip',
+      deviceId: deviceId,
+    );
+    await db.partsDao.updatePart(
+      id: partId,
+      name: 'Retired clip',
+      description: '',
+      uom: 'ea',
+      defaultSupplierId: null,
+      active: false,
+      categoryId: null,
+      styleId: null,
+      typeId: null,
+    );
+
+    final catalogTree = buildCatalogTree(await loadCatalogTreeSnapshot(db));
+    final unassigned = catalogTree
+        .firstWhere((n) => n.kind == CatalogTreeKind.unassigned);
+    expect(unassigned.children.map((c) => c.label), contains('Retired clip'));
+
+    final pickerTree = buildCatalogTree(
+      await loadCatalogTreeSnapshot(db, activeOnly: true),
+    );
+    expect(
+      pickerTree.any((n) => n.kind == CatalogTreeKind.unassigned),
+      isFalse,
+    );
+  });
 }
