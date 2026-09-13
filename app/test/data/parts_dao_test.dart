@@ -86,5 +86,12 @@ void main() {
     expect(await db.partsDao.getPart(partId), isNull);
     expect(await db.partsDao.listBrandVersionsForPart(partId), isEmpty);
     expect(await db.partsDao.listingsForBrandVersion(bvId), isEmpty);
+    final tombstone = await db.partsDao.getPart(partId, includeDeleted: true);
+    expect(tombstone?.name, 'Valve');
+    expect(tombstone?.deletedAt, isNotNull);
+    expect(
+      await db.partsDao.listBrandVersionsForPart(partId, includeDeleted: true),
+      isNotEmpty,
+    );
   });
 }

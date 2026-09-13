@@ -143,10 +143,12 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     return id;
   }
 
-  Future<Part?> getPart(String partId) {
-    return (select(parts)
-          ..where((t) => t.id.equals(partId) & t.deletedAt.isNull()))
-        .getSingleOrNull();
+  Future<Part?> getPart(String partId, {bool includeDeleted = false}) {
+    final q = select(parts)..where((t) => t.id.equals(partId));
+    if (!includeDeleted) {
+      q.where((t) => t.deletedAt.isNull());
+    }
+    return q.getSingleOrNull();
   }
 
   Future<void> updatePart({
@@ -188,8 +190,14 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     );
   }
 
-  Future<List<Part>> listParts({bool activeOnly = true}) {
-    final q = select(parts)..where((t) => t.deletedAt.isNull());
+  Future<List<Part>> listParts({
+    bool activeOnly = true,
+    bool includeDeleted = false,
+  }) {
+    final q = select(parts);
+    if (!includeDeleted) {
+      q.where((t) => t.deletedAt.isNull());
+    }
     if (activeOnly) {
       q.where((t) => t.active.equals(true));
     }
@@ -197,15 +205,20 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     return q.get();
   }
 
-  Future<List<BrandVersion>> listBrandVersionsForPart(String partId) {
-    return (select(brandVersions)
-          ..where((t) => t.partId.equals(partId) & t.deletedAt.isNull())
-          ..orderBy([
-            (t) => OrderingTerm.desc(t.isMain),
-            (t) => OrderingTerm.asc(t.varianceName),
-            (t) => OrderingTerm.asc(t.mpn),
-          ]))
-        .get();
+  Future<List<BrandVersion>> listBrandVersionsForPart(
+    String partId, {
+    bool includeDeleted = false,
+  }) {
+    final q = select(brandVersions)..where((t) => t.partId.equals(partId));
+    if (!includeDeleted) {
+      q.where((t) => t.deletedAt.isNull());
+    }
+    q.orderBy([
+      (t) => OrderingTerm.desc(t.isMain),
+      (t) => OrderingTerm.asc(t.varianceName),
+      (t) => OrderingTerm.asc(t.mpn),
+    ]);
+    return q.get();
   }
 
   Future<List<BrandVersion>> listAllBrandVersions() {

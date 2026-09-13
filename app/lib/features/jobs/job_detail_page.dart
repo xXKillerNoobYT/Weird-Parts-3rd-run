@@ -37,8 +37,14 @@ class _JobDetailPageState extends State<JobDetailPage> {
     final scope = AppScope.of(context);
     final job = await _jobs.getJob(widget.jobId);
     final lines = await _jobs.listLinesForJob(widget.jobId);
-    final parts = await scope.db.partsDao.listParts(activeOnly: false);
-    final partNames = {for (final p in parts) p.id: p.name};
+    final parts = await scope.db.partsDao.listParts(
+      activeOnly: false,
+      includeDeleted: true,
+    );
+    final partNames = {
+      for (final p in parts)
+        p.id: p.deletedAt == null ? p.name : '${p.name} (removed)',
+    };
 
     final suppliers = await scope.db.taxonomyDao.listSuppliers();
     final supplierNames = {for (final s in suppliers) s.id: s.name};

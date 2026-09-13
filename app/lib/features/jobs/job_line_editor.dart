@@ -9,6 +9,7 @@ import '../catalog/catalog_tree_picker.dart';
 import '../catalog/part_detail_page.dart';
 import '../pin/pin_gate.dart';
 import 'job_line_qty.dart';
+import 'job_line_supplier_choices.dart';
 import 'jobs_repository.dart';
 
 class JobLineEditor extends StatefulWidget {
@@ -57,6 +58,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
   final List<_SplitDraft> _splits = [];
 
   bool _useCustom = false;
+  bool _catalogPartMissing = false;
+  String? _removedPartName;
   bool _loading = true;
   bool _saving = false;
   bool _initialized = false;
@@ -147,8 +150,13 @@ class _JobLineEditorState extends State<JobLineEditor> {
     }
 
     List<BrandVersion> versions = [];
+    Part? storedPart;
     if (partId != null) {
-      versions = await _catalog.listBrandVersionsForPart(partId);
+      storedPart = await _catalog.getPart(partId, includeDeleted: true);
+      versions = await _catalog.listBrandVersionsForPart(
+        partId,
+        includeDeleted: storedPart?.deletedAt != null,
+      );
     }
 
     final tree = buildCatalogTree(
@@ -164,6 +172,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _partId = partId;
       _brandVersionId = brandVersionId;
       _useCustom = useCustom;
+      _catalogPartMissing =
+          partId != null && (storedPart == null || storedPart.deletedAt != null);
+      _removedPartName =
+          _catalogPartMissing ? storedPart?.name : null;
       _customNameController.text = customName;
       _neededController.text = needed;
       _pullController.text = pull;
@@ -182,29 +194,26 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _pickLabel = 'Pick from catalog tree';
       return;
     }
-    String name = 'Part';
+    String name = _removedPartName ?? 'Part';
     for (final p in _parts) {
       if (p.id == _partId) {
         name = p.name;
         break;
       }
     }
-    if (_brandVersionId == null) {
-      _pickLabel = name;
-      return;
-    }
     BrandVersion? version;
-    for (final v in _brandVersions) {
-      if (v.id == _brandVersionId) {
-        version = v;
-        break;
+    if (_brandVersionId != null) {
+      for (final v in _brandVersions) {
+        if (v.id == _brandVersionId) {
+          version = v;
+          break;
+        }
       }
     }
-    if (version == null) {
-      _pickLabel = name;
-      return;
-    }
-    _pickLabel = '$name · ${_brandVersionLabel(version)}';
+    final labeled = version == null ? name : '$name · ${_brandVersionLabel(version)}';
+    _pickLabel = _catalogPartMissing
+        ? '$labeled (removed from catalog)'
+        : labeled;
   }
 
   Future<void> _applyPick(CatalogTreePick pick) async {
@@ -215,6 +224,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _partId = pick.partId;
       _brandVersionId = pick.brandVersionId;
       _brandVersions = versions;
+      _catalogPartMissing = false;
+      _removedPartName = null;
     });
     _refreshPickLabel();
     await _refreshSupplierChoices();
@@ -232,33 +243,28 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   Future<void> _refreshSupplierChoices() async {
-    List<Supplier> choices;
-    if (_brandVersionId != null) {
-      // Brand version selected: only suppliers with listings on that version
-      // (may be empty — do not fall back to all suppliers).
-      final listings =
-          await _catalog.listingsForBrandVersion(_brandVersionId!);
-      final ids = listings.map((l) => l.supplierId).toSet();
-      choices = _allSuppliers.where((s) => ids.contains(s.id)).toList();
-    } else if (_partId != null) {
-      final part = await _catalog.getPart(_partId!);
-      final preferred = part?.defaultSupplierId;
-      choices = List.of(_allSuppliers);
-      if (preferred != null) {
-        choices.sort((a, b) {
-          if (a.id == preferred) return -1;
-          if (b.id == preferred) return 1;
-          return a.name.compareTo(b.name);
-        });
-      }
-    } else {
-      choices = List.of(_allSuppliers);
+    List<SupplierListing> listings = const [];
+    String? defaultSupplierId;
+    if (!_catalogPartMissing && _brandVersionId != null) {
+      listings = await _catalog.listingsForBrandVersion(_brandVersionId!);
+    } else if (!_catalogPartMissing && _partId != null) {
+      defaultSupplierId =
+          (await _catalog.getPart(_partId!))?.defaultSupplierId;
     }
+
+    final resolved = jobLineSupplierChoices(
+      allSuppliers: _allSuppliers,
+      catalogPartMissing: _catalogPartMissing,
+      brandVersionId: _catalogPartMissing ? null : _brandVersionId,
+      listingSupplierIds: listings.map((l) => l.supplierId).toSet(),
+      defaultSupplierId: defaultSupplierId,
+    );
 
     if (!mounted) return;
     setState(() {
-      _supplierChoices = choices;
-      final allowed = choices.map((s) => s.id).toSet();
+      _supplierChoices = resolved.choices;
+      if (resolved.preserveExistingSplits) return;
+      final allowed = resolved.choices.map((s) => s.id).toSet();
       for (final split in _splits) {
         if (split.supplierId != null && !allowed.contains(split.supplierId)) {
           split.supplierId = null;
@@ -568,6 +574,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
         _brandVersions = versions;
         _parts = parts;
         _tree = tree;
+        _catalogPartMissing = false;
+        _removedPartName = null;
         _customNameController.clear();
       });
       _refreshPickLabel();
@@ -652,6 +660,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
                         _partId = null;
                         _brandVersionId = null;
                         _brandVersions = [];
+                        _catalogPartMissing = false;
+                        _removedPartName = null;
                       } else {
                         _customNameController.clear();
                       }
@@ -688,7 +698,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     trailing: const Icon(Icons.account_tree_outlined),
                     onTap: _saving ? null : _pickFromTree,
                   ),
-                  if (_partId != null)
+                  if (_partId != null && !_catalogPartMissing)
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
