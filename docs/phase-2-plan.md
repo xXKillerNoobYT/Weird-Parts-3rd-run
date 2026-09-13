@@ -18,6 +18,7 @@ Isaac’s shop walk (approved). Replaces the older “search / filters / media�
 
 - Promote sets `_saving` so Save cannot race and overwrite the new catalog link.
 - Promote from **Add line** (no `lineId` yet) creates the job line as a catalog part — backing out does not drop a custom-only leftover.
+- **Edit-mode promote** writes the form's Requested / shop / splits onto the line (same values add-mode already persisted). Backing out after promote keeps those qty edits.
 
 ## Still other Phase 2 PRs (not this one)
 
@@ -40,3 +41,4 @@ Isaac’s shop walk (approved). Replaces the older “search / filters / media�
 - Catalog or More → edit → PIN **1234** unlocks (no red screen)
 - Attach / replace / remove a part photo (Windows: Choose photo; phone: camera OK)
 - Promote a custom job line (including from Add line before the first Save); it stays on the job as a catalog part
+- Edit an existing custom line's Requested / shop / splits, then Promote without Save — qty edits stay on the job line

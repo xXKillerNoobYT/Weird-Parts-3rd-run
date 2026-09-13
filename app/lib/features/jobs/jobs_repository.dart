@@ -89,9 +89,15 @@ class JobsRepository {
   }
 
   /// Point a custom line at a catalog part and drop the custom name.
+  ///
+  /// Pass [neededQty] / [shopPullQty] / [splits] to persist unsaved form
+  /// values (edit-mode promote). Stored qty/splits are kept when omitted.
   Future<void> attachCatalogPart({
     required String lineId,
     required String partId,
+    double? neededQty,
+    double? shopPullQty,
+    List<({String supplierId, double qty})>? splits,
   }) async {
     final line = await getJobLine(lineId);
     if (line == null) return;
@@ -101,11 +107,14 @@ class JobsRepository {
       brandVersionId: null,
       customName: null,
       customNotes: line.customNotes,
-      neededQty: line.neededQty,
-      shopPullQty: line.shopPullQty,
+      neededQty: neededQty ?? line.neededQty,
+      shopPullQty: shopPullQty ?? line.shopPullQty,
       uom: line.uom,
       notes: line.notes,
     );
+    if (splits != null) {
+      await replaceOrderSplits(lineId, splits);
+    }
   }
 
   Future<void> replaceOrderSplits(

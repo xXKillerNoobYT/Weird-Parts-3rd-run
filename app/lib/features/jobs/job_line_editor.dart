@@ -534,16 +534,25 @@ class _JobLineEditorState extends State<JobLineEditor> {
       );
       final needed = double.tryParse(_neededController.text.trim()) ?? 1;
       final pull = double.tryParse(_pullController.text.trim()) ?? 0;
+      final neededQty = needed < 0 ? 1 : needed;
+      final shopPullQty = pull < 0 ? 0 : pull;
+      final splits = _previewSplits();
       if (_lineId != null) {
-        await _jobs.attachCatalogPart(lineId: _lineId!, partId: partId);
+        await _jobs.attachCatalogPart(
+          lineId: _lineId!,
+          partId: partId,
+          neededQty: neededQty,
+          shopPullQty: shopPullQty,
+          splits: splits,
+        );
       } else {
         _lineId = await _jobs.addLine(
           jobId: widget.jobId,
           partId: partId,
-          neededQty: needed < 0 ? 1 : needed,
-          shopPullQty: pull < 0 ? 0 : pull,
+          neededQty: neededQty,
+          shopPullQty: shopPullQty,
         );
-        await _jobs.replaceOrderSplits(_lineId!, _previewSplits());
+        await _jobs.replaceOrderSplits(_lineId!, splits);
       }
 
       final versions = await _catalog.listBrandVersionsForPart(partId);

@@ -119,6 +119,58 @@ void main() {
     expect(line.shopPullQty, 4);
   });
 
+  test('edit-mode promote persists form qty and splits', () async {
+    final s1 = await db.taxonomyDao.insertSupplier(
+      id: newId(),
+      name: 'A',
+      deviceId: deviceId,
+    );
+    final s2 = await db.taxonomyDao.insertSupplier(
+      id: newId(),
+      name: 'B',
+      deviceId: deviceId,
+    );
+    final jobId = await jobs.createJob('Panel');
+    final lineId = await jobs.addLine(
+      jobId: jobId,
+      customName: 'temp valve',
+      neededQty: 10,
+      shopPullQty: 4,
+    );
+    await jobs.replaceOrderSplits(lineId, [
+      (supplierId: s1, qty: 3),
+      (supplierId: s2, qty: 3),
+    ]);
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'temp valve',
+      deviceId: deviceId,
+    );
+
+    await jobs.attachCatalogPart(
+      lineId: lineId,
+      partId: partId,
+      neededQty: 12,
+      shopPullQty: 5,
+      splits: [
+        (supplierId: s1, qty: 4),
+        (supplierId: s2, qty: 3),
+      ],
+    );
+
+    final line = await jobs.getJobLine(lineId);
+    expect(line!.partId, partId);
+    expect(line.customName, isNull);
+    expect(line.neededQty, 12);
+    expect(line.shopPullQty, 5);
+    final splits = await jobs.orderSplitsForLine(lineId);
+    expect(splits, hasLength(2));
+    expect(
+      splits.map((s) => s.quantity).fold<double>(0, (a, b) => a + b),
+      7,
+    );
+  });
+
   test('add-mode promote persists a catalog job line', () async {
     final jobId = await jobs.createJob('Panel');
     final partId = await db.partsDao.insertGeneralPart(
