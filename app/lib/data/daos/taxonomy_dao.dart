@@ -211,4 +211,71 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
       ),
     );
   }
+
+  Future<bool> isCategoryEmpty(String id) async {
+    final styles = await listStyles(categoryId: id);
+    if (styles.isNotEmpty) return false;
+    return !await db.partsDao.hasLiveParts(categoryId: id);
+  }
+
+  Future<bool> isStyleEmpty(String id) async {
+    final types = await listTypes(styleId: id);
+    if (types.isNotEmpty) return false;
+    return !await db.partsDao.hasLiveParts(styleId: id);
+  }
+
+  Future<bool> isTypeEmpty(String id) async {
+    return !await db.partsDao.hasLiveParts(typeId: id);
+  }
+
+  Future<void> softDeleteCategory(String id) async {
+    await _tombstoneCategories(id);
+  }
+
+  Future<void> softDeleteStyle(String id) async {
+    await _tombstoneStyles(id);
+  }
+
+  Future<void> softDeleteType(String id) async {
+    await _tombstoneTypes(id);
+  }
+
+  Future<void> _tombstoneCategories(String id) async {
+    final now = DateTime.now().toUtc();
+    await (update(categories)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+        .write(
+      CategoriesCompanion.custom(
+        deletedAt: Variable(now),
+        modifiedAt: Variable(now),
+        revision: categories.revision + const Constant(1),
+      ),
+    );
+  }
+
+  Future<void> _tombstoneStyles(String id) async {
+    final now = DateTime.now().toUtc();
+    await (update(styles)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+        .write(
+      StylesCompanion.custom(
+        deletedAt: Variable(now),
+        modifiedAt: Variable(now),
+        revision: styles.revision + const Constant(1),
+      ),
+    );
+  }
+
+  Future<void> _tombstoneTypes(String id) async {
+    final now = DateTime.now().toUtc();
+    await (update(types)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+        .write(
+      TypesCompanion.custom(
+        deletedAt: Variable(now),
+        modifiedAt: Variable(now),
+        revision: types.revision + const Constant(1),
+      ),
+    );
+  }
 }

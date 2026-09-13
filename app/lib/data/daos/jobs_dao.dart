@@ -219,6 +219,15 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
         .getSingleOrNull();
   }
 
+  Future<int> countLiveLinesForPart(String partId) async {
+    final rows = await (select(jobLines)
+          ..where(
+            (t) => t.partId.equals(partId) & t.deletedAt.isNull(),
+          ))
+        .get();
+    return rows.length;
+  }
+
   Future<List<OrderSplit>> orderSplitsForLine(String lineId) {
     return (select(orderSplits)
           ..where((t) => t.jobLineId.equals(lineId) & t.deletedAt.isNull()))

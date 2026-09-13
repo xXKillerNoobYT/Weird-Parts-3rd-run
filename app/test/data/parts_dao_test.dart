@@ -50,4 +50,41 @@ void main() {
     final listings = await db.partsDao.listingsForBrandVersion(bvId);
     expect(listings, hasLength(1));
   });
+
+  test('softDeletePart tombstones the part and brand versions', () async {
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Watts',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Valve',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'W-1',
+      deviceId: deviceId,
+    );
+    await db.partsDao.insertSupplierListing(
+      id: newId(),
+      brandVersionId: bvId,
+      supplierId: await db.taxonomyDao.insertSupplier(
+        id: newId(),
+        name: 'Co',
+        deviceId: deviceId,
+      ),
+      sku: 'X',
+      deviceId: deviceId,
+    );
+
+    await db.partsDao.softDeletePart(partId);
+    expect(await db.partsDao.getPart(partId), isNull);
+    expect(await db.partsDao.listBrandVersionsForPart(partId), isEmpty);
+    expect(await db.partsDao.listingsForBrandVersion(bvId), isEmpty);
+  });
 }

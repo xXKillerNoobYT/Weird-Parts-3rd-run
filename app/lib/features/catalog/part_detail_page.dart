@@ -8,6 +8,7 @@ import '../../data/app_database.dart';
 import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
 import 'part_photo_store.dart';
+import 'tree_edit_prompts.dart';
 
 class PartDetailPage extends StatefulWidget {
   const PartDetailPage({
@@ -343,6 +344,34 @@ class _PartDetailPageState extends State<PartDetailPage> {
     );
   }
 
+  Future<void> _deletePart() async {
+    if (_saving || !await _gate() || !mounted) return;
+    final name = _nameController.text.trim().isEmpty
+        ? 'this part'
+        : '"${_nameController.text.trim()}"';
+    final n = await _catalog.countJobLinesForPart(widget.partId);
+    final extra = n > 0
+        ? ' It is on $n job line(s); those lines stay on jobs.'
+        : '';
+    if (!mounted) return;
+    final ok = await confirmAction(
+      context,
+      title: 'Remove part?',
+      body: 'Remove $name from the catalog.$extra',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await _catalog.deletePart(widget.partId);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } on StateError catch (e) {
+      if (!mounted) return;
+      _toast(e.message);
+      setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -584,6 +613,12 @@ class _PartDetailPageState extends State<PartDetailPage> {
       appBar: AppBar(
         title: const Text('Part'),
         actions: [
+          if (!_loading)
+            IconButton(
+              tooltip: 'Remove part',
+              onPressed: _saving ? null : _deletePart,
+              icon: const Icon(Icons.delete_outline),
+            ),
           if (!_loading)
             TextButton(
               onPressed: _saving ? null : _save,

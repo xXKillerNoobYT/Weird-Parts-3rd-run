@@ -59,6 +59,19 @@ class PartPhotoStore {
     }
   }
 
+  /// Deletes versioned `$partId-*.jpg` files (and a leftover `$partId.jpg`).
+  Future<void> deleteAllForPart(String partId, {Directory? root}) async {
+    final dir = root ?? await photosDirectory();
+    if (!await dir.exists()) return;
+    await for (final entity in dir.list()) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (name == '$partId.jpg' || name.startsWith('$partId-')) {
+        await entity.delete();
+      }
+    }
+  }
+
   Future<Directory> photosDirectory() async {
     final support = await getApplicationSupportDirectory();
     return Directory(p.join(support.path, 'part_photos'));

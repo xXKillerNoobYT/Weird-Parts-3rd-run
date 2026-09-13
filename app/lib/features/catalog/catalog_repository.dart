@@ -155,4 +155,49 @@ class CatalogRepository {
       deviceId: _deviceId,
     );
   }
+
+  Future<int> countJobLinesForPart(String partId) =>
+      _db.jobsDao.countLiveLinesForPart(partId);
+
+  Future<void> deletePart(
+    String partId, {
+    PartPhotoStore store = const PartPhotoStore(),
+    Directory? root,
+  }) async {
+    await _pin.requireUnlocked();
+    final part = await _db.partsDao.getPart(partId);
+    await _db.partsDao.softDeletePart(partId);
+    final photo = part?.photoPath;
+    if (photo != null && photo.isNotEmpty) {
+      await store.deleteAt(photo, root: root);
+    }
+    await store.deleteAllForPart(partId, root: root);
+  }
+
+  /// Soft-deletes an empty category / type / variant folder.
+  Future<void> deleteEmptyFolder({
+    required CatalogTreeKind kind,
+    required String id,
+  }) async {
+    await _pin.requireUnlocked();
+    switch (kind) {
+      case CatalogTreeKind.category:
+        if (!await _db.taxonomyDao.isCategoryEmpty(id)) {
+          throw StateError('Folder is not empty');
+        }
+        await _db.taxonomyDao.softDeleteCategory(id);
+      case CatalogTreeKind.type:
+        if (!await _db.taxonomyDao.isStyleEmpty(id)) {
+          throw StateError('Folder is not empty');
+        }
+        await _db.taxonomyDao.softDeleteStyle(id);
+      case CatalogTreeKind.variant:
+        if (!await _db.taxonomyDao.isTypeEmpty(id)) {
+          throw StateError('Folder is not empty');
+        }
+        await _db.taxonomyDao.softDeleteType(id);
+      default:
+        throw StateError('Not an empty folder');
+    }
+  }
 }

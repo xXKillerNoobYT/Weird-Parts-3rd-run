@@ -226,4 +226,75 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
           ))
         .get();
   }
+
+  Future<bool> hasLiveParts({
+    String? categoryId,
+    String? styleId,
+    String? typeId,
+  }) async {
+    final q = select(parts)..where((t) => t.deletedAt.isNull());
+    if (categoryId != null) {
+      q.where((t) => t.categoryId.equals(categoryId));
+    }
+    if (styleId != null) {
+      q.where((t) => t.styleId.equals(styleId));
+    }
+    if (typeId != null) {
+      q.where((t) => t.typeId.equals(typeId));
+    }
+    q.limit(1);
+    return (await q.get()).isNotEmpty;
+  }
+
+  /// Tombstones the part and its live brand versions, listings, and devices.
+  Future<void> softDeletePart(String id) async {
+    await transaction(() async {
+      final now = DateTime.now().toUtc();
+      final versions = await (select(brandVersions)
+            ..where((t) => t.partId.equals(id) & t.deletedAt.isNull()))
+          .get();
+      final versionIds = [for (final v in versions) v.id];
+      if (versionIds.isNotEmpty) {
+        await (update(supplierListings)
+              ..where(
+                (t) =>
+                    t.brandVersionId.isIn(versionIds) & t.deletedAt.isNull(),
+              ))
+            .write(
+          SupplierListingsCompanion.custom(
+            deletedAt: Variable(now),
+            modifiedAt: Variable(now),
+            revision: supplierListings.revision + const Constant(1),
+          ),
+        );
+        await (update(brandVersions)
+              ..where((t) => t.partId.equals(id) & t.deletedAt.isNull()))
+            .write(
+          BrandVersionsCompanion.custom(
+            deletedAt: Variable(now),
+            modifiedAt: Variable(now),
+            revision: brandVersions.revision + const Constant(1),
+          ),
+        );
+      }
+      await (update(partDevices)
+            ..where((t) => t.partId.equals(id) & t.deletedAt.isNull()))
+          .write(
+        PartDevicesCompanion.custom(
+          deletedAt: Variable(now),
+          modifiedAt: Variable(now),
+          revision: partDevices.revision + const Constant(1),
+        ),
+      );
+      await (update(parts)
+            ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+          .write(
+        PartsCompanion.custom(
+          deletedAt: Variable(now),
+          modifiedAt: Variable(now),
+          revision: parts.revision + const Constant(1),
+        ),
+      );
+    });
+  }
 }

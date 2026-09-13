@@ -21,12 +21,14 @@ Future<void> _pumpShell(
   required AppDatabase db,
   required PinService pin,
   required String deviceId,
+  Future<void> Function()? wipeLocalData,
 }) async {
   await tester.pumpWidget(
     AppScope(
       db: db,
       pin: pin,
       deviceId: deviceId,
+      wipeLocalData: wipeLocalData ?? () async {},
       child: const MaterialApp(home: HomeShell()),
     ),
   );
@@ -138,5 +140,54 @@ void main() {
     expect(find.text('Wrong PIN'), findsOneWidget);
     expect(find.text('Editor PIN'), findsOneWidget);
     expect(pin.isUnlocked, isFalse);
+  });
+
+  testWidgets('Reset cancel does not wipe local data', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    var wiped = false;
+
+    await _pumpShell(
+      tester,
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      wipeLocalData: () async => wiped = true,
+    );
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset / wipe all data'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Wipe all local data?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(wiped, isFalse);
+    expect(find.text('Wipe all local data?'), findsNothing);
+  });
+
+  testWidgets('Reset confirm wipes local data', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    var wiped = false;
+
+    await _pumpShell(
+      tester,
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      wipeLocalData: () async => wiped = true,
+    );
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset / wipe all data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Wipe everything'));
+    await tester.pumpAndSettle();
+    expect(wiped, isTrue);
   });
 }
