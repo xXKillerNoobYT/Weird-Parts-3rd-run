@@ -79,8 +79,8 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 - [x] Devices chip gone; **Variance under Brands** (main + other options; colors per brand + own MPN)
 - [x] Job line: **Requested**, Split (shop / Supply A / Supply B / …), **Left to Pull/Order**
 - [x] Search / filter that respects the tree
-- [ ] Part photos (compress, store, attach) — after the tree
-- [ ] Custom part → promote to catalog (editor) — after the tree
+- [x] Part photos (compress, store, attach) — after the tree
+- [x] Custom part → promote to catalog (editor) — after the tree
 
 ### Phase 3 — Backup
 

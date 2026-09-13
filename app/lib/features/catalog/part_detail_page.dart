@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../app.dart';
 import '../../data/app_database.dart';
@@ -63,6 +66,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
   String? _categoryId;
   String? _styleId;
   String? _typeId;
+  String? _photoPath;
   bool _active = true;
   bool _loading = true;
   bool _saving = false;
@@ -139,6 +143,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       _categoryId = part.categoryId;
       _styleId = part.styleId;
       _typeId = part.typeId;
+      _photoPath = part.photoPath;
       _active = part.active;
       _suppliers = suppliers;
       _brands = brands;
@@ -171,6 +176,74 @@ class _PartDetailPageState extends State<PartDetailPage> {
   Future<bool> _gate() async {
     final scope = AppScope.of(context);
     return ensurePinUnlocked(context, scope.pin);
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    if (!await _gate() || !mounted) return;
+    final picked = await ImagePicker().pickImage(source: source);
+    if (picked == null || !mounted) return;
+    try {
+      final bytes = await picked.readAsBytes();
+      await _catalog.attachPhoto(partId: widget.partId, bytes: bytes);
+      await _reload();
+    } on StateError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } on FormatException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    if (!await _gate() || !mounted) return;
+    try {
+      await _catalog.clearPhoto(widget.partId);
+      await _reload();
+    } on StateError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    }
+  }
+
+  Future<void> _photoMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose photo'),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Take photo'),
+                onTap: () => Navigator.pop(ctx, 'camera'),
+              ),
+              if (_photoPath != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: const Text('Remove photo'),
+                  onTap: () => Navigator.pop(ctx, 'remove'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (choice == 'gallery') await _pickPhoto(ImageSource.gallery);
+    if (choice == 'camera') await _pickPhoto(ImageSource.camera);
+    if (choice == 'remove') await _removePhoto();
   }
 
   Future<void> _save() async {
@@ -439,6 +512,27 @@ class _PartDetailPageState extends State<PartDetailPage> {
                     border: OutlineInputBorder(),
                   ),
                   textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 12),
+                if (_photoPath != null && File(_photoPath!).existsSync())
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      File(_photoPath!),
+                      height: 180,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                else
+                  const Text('No photo'),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _photoMenu,
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: Text(_photoPath == null ? 'Add photo' : 'Change photo'),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(

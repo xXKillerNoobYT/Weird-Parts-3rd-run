@@ -1,5 +1,9 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
@@ -85,6 +89,30 @@ void main() {
         varianceName: 'White',
         isMain: true,
       ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('attach photo stores path; locked PIN blocks it', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-repo-photo-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final raw = img.Image(width: 16, height: 16);
+    img.fill(raw, color: img.ColorRgb8(9, 9, 9));
+    final bytes = Uint8List.fromList(img.encodePng(raw));
+
+    final id = await catalog.createGeneralPart(name: 'With photo');
+    final path = await catalog.attachPhoto(
+      partId: id,
+      bytes: bytes,
+      root: dir,
+    );
+    final part = await catalog.getPart(id);
+    expect(part!.photoPath, path);
+    expect(File(path).existsSync(), isTrue);
+
+    await pin.setPin('2468');
+    await expectLater(
+      catalog.attachPhoto(partId: id, bytes: bytes, root: dir),
       throwsA(isA<StateError>()),
     );
   });

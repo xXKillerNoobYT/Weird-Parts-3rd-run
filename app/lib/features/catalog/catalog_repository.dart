@@ -1,7 +1,11 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import '../../core/new_id.dart';
 import '../../data/app_database.dart';
 import '../pin/pin_service.dart';
 import 'catalog_tree.dart';
+import 'part_photo_store.dart';
 
 class CatalogRepository {
   CatalogRepository(this._db, this._pin, this._deviceId);
@@ -21,8 +25,37 @@ class CatalogRepository {
   Future<List<SupplierListing>> listingsForBrandVersion(String bvId) =>
       _db.partsDao.listingsForBrandVersion(bvId);
 
-  Future<CatalogTreeSnapshot> loadTreeSnapshot() =>
-      loadCatalogTreeSnapshot(_db);
+  Future<CatalogTreeSnapshot> loadTreeSnapshot({bool activeOnly = false}) =>
+      loadCatalogTreeSnapshot(_db, activeOnly: activeOnly);
+
+  Future<String> attachPhoto({
+    required String partId,
+    required Uint8List bytes,
+    PartPhotoStore store = const PartPhotoStore(),
+    Directory? root,
+  }) async {
+    await _pin.requireUnlocked();
+    final path = await store.saveForPart(
+      partId: partId,
+      bytes: bytes,
+      root: root,
+    );
+    await _db.partsDao.setPhotoPath(partId, path);
+    return path;
+  }
+
+  Future<void> clearPhoto(
+    String partId, {
+    PartPhotoStore store = const PartPhotoStore(),
+  }) async {
+    await _pin.requireUnlocked();
+    final part = await _db.partsDao.getPart(partId);
+    final existing = part?.photoPath;
+    await _db.partsDao.setPhotoPath(partId, null);
+    if (existing != null && existing.isNotEmpty) {
+      await store.deleteAt(existing);
+    }
+  }
 
   Future<String> createGeneralPart({
     required String name,
