@@ -230,4 +230,26 @@ void main() {
       isFalse,
     );
   });
+
+  test('deleted part is omitted from catalog and picker trees', () async {
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Gone clip',
+      deviceId: deviceId,
+    );
+    await db.partsDao.softDeletePart(partId);
+
+    final catalogTree = buildCatalogTree(await loadCatalogTreeSnapshot(db));
+    final pickerTree = buildCatalogTree(
+      await loadCatalogTreeSnapshot(db, activeOnly: true),
+    );
+    expect(
+      catalogTree.any((n) => n.kind == CatalogTreeKind.unassigned),
+      isFalse,
+    );
+    expect(
+      pickerTree.any((n) => n.kind == CatalogTreeKind.unassigned),
+      isFalse,
+    );
+  });
 }

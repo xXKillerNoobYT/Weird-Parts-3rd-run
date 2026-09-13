@@ -212,4 +212,64 @@ void main() {
     final all = await db.partsDao.listParts(activeOnly: false);
     expect(all.firstWhere((p) => p.id == partId).name, 'Old breaker');
   });
+
+  test('deleted part still names the job line and keeps splits', () async {
+    final s1 = await db.taxonomyDao.insertSupplier(
+      id: newId(),
+      name: 'A',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Watts',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Isolation valve',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'W-123',
+      deviceId: deviceId,
+    );
+    await db.partsDao.insertSupplierListing(
+      id: newId(),
+      brandVersionId: bvId,
+      supplierId: s1,
+      sku: 'SH-1',
+      deviceId: deviceId,
+    );
+    final jobId = await jobs.createJob('Boiler');
+    final lineId = await jobs.addLine(
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: bvId,
+      neededQty: 10,
+      shopPullQty: 4,
+    );
+    await jobs.replaceOrderSplits(lineId, [(supplierId: s1, qty: 6)]);
+
+    await db.partsDao.softDeletePart(partId);
+
+    final line = await jobs.getJobLine(lineId);
+    expect(line!.partId, partId);
+    expect(line.brandVersionId, bvId);
+    final splits = await jobs.orderSplitsForLine(lineId);
+    expect(splits, hasLength(1));
+    expect(splits.first.supplierId, s1);
+    expect(splits.first.quantity, 6);
+
+    final names = {
+      for (final p in await db.partsDao.listParts(
+        activeOnly: false,
+        includeDeleted: true,
+      ))
+        p.id: p.name,
+    };
+    expect(names[partId], 'Isolation valve');
+  });
 }

@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
 import 'package:wired_parts/features/catalog/catalog_tree.dart';
 import 'package:wired_parts/features/catalog/part_photo_store.dart';
+import 'package:wired_parts/features/jobs/job_line_qty.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 void main() {
@@ -438,4 +439,123 @@ void main() {
     expect(part.typeId, variant);
     expect(await catalog.listBrandVersionsForPart(id), hasLength(1));
   });
+
+  test('deleted part keeps job-line name, variance, and supplier listings',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('wp-del-splits-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final supplierId = await db.taxonomyDao.insertSupplier(
+      id: newId(),
+      name: 'Supply A',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Leviton',
+      deviceId: deviceId,
+    );
+    final partId = await catalog.createGeneralPart(name: 'Decora outlet');
+    final bvId = await catalog.createBrandVersion(
+      partId: partId,
+      brandId: brandId,
+      mpn: 'LEV-W',
+      varianceName: 'White',
+      isMain: true,
+    );
+    await catalog.createSupplierListing(
+      brandVersionId: bvId,
+      supplierId: supplierId,
+      sku: 'SH-1',
+    );
+    final jobId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Panel',
+      deviceId: deviceId,
+    );
+    final lineId = await db.jobsDao.insertJobLine(
+      id: newId(),
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: bvId,
+      neededQty: 10,
+      shopPullQty: 4,
+      deviceId: deviceId,
+    );
+    await db.jobsDao.replaceOrderSplits(
+      lineId: lineId,
+      splits: [(supplierId: supplierId, qty: 6)],
+      deviceId: deviceId,
+    );
+
+    await catalog.deletePart(partId, root: dir);
+
+    expect(await catalog.getPart(partId), isNull);
+    expect(await catalog.listBrandVersionsForPart(partId), isEmpty);
+    expect(await catalog.listingsForBrandVersion(bvId), isEmpty);
+
+    final named = await catalog.getPart(partId, includeDeleted: true);
+    expect(named!.name, 'Decora outlet');
+    expect(
+      (await catalog.listParts(activeOnly: false, includeDeleted: true))
+          .map((p) => p.id),
+      contains(partId),
+    );
+    final versions = await catalog.listBrandVersionsForPart(
+      partId,
+      includeDeleted: true,
+    );
+    expect(versions, hasLength(1));
+    expect(versions.first.id, bvId);
+    final listings = await catalog.listingsForBrandVersion(
+      bvId,
+      includeDeleted: true,
+    );
+    expect(listings.map((l) => l.supplierId), contains(supplierId));
+
+    final catalogTree = buildCatalogTree(await catalog.loadTreeSnapshot());
+    final pickerTree = buildCatalogTree(
+      await catalog.loadTreeSnapshot(activeOnly: true),
+    );
+    expect(_treeLabels(catalogTree), isNot(contains('Decora outlet')));
+    expect(_treeLabels(pickerTree), isNot(contains('Decora outlet')));
+
+    final splits = await db.jobsDao.orderSplitsForLine(lineId);
+    expect(splits, hasLength(1));
+    expect(splits.first.supplierId, supplierId);
+    expect(splits.first.quantity, 6);
+
+    final allowed = jobLineEditorSupplierIds(
+      listingSupplierIds: listings.map((l) => l.supplierId),
+      existingSplitSupplierIds: splits.map((s) => s.supplierId),
+      preserveExistingSplits: true,
+    );
+    expect(allowed, contains(supplierId));
+
+    await db.jobsDao.replaceOrderSplits(
+      lineId: lineId,
+      splits: [
+        for (final s in splits) (supplierId: s.supplierId, qty: s.quantity),
+      ],
+      deviceId: deviceId,
+    );
+    final saved = await db.jobsDao.orderSplitsForLine(lineId);
+    expect(saved, hasLength(1));
+    expect(saved.first.supplierId, supplierId);
+    expect(saved.first.quantity, 6);
+  });
+}
+
+Set<String> _treeLabels(List<CatalogTreeNode> nodes) {
+  final labels = <String>{};
+  void walk(CatalogTreeNode n) {
+    labels.add(n.label);
+    for (final c in n.children) {
+      walk(c);
+    }
+  }
+
+  for (final n in nodes) {
+    walk(n);
+  }
+  return labels;
 }
