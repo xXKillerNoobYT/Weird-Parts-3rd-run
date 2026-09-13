@@ -76,11 +76,71 @@ class BackupStore {
     }
   }
 
+  /// Write the backup to a staging folder, then swap into place so a failed
+  /// write cannot leave the live shop wiped.
   Future<void> replaceWithPayload({
     required BackupPayload payload,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
-    await reset.wipeFiles();
-    await writePayload(payload);
+    final live = await _support();
+    await live.create(recursive: true);
+    final staging = Directory(p.join(live.path, 'restore_staging'));
+    if (await staging.exists()) {
+      await staging.delete(recursive: true);
+    }
+    await staging.create(recursive: true);
+    try {
+      await BackupStore(
+        supportDir: staging,
+        photosDir: Directory(p.join(staging.path, 'part_photos')),
+      ).writePayload(payload);
+      await _swapStagingIntoLive(live: live, staging: staging);
+      await reset.clearDocumentsLeftover();
+    } finally {
+      if (await staging.exists()) {
+        await staging.delete(recursive: true);
+      }
+    }
+  }
+
+  Future<void> _swapStagingIntoLive({
+    required Directory live,
+    required Directory staging,
+  }) async {
+    final liveSqlite = File(p.join(live.path, kSqliteFileName));
+    final stagedSqlite = File(p.join(staging.path, kSqliteFileName));
+    final livePhotos = Directory(p.join(live.path, 'part_photos'));
+    final stagedPhotos = Directory(p.join(staging.path, 'part_photos'));
+    final bakSqlite = File(p.join(live.path, '$kSqliteFileName.restore-bak'));
+    final bakPhotos = Directory(p.join(live.path, 'part_photos.restore-bak'));
+
+    Future<void> rollback() async {
+      if (await bakSqlite.exists()) {
+        if (await liveSqlite.exists()) await liveSqlite.delete();
+        await bakSqlite.rename(liveSqlite.path);
+      }
+      if (await bakPhotos.exists()) {
+        if (await livePhotos.exists()) {
+          await livePhotos.delete(recursive: true);
+        }
+        await bakPhotos.rename(livePhotos.path);
+      }
+    }
+
+    try {
+      if (await bakSqlite.exists()) await bakSqlite.delete();
+      if (await bakPhotos.exists()) await bakPhotos.delete(recursive: true);
+      if (await liveSqlite.exists()) await liveSqlite.rename(bakSqlite.path);
+      if (await livePhotos.exists()) await livePhotos.rename(bakPhotos.path);
+      await stagedSqlite.rename(liveSqlite.path);
+      if (await stagedPhotos.exists()) {
+        await stagedPhotos.rename(livePhotos.path);
+      }
+      if (await bakSqlite.exists()) await bakSqlite.delete();
+      if (await bakPhotos.exists()) await bakPhotos.delete(recursive: true);
+    } catch (_) {
+      await rollback();
+      rethrow;
+    }
   }
 }
