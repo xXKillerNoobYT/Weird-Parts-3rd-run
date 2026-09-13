@@ -6,6 +6,8 @@ import '../../data/app_database.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/catalog_tree.dart';
 import '../catalog/catalog_tree_picker.dart';
+import '../catalog/part_detail_page.dart';
+import '../pin/pin_gate.dart';
 import 'job_line_qty.dart';
 import 'jobs_repository.dart';
 
@@ -58,8 +60,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
   bool _loading = true;
   bool _saving = false;
   bool _initialized = false;
+  String? _lineId;
 
-  bool get _isEditing => widget.lineId != null;
+  bool get _isEditing => _lineId != null;
 
   @override
   void didChangeDependencies() {
@@ -70,6 +73,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     _db = scope.db;
     _jobs = JobsRepository(scope.db, scope.deviceId);
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
+    _lineId = widget.lineId;
     _bootstrap();
   }
 
@@ -108,7 +112,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   Future<void> _bootstrap() async {
-    final parts = await _catalog.listParts();
+    final parts = await _catalog.listParts(activeOnly: false);
     final brands = await _db.taxonomyDao.listBrands();
     final suppliers = await _db.taxonomyDao.listSuppliers();
 
@@ -147,7 +151,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
       versions = await _catalog.listBrandVersionsForPart(partId);
     }
 
-    final tree = buildCatalogTree(await _catalog.loadTreeSnapshot());
+    final tree = buildCatalogTree(
+      await _catalog.loadTreeSnapshot(activeOnly: true),
+    );
 
     if (!mounted) return;
     setState(() {
@@ -294,7 +300,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (confirmed != true || !mounted) return;
     setState(() => _saving = true);
     try {
-      await _jobs.removeLine(widget.lineId!);
+      await _jobs.removeLine(_lineId!);
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
@@ -355,7 +361,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     try {
       late final String lineId;
       if (_isEditing) {
-        lineId = widget.lineId!;
+        lineId = _lineId!;
         await _jobs.updateLine(
           lineId: lineId,
           partId: partId,
@@ -382,6 +388,206 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _toast('Save failed: $e');
       setState(() => _saving = false);
     }
+  }
+
+  Future<void> _promoteToCatalog() async {
+    if (_saving || _loading) return;
+    final name = _customNameController.text.trim();
+    if (name.isEmpty) {
+      _toast('Custom name is required');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final scope = AppScope.of(context);
+      if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
+
+      final categories = await _db.taxonomyDao.listCategories();
+      final styles = await _db.taxonomyDao.listStyles();
+      final variants = await _db.taxonomyDao.listTypes();
+      if (!mounted) return;
+
+      String? categoryId;
+      String? styleId;
+      String? typeId;
+      final nameController = TextEditingController(text: name);
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (ctx, setLocal) {
+              final typesForCat = styles
+                  .where((s) => categoryId != null && s.categoryId == categoryId)
+                  .toList();
+              final variantsForType = variants
+                  .where((t) => styleId != null && t.styleId == styleId)
+                  .toList();
+              return AlertDialog(
+                title: const Text('Promote to catalog'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.',
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Part name',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        // ignore: deprecated_member_use
+                        value: categoryId,
+                        decoration: const InputDecoration(
+                          labelText: 'Category (folder)',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Unassigned'),
+                          ),
+                          for (final c in categories)
+                            DropdownMenuItem(value: c.id, child: Text(c.name)),
+                        ],
+                        onChanged: (v) => setLocal(() {
+                          categoryId = v;
+                          styleId = null;
+                          typeId = null;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        // ignore: deprecated_member_use
+                        value: styleId,
+                        decoration: const InputDecoration(
+                          labelText: 'Type',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None'),
+                          ),
+                          for (final s in typesForCat)
+                            DropdownMenuItem(value: s.id, child: Text(s.name)),
+                        ],
+                        onChanged: (v) => setLocal(() {
+                          styleId = v;
+                          typeId = null;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        // ignore: deprecated_member_use
+                        value: typeId,
+                        decoration: const InputDecoration(
+                          labelText: 'Variant',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None'),
+                          ),
+                          for (final t in variantsForType)
+                            DropdownMenuItem(value: t.id, child: Text(t.name)),
+                        ],
+                        onChanged: (v) => setLocal(() => typeId = v),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      if (nameController.text.trim().isEmpty) return;
+                      Navigator.pop(ctx, true);
+                    },
+                    child: const Text('Promote'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      final partName = nameController.text.trim();
+      nameController.dispose();
+      if (ok != true || partName.isEmpty || !mounted) return;
+
+      final partId = await _catalog.createGeneralPart(
+        name: partName,
+        categoryId: categoryId,
+        styleId: styleId,
+        typeId: typeId,
+      );
+      final needed = double.tryParse(_neededController.text.trim()) ?? 1.0;
+      final pull = double.tryParse(_pullController.text.trim()) ?? 0.0;
+      final neededQty = needed < 0 ? 1.0 : needed;
+      final shopPullQty = pull < 0 ? 0.0 : pull;
+      final splits = _previewSplits();
+      if (_lineId != null) {
+        await _jobs.attachCatalogPart(
+          lineId: _lineId!,
+          partId: partId,
+          neededQty: neededQty,
+          shopPullQty: shopPullQty,
+          splits: splits,
+        );
+      } else {
+        _lineId = await _jobs.addLine(
+          jobId: widget.jobId,
+          partId: partId,
+          neededQty: neededQty,
+          shopPullQty: shopPullQty,
+        );
+        await _jobs.replaceOrderSplits(_lineId!, splits);
+      }
+
+      final versions = await _catalog.listBrandVersionsForPart(partId);
+      final parts = await _catalog.listParts(activeOnly: false);
+      final tree = buildCatalogTree(
+        await _catalog.loadTreeSnapshot(activeOnly: true),
+      );
+      if (!mounted) return;
+      setState(() {
+        _useCustom = false;
+        _partId = partId;
+        _brandVersionId = null;
+        _brandVersions = versions;
+        _parts = parts;
+        _tree = tree;
+        _customNameController.clear();
+      });
+      _refreshPickLabel();
+      if (!mounted) return;
+      _toast('On this job as a catalog part. Back out when you are done.');
+    } on StateError catch (e) {
+      if (mounted) _toast(e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  List<({String supplierId, double qty})> _previewSplits() {
+    final splits = <({String supplierId, double qty})>[];
+    for (final draft in _splits) {
+      final qty = double.tryParse(draft.qtyController.text.trim());
+      if (draft.supplierId == null || qty == null || qty <= 0) continue;
+      splits.add((supplierId: draft.supplierId!, qty: qty));
+    }
+    return splits;
   }
 
   void _toast(String message) {
@@ -436,7 +642,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     ButtonSegment(value: true, label: Text('Custom')),
                   ],
                   selected: {_useCustom},
-                  onSelectionChanged: (sel) async {
+                  onSelectionChanged: _saving
+                      ? null
+                      : (sel) async {
                     final custom = sel.first;
                     setState(() {
                       _useCustom = custom;
@@ -452,7 +660,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                   },
                 ),
                 const SizedBox(height: 16),
-                if (_useCustom)
+                if (_useCustom) ...[
                   TextField(
                     controller: _customNameController,
                     decoration: const InputDecoration(
@@ -460,15 +668,44 @@ class _JobLineEditorState extends State<JobLineEditor> {
                       border: OutlineInputBorder(),
                     ),
                     textCapitalization: TextCapitalization.sentences,
-                  )
-                else
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _saving || _loading ? null : _promoteToCatalog,
+                      icon: const Icon(Icons.upgrade),
+                      label: const Text('Promote to catalog'),
+                    ),
+                  ),
+                  const Text(
+                    'PIN required. Puts this name on the catalog tree and on this job.',
+                  ),
+                ] else ...[
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Catalog part'),
                     subtitle: Text(_pickLabel),
                     trailing: const Icon(Icons.account_tree_outlined),
-                    onTap: _pickFromTree,
+                    onTap: _saving ? null : _pickFromTree,
                   ),
+                  if (_partId != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        PartDetailPage(partId: _partId!),
+                                  ),
+                                );
+                              },
+                        child: const Text('Open catalog part'),
+                      ),
+                    ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [

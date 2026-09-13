@@ -88,6 +88,35 @@ class JobsRepository {
     return _db.jobsDao.softDeleteJobLine(lineId);
   }
 
+  /// Point a custom line at a catalog part and drop the custom name.
+  ///
+  /// Pass [neededQty] / [shopPullQty] / [splits] to persist unsaved form
+  /// values (edit-mode promote). Stored qty/splits are kept when omitted.
+  Future<void> attachCatalogPart({
+    required String lineId,
+    required String partId,
+    double? neededQty,
+    double? shopPullQty,
+    List<({String supplierId, double qty})>? splits,
+  }) async {
+    final line = await getJobLine(lineId);
+    if (line == null) return;
+    await updateLine(
+      lineId: lineId,
+      partId: partId,
+      brandVersionId: null,
+      customName: null,
+      customNotes: line.customNotes,
+      neededQty: neededQty ?? line.neededQty,
+      shopPullQty: shopPullQty ?? line.shopPullQty,
+      uom: line.uom,
+      notes: line.notes,
+    );
+    if (splits != null) {
+      await replaceOrderSplits(lineId, splits);
+    }
+  }
+
   Future<void> replaceOrderSplits(
     String lineId,
     List<({String supplierId, double qty})> splits,
