@@ -177,6 +177,17 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     );
   }
 
+  Future<void> setPhotoPath(String id, String? photoPath) async {
+    final now = DateTime.now().toUtc();
+    await (update(parts)..where((t) => t.id.equals(id))).write(
+      PartsCompanion.custom(
+        photoPath: Variable(photoPath),
+        modifiedAt: Variable(now),
+        revision: parts.revision + const Constant(1),
+      ),
+    );
+  }
+
   Future<List<Part>> listParts({bool activeOnly = true}) {
     final q = select(parts)..where((t) => t.deletedAt.isNull());
     if (activeOnly) {

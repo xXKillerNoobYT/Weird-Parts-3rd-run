@@ -94,12 +94,15 @@ class CatalogTreeNode {
   }
 }
 
-Future<CatalogTreeSnapshot> loadCatalogTreeSnapshot(AppDatabase db) async {
+Future<CatalogTreeSnapshot> loadCatalogTreeSnapshot(
+  AppDatabase db, {
+  bool activeOnly = false,
+}) async {
   return CatalogTreeSnapshot(
     categories: await db.taxonomyDao.listCategories(),
     styles: await db.taxonomyDao.listStyles(),
     types: await db.taxonomyDao.listTypes(),
-    parts: await db.partsDao.listParts(activeOnly: false),
+    parts: await db.partsDao.listParts(activeOnly: activeOnly),
     brands: await db.taxonomyDao.listBrands(),
     brandVersions: await db.partsDao.listAllBrandVersions(),
   );
