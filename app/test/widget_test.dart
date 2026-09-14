@@ -45,6 +45,18 @@ Future<void> _openPinAndType1234(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> typeDialogName(WidgetTester tester, String name) async {
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    ),
+    name,
+  );
+  await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('HomeShell shows navigation destinations', (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -189,5 +201,84 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Wipe everything'));
     await tester.pumpAndSettle();
     expect(wiped, isTrue);
+  });
+
+  testWidgets('empty shop can create nested taxonomy on the first part',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No folders or parts yet'), findsOneWidget);
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Decora GFI');
+
+    expect(find.text('Part'), findsWidgets);
+
+    await tester.ensureVisible(find.byTooltip('Add Category'));
+    await tester.tap(find.byTooltip('Add Category'));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Outlet');
+
+    await tester.tap(find.byTooltip('Add Type'));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Decora');
+
+    await tester.tap(find.byTooltip('Add Variant'));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'GFI');
+
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saved'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+    expect(find.text('Decora'), findsOneWidget);
+    expect(find.text('GFI'), findsWidgets);
+  });
+
+  testWidgets('part save without taxonomy is rejected', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Unfiled');
+
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+  });
+
+  testWidgets('cannot add variant before type', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Skip type');
+
+    await tester.ensureVisible(find.byTooltip('Add Variant'));
+    await tester.tap(find.byTooltip('Add Variant'));
+    await tester.pumpAndSettle();
+    expect(find.text('Set Type first'), findsOneWidget);
   });
 }

@@ -162,6 +162,7 @@ class _CatalogPageState extends State<CatalogPage> {
             categoryId: part.categoryId,
             styleId: part.styleId,
             typeId: part.typeId,
+            requireNestedTaxonomy: false,
           );
         case CatalogTreeKind.brand:
           if (node.brandId != null) {
@@ -249,6 +250,7 @@ class _CatalogPageState extends State<CatalogPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'catalog-fab',
         onPressed: _addPart,
         tooltip: 'New part',
         child: const Icon(Icons.add),

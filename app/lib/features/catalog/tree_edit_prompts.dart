@@ -5,42 +5,76 @@ Future<String?> promptName(
   required String title,
   String? initial,
   String label = 'Name',
-}) async {
-  final controller = TextEditingController(text: initial ?? '');
-  final result = await showDialog<String>(
+}) {
+  return showDialog<String>(
     context: context,
-    builder: (ctx) {
-      return AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(labelText: label),
-          textCapitalization: TextCapitalization.sentences,
-          onSubmitted: (_) {
-            final v = controller.text.trim();
-            if (v.isNotEmpty) Navigator.pop(ctx, v);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final v = controller.text.trim();
-              if (v.isEmpty) return;
-              Navigator.pop(ctx, v);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      );
-    },
+    builder: (ctx) => _NamePromptDialog(
+      title: title,
+      initial: initial,
+      label: label,
+    ),
   );
-  controller.dispose();
-  return result;
+}
+
+class _NamePromptDialog extends StatefulWidget {
+  const _NamePromptDialog({
+    required this.title,
+    required this.label,
+    this.initial,
+  });
+
+  final String title;
+  final String label;
+  final String? initial;
+
+  @override
+  State<_NamePromptDialog> createState() => _NamePromptDialogState();
+}
+
+class _NamePromptDialogState extends State<_NamePromptDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initial ?? '');
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final v = _controller.text.trim();
+    if (v.isEmpty) return;
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(labelText: widget.label),
+        textCapitalization: TextCapitalization.sentences,
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
 
 Future<bool> confirmAction(

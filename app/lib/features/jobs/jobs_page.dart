@@ -188,6 +188,7 @@ class _JobsPageState extends State<JobsPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'jobs-fab',
         onPressed: _createJob,
         tooltip: 'New job',
         child: const Icon(Icons.add),
