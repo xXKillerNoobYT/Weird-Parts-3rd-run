@@ -46,13 +46,20 @@ class PartPhotoStore {
     return name;
   }
 
+  /// Resolves [stored] to a file inside [root] (or `part_photos`). Host
+  /// paths from a crafted backup never open or delete files outside that dir.
   Future<File> resolveFile(String stored, {Directory? root}) async {
-    if (_looksAbsolutePath(stored)) {
-      final abs = File(stored);
-      if (await abs.exists()) return abs;
-    }
     final dir = root ?? await photosDirectory();
-    return File(p.join(dir.path, _photoBasename(stored)));
+    await dir.create(recursive: true);
+    var name = _photoBasename(stored);
+    if (!_isSafePhotoBasename(name)) {
+      name = '.rejected-photo';
+    }
+    final file = File(p.normalize(p.join(dir.path, name)));
+    if (!_isInsideDirectory(dir, file)) {
+      return File(p.join(dir.path, '.rejected-photo'));
+    }
+    return file;
   }
 
   Future<void> deleteAt(String stored, {Directory? root}) async {
@@ -81,12 +88,20 @@ class PartPhotoStore {
   }
 }
 
-bool _looksAbsolutePath(String stored) {
-  if (p.posix.isAbsolute(stored) || p.windows.isAbsolute(stored)) return true;
-  return stored.contains('\\') || stored.contains('/');
-}
-
 String _photoBasename(String stored) {
   if (stored.contains('\\')) return p.windows.basename(stored);
   return p.posix.basename(stored);
+}
+
+bool _isSafePhotoBasename(String name) {
+  if (name.isEmpty || name == '.' || name == '..') return false;
+  if (name.contains('\u0000')) return false;
+  return true;
+}
+
+bool _isInsideDirectory(Directory dir, File file) {
+  final root = p.canonicalize(dir.path);
+  final path = p.canonicalize(file.path);
+  final rootPrefix = root.endsWith(p.separator) ? root : '$root${p.separator}';
+  return path == root || path.startsWith(rootPrefix);
 }

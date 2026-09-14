@@ -35,7 +35,7 @@ class _BackupPageState extends State<BackupPage> {
   String? _lastAt;
   String? _lastSource;
   var _busy = false;
-  var _didLoadMeta = false;
+  Object? _metaDb;
 
   BackupCodec get _codec => widget.codec ?? BackupCodec();
   BackupStore get _store => widget.store ?? const BackupStore();
@@ -43,8 +43,9 @@ class _BackupPageState extends State<BackupPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_didLoadMeta) return;
-    _didLoadMeta = true;
+    final db = AppScope.of(context).db;
+    if (identical(_metaDb, db)) return;
+    _metaDb = db;
     _reloadMeta();
   }
 
@@ -108,7 +109,7 @@ class _BackupPageState extends State<BackupPage> {
         sqliteBytes: await sqliteFile.readAsBytes(),
       );
       final bytes = await _codec.encrypt(payload, password);
-      await File(path).writeAsBytes(bytes, flush: true);
+      await writeBytesAtomically(File(path), bytes);
       await scope.db.settingsDao.setSetting(
         kLastBackupAtKey,
         payload.createdAt.toIso8601String(),
@@ -158,6 +159,8 @@ class _BackupPageState extends State<BackupPage> {
       if (password == null || !mounted) return;
       await scope.restoreFromBackup(fileBytes, password);
       if (!mounted) return;
+      await _reloadMeta();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Backup restored')),
       );
@@ -174,56 +177,11 @@ class _BackupPageState extends State<BackupPage> {
   Future<String?> _promptPassword({
     required String title,
     bool confirm = false,
-  }) async {
-    final password = TextEditingController();
-    final again = TextEditingController();
-    final ok = await showDialog<bool>(
+  }) {
+    return showDialog<String>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: password,
-                obscureText: true,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Backup password'),
-              ),
-              if (confirm) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: again,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Confirm password'),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final a = password.text;
-                if (a.isEmpty) return;
-                if (confirm && a != again.text) return;
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Continue'),
-            ),
-          ],
-        );
-      },
+      builder: (ctx) => _BackupPasswordDialog(title: title, confirm: confirm),
     );
-    final value = password.text;
-    password.dispose();
-    again.dispose();
-    if (ok == true && value.isNotEmpty) return value;
-    return null;
   }
 
   @override
@@ -256,6 +214,75 @@ class _BackupPageState extends State<BackupPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Owns its controllers so they are not disposed while the dialog route is
+/// still animating out (same pattern as the New Job dialog).
+class _BackupPasswordDialog extends StatefulWidget {
+  const _BackupPasswordDialog({required this.title, this.confirm = false});
+
+  final String title;
+  final bool confirm;
+
+  @override
+  State<_BackupPasswordDialog> createState() => _BackupPasswordDialogState();
+}
+
+class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
+  final _password = TextEditingController();
+  final _again = TextEditingController();
+
+  @override
+  void dispose() {
+    _password.dispose();
+    _again.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final a = _password.text;
+    if (a.isEmpty) return;
+    if (widget.confirm && a != _again.text) return;
+    Navigator.pop(context, a);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _password,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Backup password'),
+            onSubmitted: widget.confirm ? null : (_) => _submit(),
+          ),
+          if (widget.confirm) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _again,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Confirm password'),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Continue'),
+        ),
+      ],
     );
   }
 }
