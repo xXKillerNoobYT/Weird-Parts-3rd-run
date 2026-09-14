@@ -54,43 +54,10 @@ class _JobsPageState extends State<JobsPage> {
   }
 
   Future<void> _createJob() async {
-    final nameController = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('New job'),
-          content: TextField(
-            controller: nameController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Name',
-              hintText: 'Job name',
-            ),
-            textCapitalization: TextCapitalization.sentences,
-            onSubmitted: (_) {
-              final v = nameController.text.trim();
-              if (v.isNotEmpty) Navigator.of(ctx).pop(v);
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final v = nameController.text.trim();
-                if (v.isEmpty) return;
-                Navigator.of(ctx).pop(v);
-              },
-              child: const Text('Create'),
-            ),
-          ],
-        );
-      },
+      builder: (ctx) => const _NewJobNameDialog(),
     );
-    nameController.dispose();
     if (name == null || name.isEmpty) return;
 
     final id = await _jobs.createJob(name);
@@ -193,6 +160,58 @@ class _JobsPageState extends State<JobsPage> {
         tooltip: 'New job',
         child: const Icon(Icons.add),
       ),
+    );
+  }
+}
+
+/// Owns its [TextEditingController] so it is not disposed while the dialog
+/// route is still animating out (that corrupts overlays / job detail chrome).
+class _NewJobNameDialog extends StatefulWidget {
+  const _NewJobNameDialog();
+
+  @override
+  State<_NewJobNameDialog> createState() => _NewJobNameDialogState();
+}
+
+class _NewJobNameDialogState extends State<_NewJobNameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final v = _controller.text.trim();
+    if (v.isEmpty) return;
+    Navigator.of(context).pop(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New job'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'Name',
+          hintText: 'Job name',
+        ),
+        textCapitalization: TextCapitalization.sentences,
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Create'),
+        ),
+      ],
     );
   }
 }

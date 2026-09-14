@@ -113,16 +113,40 @@ class _JobDetailPageState extends State<JobDetailPage> {
     await _reload();
   }
 
+  void _popToJobs() {
+    Navigator.of(context).maybePop();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        // Explicit leading: Windows has no system back, and nested shell
+        // routes must always expose a reliable exit to the jobs list.
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back to jobs',
+          onPressed: _popToJobs,
+        ),
         title: Text(_job?.name ?? 'Job'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _rows.isEmpty
-              ? const Center(child: Text('No parts on this job yet'))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('No parts on this job yet'),
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: _popToJobs,
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text('Back to jobs'),
+                      ),
+                    ],
+                  ),
+                )
               : ListView.separated(
                   itemCount: _rows.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
@@ -142,7 +166,9 @@ class _JobDetailPageState extends State<JobDetailPage> {
                     );
                   },
                 ),
+      // Unique / null heroTag: JobsPage FAB stays alive under IndexedStack.
       floatingActionButton: FloatingActionButton(
+        heroTag: 'job-detail-fab',
         onPressed: () => _openEditor(),
         tooltip: 'Add line',
         child: const Icon(Icons.add),
