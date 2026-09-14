@@ -345,4 +345,44 @@ void main() {
       throwsA(isA<StateError>()),
     );
   });
+
+  test('update part rejects variant from another type', () async {
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final typeA = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final typeB = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Duplex',
+      deviceId: deviceId,
+    );
+    final variantB = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: typeB,
+      name: 'Tamper resistant',
+      deviceId: deviceId,
+    );
+    final id = await catalog.createGeneralPart(name: 'Crossed');
+    await expectLater(
+      catalog.updatePart(
+        partId: id,
+        name: 'Crossed',
+        description: '',
+        uom: 'ea',
+        active: true,
+        categoryId: cat,
+        styleId: typeA,
+        typeId: variantB,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
 }

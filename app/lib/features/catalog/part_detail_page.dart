@@ -699,7 +699,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
-              cacheExtent: 4000,
+              // ignore: deprecated_member_use
+              cacheExtent: 4000, // keep Add Category/Type/Variant mounted
               children: [
                 TextField(
                   controller: _nameController,
