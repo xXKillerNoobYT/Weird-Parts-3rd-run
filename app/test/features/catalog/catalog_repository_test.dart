@@ -64,6 +64,7 @@ void main() {
       categoryId: null,
       styleId: null,
       typeId: null,
+      requireNestedTaxonomy: false,
     );
     final part = await catalog.getPart(id);
     expect(part!.name, 'Relay 24V');
@@ -254,5 +255,187 @@ void main() {
     await catalog.deletePart(partId, root: dir);
     expect(await catalog.getPart(partId), isNull);
     expect(await catalog.countJobLinesForPart(partId), 1);
+  });
+
+  test('update part requires nested category type variant', () async {
+    final id = await catalog.createGeneralPart(name: 'Unfiled');
+    await expectLater(
+      catalog.updatePart(
+        partId: id,
+        name: 'Unfiled',
+        description: '',
+        uom: 'ea',
+        active: true,
+        categoryId: null,
+        styleId: null,
+        typeId: null,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final type = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final variant = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: type,
+      name: 'GFI',
+      deviceId: deviceId,
+    );
+    await catalog.updatePart(
+      partId: id,
+      name: 'Decora GFI',
+      description: '',
+      uom: 'ea',
+      active: true,
+      categoryId: cat,
+      styleId: type,
+      typeId: variant,
+    );
+    final part = await catalog.getPart(id);
+    expect(part!.name, 'Decora GFI');
+    expect(part.categoryId, cat);
+    expect(part.styleId, type);
+    expect(part.typeId, variant);
+  });
+
+  test('update part rejects type from another category', () async {
+    final catA = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final catB = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Switch',
+      deviceId: deviceId,
+    );
+    final typeB = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: catB,
+      name: 'Toggle',
+      deviceId: deviceId,
+    );
+    final variantB = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: typeB,
+      name: 'Single pole',
+      deviceId: deviceId,
+    );
+    final id = await catalog.createGeneralPart(name: 'Mismatch');
+    await expectLater(
+      catalog.updatePart(
+        partId: id,
+        name: 'Mismatch',
+        description: '',
+        uom: 'ea',
+        active: true,
+        categoryId: catA,
+        styleId: typeB,
+        typeId: variantB,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('update part rejects variant from another type', () async {
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final typeA = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final typeB = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Duplex',
+      deviceId: deviceId,
+    );
+    final variantB = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: typeB,
+      name: 'Tamper resistant',
+      deviceId: deviceId,
+    );
+    final id = await catalog.createGeneralPart(name: 'Crossed');
+    await expectLater(
+      catalog.updatePart(
+        partId: id,
+        name: 'Crossed',
+        description: '',
+        uom: 'ea',
+        active: true,
+        categoryId: cat,
+        styleId: typeA,
+        typeId: variantB,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('brand version before nested save still allows taxonomy update', () async {
+    final id = await catalog.createGeneralPart(name: 'Decora GFI');
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final type = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final variant = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: type,
+      name: 'GFI',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Leviton',
+      deviceId: deviceId,
+    );
+    await catalog.createBrandVersion(
+      partId: id,
+      brandId: brandId,
+      mpn: 'R50-W',
+      varianceName: 'White',
+      isMain: true,
+    );
+    final unsaved = await catalog.getPart(id);
+    expect(unsaved!.categoryId, isNull);
+    expect(unsaved.styleId, isNull);
+    expect(unsaved.typeId, isNull);
+
+    await catalog.updatePart(
+      partId: id,
+      name: 'Decora GFI',
+      description: '',
+      uom: 'ea',
+      active: true,
+      categoryId: cat,
+      styleId: type,
+      typeId: variant,
+    );
+    final part = await catalog.getPart(id);
+    expect(part!.categoryId, cat);
+    expect(part.styleId, type);
+    expect(part.typeId, variant);
+    expect(await catalog.listBrandVersionsForPart(id), hasLength(1));
   });
 }
