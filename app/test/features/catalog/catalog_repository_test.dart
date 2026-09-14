@@ -385,4 +385,57 @@ void main() {
       throwsA(isA<StateError>()),
     );
   });
+
+  test('brand version before nested save still allows taxonomy update', () async {
+    final id = await catalog.createGeneralPart(name: 'Decora GFI');
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final type = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final variant = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: type,
+      name: 'GFI',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Leviton',
+      deviceId: deviceId,
+    );
+    await catalog.createBrandVersion(
+      partId: id,
+      brandId: brandId,
+      mpn: 'R50-W',
+      varianceName: 'White',
+      isMain: true,
+    );
+    final unsaved = await catalog.getPart(id);
+    expect(unsaved!.categoryId, isNull);
+    expect(unsaved.styleId, isNull);
+    expect(unsaved.typeId, isNull);
+
+    await catalog.updatePart(
+      partId: id,
+      name: 'Decora GFI',
+      description: '',
+      uom: 'ea',
+      active: true,
+      categoryId: cat,
+      styleId: type,
+      typeId: variant,
+    );
+    final part = await catalog.getPart(id);
+    expect(part!.categoryId, cat);
+    expect(part.styleId, type);
+    expect(part.typeId, variant);
+    expect(await catalog.listBrandVersionsForPart(id), hasLength(1));
+  });
 }

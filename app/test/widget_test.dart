@@ -11,8 +11,8 @@ import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
-const _uiProofDir =
-    '/cursor/stores/bc-82e549ff-8c25-41db-9ad2-2135db82353f/media/catalog-empty-bootstrap';
+/// Opt-in UI dumps. Unset during `flutter test` / CI so nothing writes
+/// outside the workspace. Set `WP_UI_DUMP_DIR` to a writable folder to capture.
 
 Finder _navLabel(String label) => find.descendant(
       of: find.byType(NavigationBar),
@@ -52,13 +52,15 @@ Future<void> _pumpShell(
 }
 
 Future<void> _dumpUi(WidgetTester tester, String name) async {
+  final dirPath = Platform.environment['WP_UI_DUMP_DIR'];
+  if (dirPath == null || dirPath.isEmpty) return;
   await tester.runAsync(() async {
-    final dir = Directory(_uiProofDir);
+    final dir = Directory(dirPath);
     if (!dir.existsSync()) {
       dir.createSync(recursive: true);
     }
     final found = find.byType(RepaintBoundary);
-    expect(found, findsWidgets);
+    if (found.evaluate().isEmpty) return;
     final boundary = tester.renderObject(found.first) as RenderRepaintBoundary;
     final image = await boundary.toImage(pixelRatio: 1.25);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -92,14 +94,37 @@ Future<void> _addNamedFolder(
   await typeDialogName(tester, name);
 }
 
-Future<void> _fileEmptyShopTree(WidgetTester tester) async {
+Future<void> _fillEmptyShopTree(WidgetTester tester) async {
   await _openCatalogNewPart(tester, 'Decora GFI');
   await _addNamedFolder(tester, tooltip: 'Add Category', name: 'Outlet');
   await _addNamedFolder(tester, tooltip: 'Add Type', name: 'Decora');
   await _addNamedFolder(tester, tooltip: 'Add Variant', name: 'GFI');
+}
+
+Future<void> _fileEmptyShopTree(WidgetTester tester) async {
+  await _fillEmptyShopTree(tester);
   await tester.tap(find.widgetWithText(TextButton, 'Save'));
   await tester.pumpAndSettle();
   expect(find.text('Saved'), findsOneWidget);
+}
+
+Future<void> _addLevitonWhiteVariance(WidgetTester tester) async {
+  await tester.ensureVisible(find.text('Add variance').first);
+  await tester.tap(find.text('Add variance').first);
+  await tester.pumpAndSettle();
+  expect(find.text('Add brand'), findsOneWidget);
+  await typeDialogName(tester, 'Leviton');
+  expect(find.text('Add variance'), findsWidgets);
+  final varianceFields = find.descendant(
+    of: find.byType(AlertDialog),
+    matching: find.byType(TextField),
+  );
+  await tester.enterText(varianceFields.at(0), 'White');
+  await tester.enterText(varianceFields.at(1), 'R50-W');
+  await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+  await tester.pumpAndSettle();
+  expect(find.text('Leviton'), findsWidgets);
+  expect(find.text('White · R50-W'), findsOneWidget);
 }
 
 Future<void> _openPinAndType1234(WidgetTester tester) async {
@@ -408,6 +433,60 @@ void main() {
     expect(find.text('Outlet'), findsWidgets);
   });
 
+  testWidgets(
+      'adding a variance before Save keeps unsaved Category Type Variant',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _fillEmptyShopTree(tester);
+    expect(find.text('Outlet'), findsWidgets);
+    expect(find.text('Decora'), findsWidgets);
+    expect(find.text('GFI'), findsWidgets);
+
+    await _addLevitonWhiteVariance(tester);
+    expect(find.text('Outlet'), findsWidgets);
+    expect(find.text('Decora'), findsWidgets);
+    expect(find.text('GFI'), findsWidgets);
+
+    expect(find.text('Add listing'), findsWidgets);
+    await tester.tap(find.text('Add listing').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Add supplier'), findsOneWidget);
+    await typeDialogName(tester, 'SupplyHouse');
+    expect(find.text('Add supplier listing'), findsOneWidget);
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'SH-100',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('SKU SH-100'), findsOneWidget);
+    expect(find.text('Outlet'), findsWidgets);
+    expect(find.text('Decora'), findsWidgets);
+    expect(find.text('GFI'), findsWidgets);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsNothing);
+    expect(find.text('Saved'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+    await _expandFolder(tester, 'Outlet');
+    await _expandFolder(tester, 'Decora');
+    await _expandFolder(tester, 'GFI');
+    expect(find.text('Decora GFI'), findsOneWidget);
+  });
+
   testWidgets('in-place brand variance and supplier listing on empty shop',
       (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -419,23 +498,7 @@ void main() {
     await _fileEmptyShopTree(tester);
     await _dumpUi(tester, '01-empty-shop-tree-filed');
 
-    expect(find.text('Add variance'), findsWidgets);
-    await tester.tap(find.text('Add variance').first);
-    await tester.pumpAndSettle();
-    expect(find.text('Add brand'), findsOneWidget);
-    await typeDialogName(tester, 'Leviton');
-
-    expect(find.text('Add variance'), findsWidgets);
-    final varianceFields = find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.byType(TextField),
-    );
-    await tester.enterText(varianceFields.at(0), 'White');
-    await tester.enterText(varianceFields.at(1), 'R50-W');
-    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
-    await tester.pumpAndSettle();
-    expect(find.text('Leviton'), findsWidgets);
-    expect(find.text('White · R50-W'), findsOneWidget);
+    await _addLevitonWhiteVariance(tester);
 
     expect(find.text('Add listing'), findsWidgets);
     await tester.tap(find.text('Add listing').first);

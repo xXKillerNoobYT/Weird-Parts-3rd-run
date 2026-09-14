@@ -111,33 +111,10 @@ class _PartDetailPageState extends State<PartDetailPage> {
     final categories = await _db.taxonomyDao.listCategories();
     final styles = await _db.taxonomyDao.listStyles();
     final variants = await _db.taxonomyDao.listTypes();
-    final brandNames = {for (final b in brands) b.id: b.name};
-    final supplierNames = {for (final s in suppliers) s.id: s.name};
-    final versions = await _catalog.listBrandVersionsForPart(widget.partId);
-
-    final groups = <String, _BrandGroup>{};
-    for (final v in versions) {
-      final group = groups.putIfAbsent(
-        v.brandId,
-        () => _BrandGroup(
-          brandId: v.brandId,
-          brandName: brandNames[v.brandId] ?? 'Unknown brand',
-        ),
-      );
-      final listings = await _catalog.listingsForBrandVersion(v.id);
-      group.variances.add(
-        _VarianceRow(
-          version: v,
-          listings: [
-            for (final l in listings)
-              _ListingRow(
-                listing: l,
-                supplierName: supplierNames[l.supplierId] ?? 'Unknown',
-              ),
-          ],
-        ),
-      );
-    }
+    final groups = await _loadBrandGroups(
+      brands: brands,
+      suppliers: suppliers,
+    );
 
     final photoPath = await _resolvedPhotoPath(part.photoPath);
     if (!mounted) return;
@@ -156,8 +133,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       _categories = categories;
       _styles = styles;
       _variants = variants;
-      _brandGroups = groups.values.toList()
-        ..sort((a, b) => a.brandName.compareTo(b.brandName));
+      _brandGroups = groups;
       _loading = false;
     });
 
@@ -375,6 +351,40 @@ class _PartDetailPageState extends State<PartDetailPage> {
     }
   }
 
+  Future<List<_BrandGroup>> _loadBrandGroups({
+    required List<Brand> brands,
+    required List<Supplier> suppliers,
+  }) async {
+    final brandNames = {for (final b in brands) b.id: b.name};
+    final supplierNames = {for (final s in suppliers) s.id: s.name};
+    final versions = await _catalog.listBrandVersionsForPart(widget.partId);
+    final groups = <String, _BrandGroup>{};
+    for (final v in versions) {
+      final group = groups.putIfAbsent(
+        v.brandId,
+        () => _BrandGroup(
+          brandId: v.brandId,
+          brandName: brandNames[v.brandId] ?? 'Unknown brand',
+        ),
+      );
+      final listings = await _catalog.listingsForBrandVersion(v.id);
+      group.variances.add(
+        _VarianceRow(
+          version: v,
+          listings: [
+            for (final l in listings)
+              _ListingRow(
+                listing: l,
+                supplierName: supplierNames[l.supplierId] ?? 'Unknown',
+              ),
+          ],
+        ),
+      );
+    }
+    return groups.values.toList()
+      ..sort((a, b) => a.brandName.compareTo(b.brandName));
+  }
+
   Future<void> _refreshTaxonomyLists() async {
     final suppliers = await _db.taxonomyDao.listSuppliers();
     final brands = await _db.taxonomyDao.listBrands();
@@ -389,6 +399,19 @@ class _PartDetailPageState extends State<PartDetailPage> {
       _styles = styles;
       _variants = variants;
     });
+  }
+
+  /// Reloads brands, listings, and taxonomy chips without touching unsaved
+  /// name / tree / supplier fields (a full [_reload] would restore null IDs).
+  Future<void> _refreshBrandGroups() async {
+    await _refreshTaxonomyLists();
+    if (!mounted) return;
+    final groups = await _loadBrandGroups(
+      brands: _brands,
+      suppliers: _suppliers,
+    );
+    if (!mounted) return;
+    setState(() => _brandGroups = groups);
   }
 
   Future<void> _addCategory() async {
@@ -570,7 +593,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
         varianceName: result.varianceName,
         isMain: result.isMain,
       );
-      await _reload();
+      await _refreshBrandGroups();
     } on StateError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -603,7 +626,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
         supplierId: result.supplierId,
         sku: result.sku,
       );
-      await _reload();
+      await _refreshBrandGroups();
     } on StateError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
