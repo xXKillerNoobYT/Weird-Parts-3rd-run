@@ -257,6 +257,47 @@ void main() {
     expect(await catalog.countJobLinesForPart(partId), 1);
   });
 
+  test('create general part with nested required refuses empty folders',
+      () async {
+    await expectLater(
+      catalog.createGeneralPart(
+        name: 'Unfiled',
+        requireNestedTaxonomy: true,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final type = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final variant = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: type,
+      name: 'GFI',
+      deviceId: deviceId,
+    );
+    final id = await catalog.createGeneralPart(
+      name: 'Decora GFI',
+      categoryId: cat,
+      styleId: type,
+      typeId: variant,
+      requireNestedTaxonomy: true,
+    );
+    final part = await catalog.getPart(id);
+    expect(part!.name, 'Decora GFI');
+    expect(part.categoryId, cat);
+    expect(part.styleId, type);
+    expect(part.typeId, variant);
+  });
+
   test('update part requires nested category type variant', () async {
     final id = await catalog.createGeneralPart(name: 'Unfiled');
     await expectLater(

@@ -85,20 +85,20 @@ Future<void> _expandFolder(WidgetTester tester, String label) async {
 
 Future<void> _addNamedFolder(
   WidgetTester tester, {
-  required String tooltip,
+  required String label,
   required String name,
 }) async {
-  await tester.ensureVisible(find.byTooltip(tooltip));
-  await tester.tap(find.byTooltip(tooltip));
+  await tester.ensureVisible(find.text(label));
+  await tester.tap(find.text(label));
   await tester.pumpAndSettle();
   await typeDialogName(tester, name);
 }
 
 Future<void> _fillEmptyShopTree(WidgetTester tester) async {
   await _openCatalogNewPart(tester, 'Decora GFI');
-  await _addNamedFolder(tester, tooltip: 'Add Category', name: 'Outlet');
-  await _addNamedFolder(tester, tooltip: 'Add Type', name: 'Decora');
-  await _addNamedFolder(tester, tooltip: 'Add Variant', name: 'GFI');
+  await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
+  await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
+  await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
 }
 
 Future<void> _fileEmptyShopTree(WidgetTester tester) async {
@@ -345,19 +345,14 @@ void main() {
     await typeDialogName(tester, 'Decora GFI');
 
     expect(find.text('Part'), findsWidgets);
+    expect(find.text('Add Category'), findsOneWidget);
+    expect(find.text('Add Type'), findsOneWidget);
+    expect(find.text('Add Variant'), findsOneWidget);
+    expect(find.text('Add supplier'), findsOneWidget);
 
-    await tester.ensureVisible(find.byTooltip('Add Category'));
-    await tester.tap(find.byTooltip('Add Category'));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Outlet');
-
-    await tester.tap(find.byTooltip('Add Type'));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Decora');
-
-    await tester.tap(find.byTooltip('Add Variant'));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'GFI');
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
+    await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
+    await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
 
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
@@ -406,8 +401,8 @@ void main() {
     await tester.pumpAndSettle();
     await typeDialogName(tester, 'Skip type');
 
-    await tester.ensureVisible(find.byTooltip('Add Variant'));
-    await tester.tap(find.byTooltip('Add Variant'));
+    await tester.ensureVisible(find.text('Add Variant'));
+    await tester.tap(find.text('Add Variant'));
     await tester.pumpAndSettle();
     expect(find.text('Set Type first'), findsOneWidget);
   });
@@ -421,8 +416,8 @@ void main() {
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
     await _openCatalogNewPart(tester, 'Skip category');
 
-    await tester.ensureVisible(find.byTooltip('Add Type'));
-    await tester.tap(find.byTooltip('Add Type'));
+    await tester.ensureVisible(find.text('Add Type'));
+    await tester.tap(find.text('Add Type'));
     await tester.pumpAndSettle();
     expect(find.text('Set Category first'), findsOneWidget);
   });
@@ -435,7 +430,7 @@ void main() {
 
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
     await _openCatalogNewPart(tester, 'Outlet only');
-    await _addNamedFolder(tester, tooltip: 'Add Category', name: 'Outlet');
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
 
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
@@ -457,8 +452,8 @@ void main() {
     await _openPinAndType1234(tester);
     await typeDialogName(tester, 'Gated');
 
-    await tester.ensureVisible(find.byTooltip('Add Category'));
-    await tester.tap(find.byTooltip('Add Category'));
+    await tester.ensureVisible(find.text('Add Category'));
+    await tester.tap(find.text('Add Category'));
     await tester.pumpAndSettle();
     expect(find.text('Editor PIN'), findsNothing);
     await typeDialogName(tester, 'Outlet');
@@ -487,7 +482,7 @@ void main() {
     expect(find.text('Add listing'), findsWidgets);
     await tester.tap(find.text('Add listing').first);
     await tester.pumpAndSettle();
-    expect(find.text('Add supplier'), findsOneWidget);
+    expect(find.text('Add supplier'), findsWidgets);
     await typeDialogName(tester, 'SupplyHouse');
     expect(find.text('Add supplier listing'), findsOneWidget);
     await tester.enterText(
@@ -535,7 +530,7 @@ void main() {
     expect(find.text('Add listing'), findsWidgets);
     await tester.tap(find.text('Add listing').first);
     await tester.pumpAndSettle();
-    expect(find.text('Add supplier'), findsOneWidget);
+    expect(find.text('Add supplier'), findsWidgets);
     await typeDialogName(tester, 'SupplyHouse');
 
     expect(find.text('Add supplier listing'), findsOneWidget);
@@ -658,9 +653,9 @@ void main() {
     await tester.tap(find.byType(FloatingActionButton));
     await tester.pumpAndSettle();
     await typeDialogName(tester, 'Decora GFI');
-    await _addNamedFolder(tester, tooltip: 'Add Category', name: 'Outlet');
-    await _addNamedFolder(tester, tooltip: 'Add Type', name: 'Decora');
-    await _addNamedFolder(tester, tooltip: 'Add Variant', name: 'GFI');
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
+    await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
+    await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
     expect(find.text('Saved'), findsOneWidget);
@@ -860,7 +855,7 @@ void main() {
     expect(find.text('Add listing'), findsWidgets);
     await tester.tap(find.text('Add listing').first);
     await tester.pumpAndSettle();
-    expect(find.text('Add supplier'), findsOneWidget);
+    expect(find.text('Add supplier'), findsWidgets);
     await typeDialogName(tester, 'SupplyHouse');
     expect(find.text('Add supplier listing'), findsOneWidget);
     expect(find.text('SKU (optional)'), findsOneWidget);

@@ -111,8 +111,7 @@ Future<bool> confirmAction(
   return ok ?? false;
 }
 
-/// Dropdown plus an Add control. Icon-only matches the part editor.
-/// Pass [addLabel] for a visible “Add …” button under the field (touch, no tooltip).
+/// Dropdown plus a labeled Add button under the field (touch, not tooltip-only).
 class TaxonomyPickField extends StatelessWidget {
   const TaxonomyPickField({
     required this.label,
@@ -120,9 +119,9 @@ class TaxonomyPickField extends StatelessWidget {
     required this.items,
     required this.onChanged,
     required this.onAdd,
+    required this.addLabel,
     this.enabled = true,
     this.allowNone = false,
-    this.addLabel,
     super.key,
   });
 
@@ -134,8 +133,8 @@ class TaxonomyPickField extends StatelessWidget {
   final bool enabled;
   final bool allowNone;
 
-  /// Visible Add button text (e.g. "Add Category"). Null = icon + tooltip only.
-  final String? addLabel;
+  /// Visible Add button text (e.g. "Add Category").
+  final String addLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -175,31 +174,17 @@ class TaxonomyPickField extends StatelessWidget {
             onChanged: enabled ? onChanged : null,
           );
 
-    if (addLabel != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          field,
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add),
-              label: Text(addLabel!),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(child: field),
-        IconButton(
-          tooltip: 'Add $label',
-          onPressed: onAdd,
-          icon: const Icon(Icons.add),
+        field,
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+            label: Text(addLabel),
+          ),
         ),
       ],
     );

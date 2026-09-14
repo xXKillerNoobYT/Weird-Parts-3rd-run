@@ -637,6 +637,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   Widget _treeField({
     required String label,
+    required String addLabel,
     required String? value,
     required List<DropdownMenuItem<String>> items,
     required ValueChanged<String?> onChanged,
@@ -646,6 +647,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
   }) {
     return TaxonomyPickField(
       label: label,
+      addLabel: addLabel,
       value: value,
       items: items,
       onChanged: onChanged,
@@ -708,6 +710,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 const SizedBox(height: 8),
                 _treeField(
                   label: 'Category',
+                  addLabel: 'Add Category',
                   value: _categoryId,
                   items: [
                     for (final c in _categories)
@@ -725,6 +728,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 const SizedBox(height: 12),
                 _treeField(
                   label: 'Type',
+                  addLabel: 'Add Type',
                   value: _styleId,
                   enabled: _categoryId != null,
                   items: [
@@ -742,6 +746,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 const SizedBox(height: 12),
                 _treeField(
                   label: 'Variant',
+                  addLabel: 'Add Variant',
                   value: _typeId,
                   enabled: _styleId != null,
                   items: [
@@ -774,6 +779,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 const SizedBox(height: 12),
                 _treeField(
                   label: 'Default supplier',
+                  addLabel: 'Add supplier',
                   value: _defaultSupplierId,
                   allowNone: true,
                   items: [

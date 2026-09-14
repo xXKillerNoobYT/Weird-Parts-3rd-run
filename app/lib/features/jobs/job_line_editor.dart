@@ -297,7 +297,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _allSuppliers = suppliers;
       await _refreshSupplierChoices();
       if (!mounted) return;
-      if (!_supplierChoices.any((s) => s.id == id)) return;
+      if (!_supplierChoices.any((s) => s.id == id)) {
+        _toast('That supplier is not on this brand version yet');
+        return;
+      }
       setState(() => split.supplierId = id);
     } on StateError catch (e) {
       if (mounted) _toast(e.message);
@@ -450,6 +453,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
         categoryId: result.categoryId,
         styleId: result.styleId,
         typeId: result.typeId,
+        requireNestedTaxonomy: true,
       );
       final needed = double.tryParse(_neededController.text.trim()) ?? 1.0;
       final pull = double.tryParse(_pullController.text.trim()) ?? 0.0;

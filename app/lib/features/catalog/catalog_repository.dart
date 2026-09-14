@@ -69,8 +69,16 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
+    bool requireNestedTaxonomy = false,
   }) async {
     await _pin.requireUnlocked();
+    if (requireNestedTaxonomy) {
+      await _requireNestedTaxonomy(
+        categoryId: categoryId,
+        styleId: styleId,
+        typeId: typeId,
+      );
+    }
     return _db.partsDao.insertGeneralPart(
       id: newId(),
       name: name,
