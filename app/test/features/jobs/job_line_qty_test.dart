@@ -40,6 +40,44 @@ void main() {
     expect(fromListings, contains(supplierId));
   });
 
+  test('picking a live variance drops suppliers not listed on it', () {
+    const saved = 'supply-a';
+    const listed = 'supply-b';
+    final dropped = jobLineEditorSupplierIds(
+      listingSupplierIds: const [listed],
+      existingSplitSupplierIds: const [saved],
+    );
+    expect(dropped, equals({listed}));
+    expect(dropped, isNot(contains(saved)));
+  });
+
+  test('job list and pick labels mark a removed catalog part', () {
+    expect(
+      jobLinePartListLabel(name: 'Isolation valve', removedFromCatalog: false),
+      'Isolation valve',
+    );
+    expect(
+      jobLinePartListLabel(name: 'Isolation valve', removedFromCatalog: true),
+      'Isolation valve (removed)',
+    );
+    expect(
+      jobLineCatalogPickLabel(
+        name: 'Isolation valve',
+        brandVersionLabel: 'Watts · W-123',
+        removedFromCatalog: false,
+      ),
+      'Isolation valve · Watts · W-123',
+    );
+    expect(
+      jobLineCatalogPickLabel(
+        name: 'Isolation valve',
+        brandVersionLabel: 'Watts · W-123',
+        removedFromCatalog: true,
+      ),
+      'Isolation valve · Watts · W-123 (removed from catalog)',
+    );
+  });
+
   test('over-split shows a negative left', () {
     const qty = JobLineQty(
       requested: 10,

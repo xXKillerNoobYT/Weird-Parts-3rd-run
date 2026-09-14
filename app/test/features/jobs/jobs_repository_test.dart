@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/features/jobs/job_line_qty.dart';
 import 'package:wired_parts/features/jobs/jobs_repository.dart';
 
 void main() {
@@ -268,8 +269,11 @@ void main() {
         activeOnly: false,
         includeDeleted: true,
       ))
-        p.id: p.name,
+        p.id: jobLinePartListLabel(
+          name: p.name,
+          removedFromCatalog: p.deletedAt != null,
+        ),
     };
-    expect(names[partId], 'Isolation valve');
+    expect(names[partId], 'Isolation valve (removed)');
   });
 }

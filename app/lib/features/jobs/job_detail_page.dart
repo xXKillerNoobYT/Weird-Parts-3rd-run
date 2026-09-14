@@ -41,7 +41,13 @@ class _JobDetailPageState extends State<JobDetailPage> {
       activeOnly: false,
       includeDeleted: true,
     );
-    final partNames = {for (final p in parts) p.id: p.name};
+    final partNames = {
+      for (final p in parts)
+        p.id: jobLinePartListLabel(
+          name: p.name,
+          removedFromCatalog: p.deletedAt != null,
+        ),
+    };
 
     final suppliers = await scope.db.taxonomyDao.listSuppliers();
     final supplierNames = {for (final s in suppliers) s.id: s.name};
