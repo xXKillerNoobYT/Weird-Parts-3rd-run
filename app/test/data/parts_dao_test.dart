@@ -86,5 +86,26 @@ void main() {
     expect(await db.partsDao.getPart(partId), isNull);
     expect(await db.partsDao.listBrandVersionsForPart(partId), isEmpty);
     expect(await db.partsDao.listingsForBrandVersion(bvId), isEmpty);
+
+    final tombstoned = await db.partsDao.getPart(partId, includeDeleted: true);
+    expect(tombstoned, isNotNull);
+    expect(tombstoned!.name, 'Valve');
+    expect(
+      await db.partsDao.listBrandVersionsForPart(partId, includeDeleted: true),
+      hasLength(1),
+    );
+    expect(
+      await db.partsDao.listingsForBrandVersion(bvId, includeDeleted: true),
+      hasLength(1),
+    );
+    expect(
+      (await db.partsDao.listParts(activeOnly: false, includeDeleted: true))
+          .map((p) => p.id),
+      contains(partId),
+    );
+    expect(
+      (await db.partsDao.listParts(activeOnly: false)).map((p) => p.id),
+      isNot(contains(partId)),
+    );
   });
 }
