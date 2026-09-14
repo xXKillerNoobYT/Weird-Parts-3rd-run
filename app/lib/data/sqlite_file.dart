@@ -23,6 +23,12 @@ File resolveSqliteFile({
   final dest = File(p.join(supportDir.path, fileName));
   if (dest.existsSync()) return dest;
 
+  final marker = File(p.join(supportDir.path, kRestoreSwapMarkerName));
+  if (marker.existsSync()) {
+    // Incomplete restore: do not invent a shop from Documents.
+    return dest;
+  }
+
   if (documentsDir != null) {
     final src = File(p.join(documentsDir.path, fileName));
     if (src.existsSync()) {
@@ -40,6 +46,10 @@ File resolveSqliteFile({
 
 /// Finish or roll back a restore that crashed between live/bak/staging
 /// renames. Safe to call when no marker is present.
+///
+/// Marker and staging are removed only after live sqlite is in place and
+/// nothing remains to promote from staging. A failed rename keeps both so
+/// the next startup can retry.
 void recoverInterruptedRestore({required Directory supportDir}) {
   final marker = File(p.join(supportDir.path, kRestoreSwapMarkerName));
   if (!marker.existsSync()) return;
@@ -52,6 +62,8 @@ void recoverInterruptedRestore({required Directory supportDir}) {
   final stagedSqlite = File(p.join(staging.path, kSqliteFileName));
   final stagedPhotos = Directory(p.join(staging.path, 'part_photos'));
 
+  var sqliteFromBak = false;
+  Object? error;
   try {
     if (stagedSqlite.existsSync()) {
       if (!liveSqlite.existsSync()) {
@@ -60,6 +72,7 @@ void recoverInterruptedRestore({required Directory supportDir}) {
       }
     } else if (!liveSqlite.existsSync() && bakSqlite.existsSync()) {
       bakSqlite.renameSync(liveSqlite.path);
+      sqliteFromBak = true;
     }
 
     if (stagedPhotos.existsSync()) {
@@ -79,15 +92,32 @@ void recoverInterruptedRestore({required Directory supportDir}) {
         }
       }
     } else if (!livePhotos.existsSync() && bakPhotos.existsSync()) {
-      bakPhotos.renameSync(livePhotos.path);
+      // Only roll bak photos when this recovery also rolled sqlite back.
+      // A committed sqlite swap with missing live photos must not attach
+      // the previous shop's images.
+      if (sqliteFromBak || !liveSqlite.existsSync()) {
+        bakPhotos.renameSync(livePhotos.path);
+      }
     }
-  } finally {
+  } catch (e) {
+    error = e;
+  }
+
+  final liveOk = liveSqlite.existsSync();
+  final pendingStaging = (stagedSqlite.existsSync() && !liveOk) ||
+      (stagedPhotos.existsSync() && !livePhotos.existsSync());
+
+  if (liveOk && !pendingStaging) {
     try {
       if (marker.existsSync()) marker.deleteSync();
     } catch (_) {}
     try {
       if (staging.existsSync()) staging.deleteSync(recursive: true);
     } catch (_) {}
+  }
+
+  if (error != null && !liveOk) {
+    throw error;
   }
 }
 

@@ -356,6 +356,62 @@ void main() {
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
   });
 
+  test('committed sqlite swap does not revive bak photos', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-photos-bak-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+    Directory(p.join(dest.path, kPhotosRestoreBakName)).createSync();
+    File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg'))
+        .writeAsBytesSync([1]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    resolveSqliteFile(supportDir: dest);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+    expect(
+      Directory(p.join(dest.path, 'part_photos')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg')).existsSync(),
+      isTrue,
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+  });
+
+  test('failed recover rename keeps staging and marker', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-keep-stage-');
+    addTearDown(() {
+      try {
+        dest.statSync();
+        Process.runSync('chmod', ['u+w', dest.path]);
+      } catch (_) {}
+      dest.deleteSync(recursive: true);
+    });
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+    Process.runSync('chmod', ['a-w', dest.path]);
+
+    expect(
+      () => recoverInterruptedRestore(supportDir: dest),
+      throwsA(isA<FileSystemException>()),
+    );
+    Process.runSync('chmod', ['u+w', dest.path]);
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
+    expect(
+      File(p.join(staging.path, kSqliteFileName)).existsSync(),
+      isTrue,
+    );
+    expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isFalse);
+  });
+
   test('writeBytesAtomically replaces an existing backup without a leftover tmp',
       () async {
     final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-');
@@ -366,6 +422,30 @@ void main() {
     await writeBytesAtomically(dest, [9, 9, 9, 9]);
     expect(dest.readAsBytesSync(), [9, 9, 9, 9]);
     expect(File('${dest.path}.tmp').existsSync(), isFalse);
+    expect(File('${dest.path}.old').existsSync(), isFalse);
+  });
+
+  test('atomic write restores parked backup if replace fails', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-fail-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final dest = File(p.join(dir.path, 'shop.wpbackup'))
+      ..writeAsBytesSync([1, 2, 3]);
+
+    await expectLater(
+      writeBytesAtomically(
+        dest,
+        [9, 9, 9, 9],
+        beforeReplace: () async {
+          throw StateError('replace');
+        },
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(dest.readAsBytesSync(), [1, 2, 3]);
+    expect(File('${dest.path}.tmp').existsSync(), isTrue);
+    expect(File('${dest.path}.tmp').readAsBytesSync(), [9, 9, 9, 9]);
+    expect(File('${dest.path}.old').existsSync(), isFalse);
   });
 
   test('in-process park crash rolls bak back to the live shop', () async {
