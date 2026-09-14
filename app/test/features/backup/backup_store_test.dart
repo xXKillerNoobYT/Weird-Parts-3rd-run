@@ -381,6 +381,55 @@ void main() {
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
   });
 
+  test('failed photo replace keeps staged photos and marker', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-photo-keep-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync([1]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'new.jpg')).writeAsBytesSync([9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    recoverInterruptedRestore(
+      supportDir: dest,
+      beforeReplaceLivePhotos: () {
+        throw StateError('photo replace');
+      },
+    );
+
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
+    expect(
+      File(p.join(staging.path, 'part_photos', 'new.jpg')).existsSync(),
+      isTrue,
+    );
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).readAsBytesSync(),
+      [1],
+    );
+    expect(
+      File(p.join(dest.path, 'part_photos', 'new.jpg')).existsSync(),
+      isFalse,
+    );
+
+    recoverInterruptedRestore(supportDir: dest);
+    expect(
+      File(p.join(dest.path, 'part_photos', 'new.jpg')).readAsBytesSync(),
+      [9],
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(
+      File(p.join(staging.path, 'part_photos', 'new.jpg')).existsSync(),
+      isFalse,
+    );
+  });
+
   test('failed recover rename keeps staging and marker', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-keep-stage-');
     addTearDown(() {

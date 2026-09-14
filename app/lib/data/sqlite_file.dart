@@ -50,7 +50,10 @@ File resolveSqliteFile({
 /// Marker and staging are removed only after live sqlite is in place and
 /// nothing remains to promote from staging. A failed rename keeps both so
 /// the next startup can retry.
-void recoverInterruptedRestore({required Directory supportDir}) {
+void recoverInterruptedRestore({
+  required Directory supportDir,
+  void Function()? beforeReplaceLivePhotos,
+}) {
   final marker = File(p.join(supportDir.path, kRestoreSwapMarkerName));
   if (!marker.existsSync()) return;
 
@@ -75,11 +78,15 @@ void recoverInterruptedRestore({required Directory supportDir}) {
       sqliteFromBak = true;
     }
 
-    if (stagedPhotos.existsSync()) {
+    // Staged photos belong to the new shop. Do not apply them after rolling
+    // sqlite back from bak.
+    if (stagedPhotos.existsSync() && !sqliteFromBak) {
       if (!livePhotos.existsSync()) {
         stagedPhotos.renameSync(livePhotos.path);
-      } else if (!stagedSqlite.existsSync() && bakSqlite.existsSync()) {
-        // Sqlite swap already committed; finish replacing photos.
+      } else if (!stagedSqlite.existsSync() && liveSqlite.existsSync()) {
+        // Sqlite swap already committed; finish replacing photos. Live photos
+        // may still be the pre-restore folder if park happened after sqlite.
+        beforeReplaceLivePhotos?.call();
         if (!bakPhotos.existsSync()) {
           livePhotos.renameSync(bakPhotos.path);
         } else {
@@ -104,8 +111,13 @@ void recoverInterruptedRestore({required Directory supportDir}) {
   }
 
   final liveOk = liveSqlite.existsSync();
-  final pendingStaging = (stagedSqlite.existsSync() && !liveOk) ||
-      (stagedPhotos.existsSync() && !livePhotos.existsSync());
+  // Staged photos are unfinished even when the old live folder is still
+  // sitting in the way. Deleting staging here would drop the backup images
+  // and leave no marker for the next startup to retry.
+  final photosUnfinished =
+      stagedPhotos.existsSync() && !sqliteFromBak;
+  final pendingStaging =
+      (stagedSqlite.existsSync() && !liveOk) || photosUnfinished;
 
   if (liveOk && !pendingStaging) {
     try {
