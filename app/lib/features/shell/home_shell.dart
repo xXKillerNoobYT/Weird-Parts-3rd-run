@@ -22,10 +22,10 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: const [
-          JobsPage(),
-          CatalogPage(),
-          _MoreTab(),
+        children: [
+          const JobsPage(),
+          CatalogPage(active: _index == 1),
+          const _MoreTab(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

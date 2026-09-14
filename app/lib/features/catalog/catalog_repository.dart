@@ -69,8 +69,16 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
+    bool requireNestedTaxonomy = false,
   }) async {
     await _pin.requireUnlocked();
+    if (requireNestedTaxonomy) {
+      await _requireNestedTaxonomy(
+        categoryId: categoryId,
+        styleId: styleId,
+        typeId: typeId,
+      );
+    }
     return _db.partsDao.insertGeneralPart(
       id: newId(),
       name: name,
@@ -80,6 +88,29 @@ class CatalogRepository {
       styleId: styleId,
       typeId: typeId,
     );
+  }
+
+  Future<void> _requireNestedTaxonomy({
+    required String? categoryId,
+    required String? styleId,
+    required String? typeId,
+  }) async {
+    if (categoryId == null ||
+        categoryId.isEmpty ||
+        styleId == null ||
+        styleId.isEmpty ||
+        typeId == null ||
+        typeId.isEmpty) {
+      throw StateError('Category, Type, and Variant are required');
+    }
+    final styles = await _db.taxonomyDao.listStyles(categoryId: categoryId);
+    if (!styles.any((s) => s.id == styleId)) {
+      throw StateError('Type must belong to the selected Category');
+    }
+    final variants = await _db.taxonomyDao.listTypes(styleId: styleId);
+    if (!variants.any((t) => t.id == typeId)) {
+      throw StateError('Variant must belong to the selected Type');
+    }
   }
 
   Future<void> updatePart({
@@ -92,8 +123,16 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
+    bool requireNestedTaxonomy = true,
   }) async {
     await _pin.requireUnlocked();
+    if (requireNestedTaxonomy) {
+      await _requireNestedTaxonomy(
+        categoryId: categoryId,
+        styleId: styleId,
+        typeId: typeId,
+      );
+    }
     await _db.partsDao.updatePart(
       id: partId,
       name: name,
