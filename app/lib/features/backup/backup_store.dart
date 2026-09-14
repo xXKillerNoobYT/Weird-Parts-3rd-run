@@ -18,25 +18,39 @@ const _sqliteMagic = [
   0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
 ];
 
-/// Write [bytes] to a sibling temp file, then rename over [dest] so a failed
-/// overwrite cannot truncate the only copy of a `.wpbackup`.
-Future<void> writeBytesAtomically(File dest, List<int> bytes) async {
+/// Write [bytes] to a sibling temp file, then replace [dest] by parking the
+/// previous file. Never delete the old copy until the new file is at [dest],
+/// and never delete the temp copy on failure.
+Future<void> writeBytesAtomically(
+  File dest,
+  List<int> bytes, {
+  Future<void> Function()? beforeReplace,
+}) async {
   final tmp = File('${dest.path}.tmp');
+  final bak = File('${dest.path}.old');
   await tmp.writeAsBytes(bytes, flush: true);
+  var parked = false;
   try {
     if (await dest.exists()) {
-      try {
-        await tmp.rename(dest.path);
-        return;
-      } on FileSystemException {
-        await dest.delete();
+      if (await bak.exists()) {
+        await bak.delete();
       }
+      await dest.rename(bak.path);
+      parked = true;
     }
+    await beforeReplace?.call();
     await tmp.rename(dest.path);
+    if (parked) {
+      try {
+        if (await bak.exists()) await bak.delete();
+      } catch (_) {}
+    }
   } catch (e) {
-    try {
-      if (await tmp.exists()) await tmp.delete();
-    } catch (_) {}
+    if (parked && await bak.exists() && !await dest.exists()) {
+      try {
+        await bak.rename(dest.path);
+      } catch (_) {}
+    }
     rethrow;
   }
 }

@@ -51,13 +51,17 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _reloadMeta() async {
     final db = AppScope.of(context).db;
-    final at = await db.settingsDao.getSetting(kLastBackupAtKey);
-    final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
-    if (!mounted) return;
-    setState(() {
-      _lastAt = at;
-      _lastSource = source;
-    });
+    try {
+      final at = await db.settingsDao.getSetting(kLastBackupAtKey);
+      final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
+      if (!mounted) return;
+      setState(() {
+        _lastAt = at;
+        _lastSource = source;
+      });
+    } catch (_) {
+      // Closed pre-restore connection; a later AppScope rebuild reloads.
+    }
   }
 
   Future<String?> _savePath() async {
@@ -159,11 +163,15 @@ class _BackupPageState extends State<BackupPage> {
       if (password == null || !mounted) return;
       await scope.restoreFromBackup(fileBytes, password);
       if (!mounted) return;
-      await _reloadMeta();
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Backup restored')),
       );
+      // Do not query the pre-restore connection here: restore closes it and
+      // replaces AppScope. A failed meta read must not report Restore failed.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _reloadMeta();
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
