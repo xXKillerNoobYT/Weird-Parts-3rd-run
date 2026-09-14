@@ -48,14 +48,19 @@ class LocalDataReset {
   Future<void> wipeFiles() async {
     final dir = await _support();
     await _deleteSqliteIn(dir);
-    final docs = await _documents();
-    if (docs != null) {
-      await _deleteSqliteIn(docs);
-    }
+    await clearDocumentsLeftover();
     final photos =
         photosDir ?? Directory(p.join(dir.path, 'part_photos'));
     if (await photos.exists()) {
       await photos.delete(recursive: true);
     }
+  }
+
+  Future<void> clearDocumentsLeftover() async {
+    final docs = await _documents();
+    if (docs == null) return;
+    final support = await _support();
+    if (p.canonicalize(docs.path) == p.canonicalize(support.path)) return;
+    await _deleteSqliteIn(docs);
   }
 }

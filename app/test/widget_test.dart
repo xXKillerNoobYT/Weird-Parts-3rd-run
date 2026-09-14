@@ -1,8 +1,10 @@
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
@@ -29,6 +31,7 @@ Future<void> _pumpShell(
       pin: pin,
       deviceId: deviceId,
       wipeLocalData: wipeLocalData ?? () async {},
+      restoreFromBackup: (_, _) async {},
       child: const MaterialApp(home: HomeShell()),
     ),
   );
@@ -189,5 +192,70 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Wipe everything'));
     await tester.pumpAndSettle();
     expect(wiped, isTrue);
+  });
+
+  testWidgets('Job detail has back control; FAB hover does not assert',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+
+    await tester.tap(find.byTooltip('New job'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'Test #1',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No parts on this job yet'), findsOneWidget);
+    expect(find.byTooltip('Back to jobs'), findsWidgets);
+    expect(find.text('Back to jobs'), findsOneWidget);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(find.byTooltip('Add line')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Back to jobs'));
+    await tester.pumpAndSettle();
+    expect(find.text('No parts on this job yet'), findsNothing);
+    expect(find.text('Test #1'), findsOneWidget);
+  });
+
+  testWidgets('More shows backup date and source device', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    await db.settingsDao.setSetting(
+      kLastBackupAtKey,
+      '2026-09-13T20:15:00.000Z',
+    );
+    await db.settingsDao.setSetting(kLastBackupSourceKey, 'dev-source-1');
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Backup & restore'), findsOneWidget);
+    expect(find.textContaining('dev-source-1'), findsOneWidget);
+    expect(find.textContaining('2026-09-13'), findsOneWidget);
+
+    await tester.tap(find.text('Backup & restore'));
+    await tester.pumpAndSettle();
+    expect(find.text('Last backup'), findsOneWidget);
+    expect(find.text('Export encrypted backup'), findsOneWidget);
+    expect(find.text('Restore encrypted backup'), findsOneWidget);
   });
 }

@@ -36,13 +36,51 @@ void main() {
     expect(file.existsSync(), isTrue);
   });
 
-  test('resolveFile still opens a leftover absolute path', () async {
-    final dir = Directory.systemTemp.createTempSync('wp-photo-abs-');
+  test('resolveFile does not open a host path outside part_photos', () async {
+    final photos = Directory.systemTemp.createTempSync('wp-photo-root-');
+    final host = Directory.systemTemp.createTempSync('wp-photo-host-');
+    addTearDown(() {
+      photos.deleteSync(recursive: true);
+      host.deleteSync(recursive: true);
+    });
+    File(p.join(photos.path, 'part-1-1.jpg')).writeAsBytesSync(const [9, 9]);
+    final secret = File(p.join(host.path, 'secret.txt'))
+      ..writeAsStringSync('do-not-open');
+    final file = await const PartPhotoStore().resolveFile(
+      secret.path,
+      root: photos,
+    );
+    expect(p.isWithin(photos.path, file.path), isTrue);
+    expect(file.path, isNot(secret.path));
+    expect(secret.existsSync(), isTrue);
+    expect(secret.readAsStringSync(), 'do-not-open');
+  });
+
+  test('deleteAt does not delete a host file outside part_photos', () async {
+    final photos = Directory.systemTemp.createTempSync('wp-photo-del-root-');
+    final host = Directory.systemTemp.createTempSync('wp-photo-del-host-');
+    addTearDown(() {
+      photos.deleteSync(recursive: true);
+      host.deleteSync(recursive: true);
+    });
+    final secret = File(p.join(host.path, 'secret.txt'))
+      ..writeAsStringSync('keep-me');
+    await const PartPhotoStore().deleteAt(secret.path, root: photos);
+    expect(secret.existsSync(), isTrue);
+    expect(secret.readAsStringSync(), 'keep-me');
+  });
+
+  test('resolveFile falls back to copied basename when absolute path is gone',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('wp-photo-restore-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final absolute = File(p.join(dir.path, 'old.jpg'))
-      ..writeAsBytesSync(const [1, 2, 3]);
-    final file = await const PartPhotoStore().resolveFile(absolute.path);
-    expect(file.path, absolute.path);
+    File(p.join(dir.path, 'part-1-1.jpg')).writeAsBytesSync(const [9, 9]);
+    final file = await const PartPhotoStore().resolveFile(
+      r'C:\Users\old\part_photos\part-1-1.jpg',
+      root: dir,
+    );
+    expect(p.basename(file.path), 'part-1-1.jpg');
     expect(file.existsSync(), isTrue);
+    expect(file.readAsBytesSync(), [9, 9]);
   });
 }

@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:path/path.dart' as p;
 
 import '../app_database.dart';
 import '../tables/parts.dart';
@@ -177,6 +178,17 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     );
   }
 
+  Future<void> relativizeAbsolutePhotoPaths() async {
+    final rows = await select(parts).get();
+    for (final row in rows) {
+      final stored = row.photoPath;
+      if (stored == null || stored.isEmpty || !_looksAbsolutePath(stored)) {
+        continue;
+      }
+      await setPhotoPath(row.id, _photoBasename(stored));
+    }
+  }
+
   Future<void> setPhotoPath(String id, String? photoPath) async {
     final now = DateTime.now().toUtc();
     await (update(parts)..where((t) => t.id.equals(id))).write(
@@ -297,4 +309,14 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
       );
     });
   }
+}
+
+bool _looksAbsolutePath(String stored) {
+  if (p.posix.isAbsolute(stored) || p.windows.isAbsolute(stored)) return true;
+  return stored.contains('\\') || stored.contains('/');
+}
+
+String _photoBasename(String stored) {
+  if (stored.contains('\\')) return p.windows.basename(stored);
+  return p.posix.basename(stored);
 }
