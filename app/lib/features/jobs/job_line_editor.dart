@@ -432,20 +432,20 @@ class _JobLineEditorState extends State<JobLineEditor> {
       return;
     }
 
+    final scope = AppScope.of(context);
+    if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
+
+    final result = await showDialog<_PromoteResult>(
+      context: context,
+      builder: (ctx) => _PromoteDialog(
+        initialName: name,
+        maintenance: _maintenance,
+      ),
+    );
+    if (result == null || !mounted) return;
+
     setState(() => _saving = true);
     try {
-      final scope = AppScope.of(context);
-      if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
-
-      final result = await showDialog<_PromoteResult>(
-        context: context,
-        builder: (ctx) => _PromoteDialog(
-          initialName: name,
-          maintenance: _maintenance,
-        ),
-      );
-      if (result == null || !mounted) return;
-
       final partId = await _catalog.createGeneralPart(
         name: result.name,
         categoryId: result.categoryId,

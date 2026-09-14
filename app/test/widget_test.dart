@@ -171,16 +171,7 @@ Future<void> _openNewJobCustomLine(
 }) async {
   await tester.tap(_navLabel('Jobs'));
   await tester.pumpAndSettle();
-  await tester.tap(find.byTooltip('New job'));
-  await tester.pumpAndSettle();
-  await tester.enterText(
-    find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.byType(TextField),
-    ),
-    jobName,
-  );
-  await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+  await tester.tap(find.text(jobName));
   await tester.pumpAndSettle();
   await tester.tap(find.byTooltip('Add line'));
   await tester.pumpAndSettle();
@@ -683,6 +674,11 @@ void main() {
     final deviceId = await db.settingsDao.ensureDeviceId();
     final pin = PinService(db.settingsDao);
 
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
     await _openNewJobCustomLine(tester);
 
@@ -737,6 +733,11 @@ void main() {
     final deviceId = await db.settingsDao.ensureDeviceId();
     final pin = PinService(db.settingsDao);
 
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
     await _openNewJobCustomLine(tester, customName: 'Unfiled');
 
@@ -763,6 +764,11 @@ void main() {
     final deviceId = await db.settingsDao.ensureDeviceId();
     final pin = PinService(db.settingsDao);
 
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
     await _openNewJobCustomLine(tester, customName: 'Temp valve');
 
