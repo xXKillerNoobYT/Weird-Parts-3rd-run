@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../data/app_database.dart';
 import '../../data/sqlite_file.dart';
 import '../reset/local_data_reset.dart';
 import 'backup_codec.dart';
@@ -11,12 +13,42 @@ import 'backup_codec.dart';
 const kLastBackupAtKey = 'last_backup_at';
 const kLastBackupSourceKey = 'last_backup_source_device';
 
+const _sqliteMagic = [
+  0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
+  0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
+];
+
+/// Write [bytes] to a sibling temp file, then rename over [dest] so a failed
+/// overwrite cannot truncate the only copy of a `.wpbackup`.
+Future<void> writeBytesAtomically(File dest, List<int> bytes) async {
+  final tmp = File('${dest.path}.tmp');
+  await tmp.writeAsBytes(bytes, flush: true);
+  try {
+    if (await dest.exists()) {
+      try {
+        await tmp.rename(dest.path);
+        return;
+      } on FileSystemException {
+        await dest.delete();
+      }
+    }
+    await tmp.rename(dest.path);
+  } catch (e) {
+    try {
+      if (await tmp.exists()) await tmp.delete();
+    } catch (_) {}
+    rethrow;
+  }
+}
+
 class BackupStore {
   const BackupStore({
     this.supportDir,
     this.photosDir,
     this.afterLiveSwap,
+    this.afterParkLive,
     this.failSidecarDelete = false,
+    this.failStagingDelete = false,
   });
 
   final Directory? supportDir;
@@ -25,8 +57,14 @@ class BackupStore {
   /// Test hook: runs after the restored files are live, before bak cleanup.
   final Future<void> Function()? afterLiveSwap;
 
+  /// Test hook: runs after live files are parked to bak, before staged rename.
+  final Future<void> Function()? afterParkLive;
+
   /// Test hook: pretend WAL/SHM delete failed.
   final bool failSidecarDelete;
+
+  /// Test hook: pretend staging-dir delete failed after the swap.
+  final bool failStagingDelete;
 
   Future<Directory> _support() async =>
       supportDir ?? await getApplicationSupportDirectory();
@@ -87,15 +125,18 @@ class BackupStore {
   /// Write the backup to a staging folder, then swap into place so a failed
   /// write cannot leave the live shop wiped.
   ///
-  /// After the live swap commits, leftover Documents sqlite and `.restore-bak`
-  /// copies are best-effort. Those failures must not roll the restored shop back.
+  /// After the live swap commits, leftover Documents sqlite, `.restore-bak`
+  /// copies, and the staging directory are best-effort. Those failures must
+  /// not roll the restored shop back or report Restore failed.
   Future<void> replaceWithPayload({
     required BackupPayload payload,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
     final live = await _support();
     await live.create(recursive: true);
-    final staging = Directory(p.join(live.path, 'restore_staging'));
+    recoverInterruptedRestore(supportDir: live);
+
+    final staging = Directory(p.join(live.path, kRestoreStagingName));
     if (await staging.exists()) {
       await staging.delete(recursive: true);
     }
@@ -105,10 +146,18 @@ class BackupStore {
         supportDir: staging,
         photosDir: Directory(p.join(staging.path, 'part_photos')),
       ).writePayload(payload);
+      await _validateStagedSqlite(File(p.join(staging.path, kSqliteFileName)));
       await _swapStagingIntoLive(live: live, staging: staging);
     } finally {
-      if (await staging.exists()) {
-        await staging.delete(recursive: true);
+      try {
+        if (failStagingDelete) {
+          throw const FileSystemException('Failed to delete restore staging');
+        }
+        if (await staging.exists()) {
+          await staging.delete(recursive: true);
+        }
+      } catch (_) {
+        // Swap may already have committed. Leftover staging is disk junk.
       }
     }
     try {
@@ -116,6 +165,50 @@ class BackupStore {
     } catch (_) {
       // Restored sqlite is already in Application Support, so a leftover
       // Documents copy cannot be copied over it.
+    }
+  }
+
+  Future<void> _validateStagedSqlite(File sqlite) async {
+    if (!await sqlite.exists()) {
+      throw const BackupFormatException('Backup database is missing');
+    }
+    final header = await sqlite.openRead(0, 16).fold<List<int>>(
+      <int>[],
+      (out, chunk) {
+        out.addAll(chunk);
+        return out;
+      },
+    );
+    if (header.length < 16) {
+      throw const BackupFormatException('Backup database is damaged');
+    }
+    for (var i = 0; i < 16; i++) {
+      if (header[i] != _sqliteMagic[i]) {
+        throw const BackupFormatException('Backup database is damaged');
+      }
+    }
+
+    final db = AppDatabase.forTesting(NativeDatabase(sqlite));
+    try {
+      final rows = await db.customSelect('PRAGMA integrity_check').get();
+      final ok = rows.isNotEmpty && '${rows.first.data.values.first}' == 'ok';
+      if (!ok) {
+        throw const BackupFormatException('Backup database is damaged');
+      }
+      final tables = await db.customSelect(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'parts'",
+      ).get();
+      if (tables.isEmpty) {
+        throw const BackupFormatException(
+          'Backup database is missing shop tables',
+        );
+      }
+    } on BackupFormatException {
+      rethrow;
+    } catch (e) {
+      throw BackupFormatException('Backup database cannot be opened: $e');
+    } finally {
+      await db.close();
     }
   }
 
@@ -127,11 +220,13 @@ class BackupStore {
     final stagedSqlite = File(p.join(staging.path, kSqliteFileName));
     final livePhotos = Directory(p.join(live.path, 'part_photos'));
     final stagedPhotos = Directory(p.join(staging.path, 'part_photos'));
-    final bakSqlite = File(p.join(live.path, '$kSqliteFileName.restore-bak'));
-    final bakPhotos = Directory(p.join(live.path, 'part_photos.restore-bak'));
+    final bakSqlite = File(p.join(live.path, kSqliteRestoreBakName));
+    final bakPhotos = Directory(p.join(live.path, kPhotosRestoreBakName));
+    final marker = File(p.join(live.path, kRestoreSwapMarkerName));
 
     var parkedSqlite = false;
     var parkedPhotos = false;
+    var committed = false;
 
     Future<void> rollback() async {
       // Only restore bak files this swap parked. Leftover `.restore-bak`
@@ -157,6 +252,7 @@ class BackupStore {
       }
     }
 
+    await marker.writeAsString('in-progress', flush: true);
     try {
       if (await bakSqlite.exists()) await bakSqlite.delete();
       if (await bakPhotos.exists()) await bakPhotos.delete(recursive: true);
@@ -171,13 +267,23 @@ class BackupStore {
         await livePhotos.rename(bakPhotos.path);
         parkedPhotos = true;
       }
+      await afterParkLive?.call();
       await stagedSqlite.rename(liveSqlite.path);
       await _deleteSqliteSidecars(liveSqlite);
       if (await stagedPhotos.exists()) {
         await stagedPhotos.rename(livePhotos.path);
       }
-    } catch (_) {
-      await rollback();
+      committed = true;
+      try {
+        if (await marker.exists()) await marker.delete();
+      } catch (_) {}
+    } catch (e) {
+      if (!committed) {
+        await rollback();
+        try {
+          if (await marker.exists()) await marker.delete();
+        } catch (_) {}
+      }
       rethrow;
     }
 

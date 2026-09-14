@@ -1,12 +1,16 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
+
+import 'backup_test_support.dart';
 
 void main() {
   test('replaceWithPayload restores sqlite and photos onto a wiped dir',
@@ -18,18 +22,21 @@ void main() {
       dest.deleteSync(recursive: true);
     });
 
-    File(p.join(src.path, kSqliteFileName)).writeAsBytesSync([9, 9, 9]);
+    final sqlite = await sqliteBytesWithSetting(key: 'marker', value: 'src');
+    File(p.join(src.path, kSqliteFileName)).writeAsBytesSync(sqlite);
     final srcPhotos = Directory(p.join(src.path, 'part_photos'))..createSync();
     File(p.join(srcPhotos.path, 'part-1-1.jpg')).writeAsBytesSync([7, 8]);
 
     final payload = await BackupStore(supportDir: src).collect(
       sourceDeviceId: 'dev-a',
       createdAt: DateTime.utc(2026, 9, 13, 18),
-      sqliteBytes: File(p.join(src.path, kSqliteFileName)).readAsBytesSync(),
+      sqliteBytes: sqlite,
     );
     expect(payload.photos['part-1-1.jpg'], [7, 8]);
 
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1]);
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
     Directory(p.join(dest.path, 'part_photos')).createSync();
     File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([0]);
     File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([2, 2]);
@@ -40,10 +47,7 @@ void main() {
       reset: LocalDataReset(supportDir: dest, documentsDir: dest),
     );
 
-    expect(
-      File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(),
-      [9, 9, 9],
-    );
+    expect(await readSqliteSetting(dest, 'marker'), 'src');
     expect(
       File(p.join(dest.path, 'part_photos', 'part-1-1.jpg')).readAsBytesSync(),
       [7, 8],
@@ -80,27 +84,27 @@ void main() {
     expect(restored.sourceDeviceId, 'dev-b');
   });
 
-  test('failed staging write leaves the live shop', () async {
+  test('damaged staged sqlite leaves the live shop', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-keep-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    final original = await sqliteBytesWithSetting(key: 'marker', value: 'live');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(original);
 
-    final store = BackupStore(supportDir: dest);
-    final payload = BackupPayload(
-      createdAt: DateTime.utc(2026, 9, 13),
-      sourceDeviceId: 'dev-a',
-      sqliteBytes: Uint8List.fromList([9, 9, 9]),
-      photos: const {},
+    await expectLater(
+      BackupStore(supportDir: dest).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: Uint8List.fromList([9, 9, 9]),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(isA<BackupFormatException>()),
     );
-    // Staging is a subfolder of dest; a missing parent after delete is the
-    // failure case. Replace still succeeds on a normal dir.
-    await store.replaceWithPayload(
-      payload: payload,
-      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
-    );
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), original);
     expect(
-      Directory(p.join(dest.path, 'restore_staging')).existsSync(),
+      Directory(p.join(dest.path, kRestoreStagingName)).existsSync(),
       isFalse,
     );
   });
@@ -108,22 +112,25 @@ void main() {
   test('leftover WAL sidecars are deleted around the live swap', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-wal-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
     File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([4]);
     File(p.join(dest.path, '$kSqliteFileName-shm')).writeAsBytesSync([5]);
     File(p.join(dest.path, '$kSqliteFileName-journal')).writeAsBytesSync([6]);
 
+    final sqlite = await sqliteBytesWithSetting(key: 'marker', value: 'new');
     await BackupStore(supportDir: dest).replaceWithPayload(
       payload: BackupPayload(
         createdAt: DateTime.utc(2026, 9, 13),
         sourceDeviceId: 'dev-a',
-        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        sqliteBytes: sqlite,
         photos: const {},
       ),
       reset: LocalDataReset(supportDir: dest, documentsDir: dest),
     );
 
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
     for (final suffix in const ['-wal', '-shm', '-journal']) {
       expect(
         File(p.join(dest.path, '$kSqliteFileName$suffix')).existsSync(),
@@ -135,10 +142,13 @@ void main() {
   test('bak cleanup failure does not roll the restored shop back', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-cleanup-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
     Directory(p.join(dest.path, 'part_photos')).createSync();
     File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([0]);
 
+    final sqlite = await sqliteBytesWithSetting(key: 'marker', value: 'new');
     await BackupStore(
       supportDir: dest,
       afterLiveSwap: () async {
@@ -148,13 +158,13 @@ void main() {
       payload: BackupPayload(
         createdAt: DateTime.utc(2026, 9, 13),
         sourceDeviceId: 'dev-a',
-        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        sqliteBytes: sqlite,
         photos: {'part-1-1.jpg': Uint8List.fromList([7, 8])},
       ),
       reset: LocalDataReset(supportDir: dest, documentsDir: dest),
     );
 
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
     expect(
       File(p.join(dest.path, 'part_photos', 'part-1-1.jpg')).readAsBytesSync(),
       [7, 8],
@@ -169,28 +179,34 @@ void main() {
       () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-docs-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1]);
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
 
+    final sqlite = await sqliteBytesWithSetting(key: 'marker', value: 'new');
     await BackupStore(supportDir: dest).replaceWithPayload(
       payload: BackupPayload(
         createdAt: DateTime.utc(2026, 9, 13),
         sourceDeviceId: 'dev-source',
-        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        sqliteBytes: sqlite,
         photos: const {},
       ),
       reset: _ThrowingDocsReset(supportDir: dest, documentsDir: dest),
     );
 
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
   });
 
   test('leftover bak is not rolled back over the current shop', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-stale-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
     Directory(p.join(dest.path, 'part_photos')).createSync();
     File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([0]);
 
+    final first = await sqliteBytesWithSetting(key: 'marker', value: 'first');
     await BackupStore(
       supportDir: dest,
       afterLiveSwap: () async {
@@ -200,19 +216,19 @@ void main() {
       payload: BackupPayload(
         createdAt: DateTime.utc(2026, 9, 13),
         sourceDeviceId: 'dev-a',
-        sqliteBytes: Uint8List.fromList([9, 9, 9]),
+        sqliteBytes: first,
         photos: {'part-1-1.jpg': Uint8List.fromList([7, 8])},
       ),
       reset: LocalDataReset(supportDir: dest, documentsDir: dest),
     );
 
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
-    final leftoverBak = File(p.join(dest.path, '$kSqliteFileName.restore-bak'));
+    expect(await readSqliteSetting(dest, 'marker'), 'first');
+    final leftoverBak = File(p.join(dest.path, kSqliteRestoreBakName));
     expect(leftoverBak.existsSync(), isTrue);
     leftoverBak.deleteSync();
     Directory(leftoverBak.path).createSync();
     File(p.join(leftoverBak.path, 'blocked')).writeAsStringSync('nope');
-    final leftoverPhotos = Directory(p.join(dest.path, 'part_photos.restore-bak'));
+    final leftoverPhotos = Directory(p.join(dest.path, kPhotosRestoreBakName));
     if (leftoverPhotos.existsSync()) {
       leftoverPhotos.deleteSync(recursive: true);
     }
@@ -224,7 +240,7 @@ void main() {
         payload: BackupPayload(
           createdAt: DateTime.utc(2026, 9, 13),
           sourceDeviceId: 'dev-b',
-          sqliteBytes: Uint8List.fromList([4, 4, 4]),
+          sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'second'),
           photos: const {},
         ),
         reset: LocalDataReset(supportDir: dest, documentsDir: dest),
@@ -232,7 +248,7 @@ void main() {
       throwsA(isA<FileSystemException>()),
     );
 
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [9, 9, 9]);
+    expect(await readSqliteSetting(dest, 'marker'), 'first');
     expect(
       File(p.join(dest.path, 'part_photos', 'part-1-1.jpg')).readAsBytesSync(),
       [7, 8],
@@ -243,14 +259,15 @@ void main() {
       () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-side-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
+    final original = await sqliteBytesWithSetting(key: 'marker', value: 'live');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(original);
 
     await expectLater(
       BackupStore(supportDir: dest, failSidecarDelete: true).replaceWithPayload(
         payload: BackupPayload(
           createdAt: DateTime.utc(2026, 9, 13),
           sourceDeviceId: 'dev-a',
-          sqliteBytes: Uint8List.fromList([9, 9, 9]),
+          sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'new'),
           photos: const {},
         ),
         reset: LocalDataReset(supportDir: dest, documentsDir: dest),
@@ -259,11 +276,128 @@ void main() {
     );
 
     expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isTrue);
-    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), [1, 2, 3]);
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), original);
     expect(
-      File(p.join(dest.path, '$kSqliteFileName.restore-bak')).existsSync(),
+      File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
       isFalse,
     );
+  });
+
+  test('staging delete failure after swap still reports the restored shop',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-stage-del-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
+
+    final sqlite = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    await BackupStore(supportDir: dest, failStagingDelete: true).replaceWithPayload(
+      payload: BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13),
+        sourceDeviceId: 'dev-a',
+        sqliteBytes: sqlite,
+        photos: const {},
+      ),
+      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+    );
+
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+  });
+
+  test('startup recovers live sqlite parked mid-swap', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-crash-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final original = await sqliteBytesWithSetting(key: 'marker', value: 'old');
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync(original);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'part-1-1.jpg'))
+        .writeAsBytesSync([7, 8]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    final docs = Directory(p.join(dest.path, 'docs'))..createSync();
+    File(p.join(docs.path, kSqliteFileName)).writeAsStringSync('obsolete');
+
+    final live = resolveSqliteFile(supportDir: dest, documentsDir: docs);
+    expect(live.readAsBytesSync(), restored);
+    expect(
+      File(p.join(dest.path, 'part_photos', 'part-1-1.jpg')).readAsBytesSync(),
+      [7, 8],
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(Directory(p.join(dest.path, kRestoreStagingName)).existsSync(), isFalse);
+    expect(live.readAsStringSync(), isNot('obsolete'));
+  });
+
+  test('startup rolls bak back when staging is gone mid-swap', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-crash-bak-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final original = await sqliteBytesWithSetting(key: 'marker', value: 'old');
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync(original);
+    Directory(p.join(dest.path, kPhotosRestoreBakName)).createSync();
+    File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg'))
+        .writeAsBytesSync([1]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    final live = resolveSqliteFile(supportDir: dest);
+    expect(live.readAsBytesSync(), original);
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).readAsBytesSync(),
+      [1],
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+  });
+
+  test('writeBytesAtomically replaces an existing backup without a leftover tmp',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final dest = File(p.join(dir.path, 'shop.wpbackup'))
+      ..writeAsBytesSync([1, 2, 3]);
+
+    await writeBytesAtomically(dest, [9, 9, 9, 9]);
+    expect(dest.readAsBytesSync(), [9, 9, 9, 9]);
+    expect(File('${dest.path}.tmp').existsSync(), isFalse);
+  });
+
+  test('in-process park crash rolls bak back to the live shop', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-park-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    final original = await sqliteBytesWithSetting(key: 'marker', value: 'old');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(original);
+
+    await expectLater(
+      BackupStore(
+        supportDir: dest,
+        afterParkLive: () async {
+          throw StateError('crash after park');
+        },
+      ).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'new'),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(File(p.join(dest.path, kSqliteFileName)).readAsBytesSync(), original);
+    final db = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(dest.path, kSqliteFileName))),
+    );
+    addTearDown(db.close);
+    expect(await db.settingsDao.getSetting('marker'), 'old');
   });
 }
 

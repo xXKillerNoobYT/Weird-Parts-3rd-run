@@ -10,6 +10,8 @@ import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 
+import 'backup_test_support.dart';
+
 AppDatabase _open(Directory dir) {
   return AppDatabase.forTesting(
     NativeDatabase(File(p.join(dir.path, kSqliteFileName))),
@@ -90,7 +92,7 @@ void main() {
         payload: BackupPayload(
           createdAt: DateTime.utc(2026, 9, 13),
           sourceDeviceId: 'source',
-          sqliteBytes: Uint8List.fromList([9, 9, 9]),
+          sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'new'),
           photos: const {},
         ),
         reset: LocalDataReset(supportDir: dest, documentsDir: dest),
