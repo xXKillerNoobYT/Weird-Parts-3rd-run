@@ -149,6 +149,47 @@ Future<void> typeDialogName(WidgetTester tester, String name) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> typeTopDialogName(WidgetTester tester, String name) async {
+  final dialog = find.byType(AlertDialog).last;
+  await tester.enterText(
+    find.descendant(of: dialog, matching: find.byType(TextField)).first,
+    name,
+  );
+  await tester.tap(
+    find.descendant(
+      of: dialog,
+      matching: find.widgetWithText(FilledButton, 'Save'),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openNewJobCustomLine(
+  WidgetTester tester, {
+  String jobName = 'Shop job',
+  String customName = 'Decora GFI',
+}) async {
+  await tester.tap(_navLabel('Jobs'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('New job'));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    ),
+    jobName,
+  );
+  await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('Add line'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Custom'));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextField).first, customName);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('HomeShell shows navigation destinations', (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -633,4 +674,127 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Saved'), findsOneWidget);
   });
+
+  testWidgets(
+      'empty shop job custom Promote adds Category Type Variant on the tree',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openNewJobCustomLine(tester);
+
+    await tester.tap(find.text('Promote to catalog'));
+    await tester.pumpAndSettle();
+    expect(find.text('Promote to catalog'), findsWidgets);
+    expect(find.text('Add Category'), findsOneWidget);
+    expect(find.text('Add Type'), findsOneWidget);
+    expect(find.text('Add Variant'), findsOneWidget);
+
+    await tester.tap(find.text('Add Category'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Outlet');
+
+    await tester.tap(find.text('Add Type'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Decora');
+
+    await tester.ensureVisible(find.text('Add Variant'));
+    await tester.tap(find.text('Add Variant'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'GFI');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Promote'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('On this job as a catalog part. Back out when you are done.'),
+      findsOneWidget,
+    );
+    expect(find.text('Decora GFI'), findsWidgets);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Decora GFI'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+    await _expandFolder(tester, 'Outlet');
+    expect(find.text('Decora'), findsOneWidget);
+    await _expandFolder(tester, 'Decora');
+    expect(find.text('GFI'), findsWidgets);
+    await _expandFolder(tester, 'GFI');
+    expect(find.text('Decora GFI'), findsOneWidget);
+  });
+
+  testWidgets('Promote without folders is refused', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openNewJobCustomLine(tester, customName: 'Unfiled');
+
+    await tester.tap(find.text('Promote to catalog'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Type'));
+    await tester.pumpAndSettle();
+    expect(find.text('Set Category first'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Promote'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+    expect(find.text('Promote to catalog'), findsWidgets);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Custom name'), findsOneWidget);
+  });
+
+  testWidgets('job split can add a supplier in place', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openNewJobCustomLine(tester, customName: 'Temp valve');
+
+    await tester.ensureVisible(find.text('Add supplier'));
+    expect(find.text('Add supplier'), findsOneWidget);
+    await tester.tap(find.text('Add supplier'));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Codale');
+    expect(find.text('Codale'), findsWidgets);
+  });
+
+  testWidgets('listing can be added with empty SKU', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _fileEmptyShopTree(tester);
+    await _addLevitonWhiteVariance(tester);
+
+    expect(find.text('Add listing'), findsWidgets);
+    await tester.tap(find.text('Add listing').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Add supplier'), findsOneWidget);
+    await typeDialogName(tester, 'SupplyHouse');
+    expect(find.text('Add supplier listing'), findsOneWidget);
+    expect(find.text('SKU (optional)'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('No SKU'), findsOneWidget);
+  });
 }
+

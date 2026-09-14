@@ -110,3 +110,98 @@ Future<bool> confirmAction(
   );
   return ok ?? false;
 }
+
+/// Dropdown plus an Add control. Icon-only matches the part editor.
+/// Pass [addLabel] for a visible “Add …” button under the field (touch, no tooltip).
+class TaxonomyPickField extends StatelessWidget {
+  const TaxonomyPickField({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    required this.onAdd,
+    this.enabled = true,
+    this.allowNone = false,
+    this.addLabel,
+    super.key,
+  });
+
+  final String label;
+  final String? value;
+  final List<DropdownMenuItem<String>> items;
+  final ValueChanged<String?> onChanged;
+  final VoidCallback? onAdd;
+  final bool enabled;
+  final bool allowNone;
+
+  /// Visible Add button text (e.g. "Add Category"). Null = icon + tooltip only.
+  final String? addLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final inItems = items.any((i) => i.value == value);
+    final resolved = enabled && inItems ? value : null;
+    final field = allowNone
+        ? DropdownButtonFormField<String?>(
+            // ignore: deprecated_member_use
+            value: resolved,
+            decoration: InputDecoration(
+              labelText: label,
+              border: const OutlineInputBorder(),
+            ),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('None'),
+              ),
+              ...items.map(
+                (i) => DropdownMenuItem<String?>(
+                  value: i.value,
+                  child: i.child,
+                ),
+              ),
+            ],
+            onChanged: enabled ? onChanged : null,
+          )
+        : DropdownButtonFormField<String>(
+            // ignore: deprecated_member_use
+            value: resolved,
+            decoration: InputDecoration(
+              labelText: label,
+              border: const OutlineInputBorder(),
+            ),
+            hint: Text(enabled ? 'Select' : 'Set the parent first'),
+            items: items,
+            onChanged: enabled ? onChanged : null,
+          );
+
+    if (addLabel != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          field,
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add),
+              label: Text(addLabel!),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: field),
+        IconButton(
+          tooltip: 'Add $label',
+          onPressed: onAdd,
+          icon: const Icon(Icons.add),
+        ),
+      ],
+    );
+  }
+}

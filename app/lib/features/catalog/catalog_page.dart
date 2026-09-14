@@ -10,7 +10,10 @@ import 'part_detail_page.dart';
 import 'tree_edit_prompts.dart';
 
 class CatalogPage extends StatefulWidget {
-  const CatalogPage({super.key});
+  const CatalogPage({this.active = true, super.key});
+
+  /// When this tab becomes selected, reload so a Promote from Jobs shows up.
+  final bool active;
 
   @override
   State<CatalogPage> createState() => _CatalogPageState();
@@ -33,6 +36,14 @@ class _CatalogPageState extends State<CatalogPage> {
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
     _maintenance = MaintenanceRepository(scope.db, scope.pin, scope.deviceId);
     _reload();
+  }
+
+  @override
+  void didUpdateWidget(CatalogPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active && _initialized) {
+      _reload();
+    }
   }
 
   @override

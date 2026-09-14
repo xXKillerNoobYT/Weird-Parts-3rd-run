@@ -644,52 +644,14 @@ class _PartDetailPageState extends State<PartDetailPage> {
     bool enabled = true,
     bool allowNone = false,
   }) {
-    final inItems = items.any((i) => i.value == value);
-    final resolved = enabled && inItems ? value : null;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: allowNone
-              ? DropdownButtonFormField<String?>(
-                  // ignore: deprecated_member_use
-                  value: resolved,
-                  decoration: InputDecoration(
-                    labelText: label,
-                    border: const OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('None'),
-                    ),
-                    ...items.map(
-                      (i) => DropdownMenuItem<String?>(
-                        value: i.value,
-                        child: i.child,
-                      ),
-                    ),
-                  ],
-                  onChanged: enabled ? onChanged : null,
-                )
-              : DropdownButtonFormField<String>(
-                  // ignore: deprecated_member_use
-                  value: resolved,
-                  decoration: InputDecoration(
-                    labelText: label,
-                    border: const OutlineInputBorder(),
-                  ),
-                  hint: Text(enabled ? 'Select' : 'Set the parent first'),
-                  items: items,
-                  onChanged: enabled ? onChanged : null,
-                ),
-        ),
-        IconButton(
-          tooltip: 'Add $label',
-          onPressed: onAdd,
-          icon: const Icon(Icons.add),
-        ),
-      ],
+    return TaxonomyPickField(
+      label: label,
+      value: value,
+      items: items,
+      onChanged: onChanged,
+      onAdd: onAdd,
+      enabled: enabled,
+      allowNone: allowNone,
     );
   }
 
@@ -885,7 +847,11 @@ class _PartDetailPageState extends State<PartDetailPage> {
                                 contentPadding:
                                     const EdgeInsets.only(left: 32, right: 16),
                                 title: Text(listing.supplierName),
-                                subtitle: Text('SKU ${listing.listing.sku}'),
+                                subtitle: Text(
+                                  listing.listing.sku.trim().isEmpty
+                                      ? 'No SKU'
+                                      : 'SKU ${listing.listing.sku}',
+                                ),
                               ),
                             Align(
                               alignment: Alignment.centerLeft,
@@ -1127,8 +1093,8 @@ class _ListingDialogState extends State<_ListingDialog> {
 
   void _submit() {
     final supplierId = _supplierId;
+    if (supplierId == null) return;
     final sku = _skuController.text.trim();
-    if (supplierId == null || sku.isEmpty) return;
     Navigator.pop(context, _ListingDraft(supplierId: supplierId, sku: sku));
   }
 
@@ -1163,7 +1129,10 @@ class _ListingDialogState extends State<_ListingDialog> {
           ),
           TextField(
             controller: _skuController,
-            decoration: const InputDecoration(labelText: 'SKU'),
+            decoration: const InputDecoration(
+              labelText: 'SKU (optional)',
+              hintText: 'Leave blank if you do not have one',
+            ),
             autofocus: true,
           ),
         ],
