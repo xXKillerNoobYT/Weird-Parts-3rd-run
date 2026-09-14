@@ -780,6 +780,73 @@ void main() {
     expect(find.text('Codale'), findsWidgets);
   });
 
+  testWidgets(
+      'job split Add supplier on a brand version keeps a listing',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Leviton',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Decora GFI',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'R50-W',
+      deviceId: deviceId,
+      varianceName: 'White',
+    );
+    final jobId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
+    await db.jobsDao.insertJobLine(
+      id: newId(),
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: bvId,
+      neededQty: 1,
+      shopPullQty: 0,
+      deviceId: deviceId,
+    );
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Shop job'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decora GFI'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Add supplier'));
+    await tester.tap(find.text('Add supplier'));
+    await tester.pumpAndSettle();
+    await typeDialogName(tester, 'Codale');
+    expect(find.text('Codale'), findsWidgets);
+
+    final listings = await db.partsDao.listingsForBrandVersion(bvId);
+    expect(listings, hasLength(1));
+    expect(listings.first.sku, '');
+
+    await tester.enterText(find.widgetWithText(TextField, 'Qty'), '1');
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decora GFI'));
+    await tester.pumpAndSettle();
+    expect(find.text('Codale'), findsWidgets);
+  });
+
   testWidgets('listing can be added with empty SKU', (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);

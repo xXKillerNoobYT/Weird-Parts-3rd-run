@@ -282,24 +282,23 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (name == null || name.isEmpty || !mounted) return;
     try {
       final id = await _maintenance.createSupplier(name);
+      // Brand-version splits only list suppliers with a listing on that
+      // version. Hang an empty-SKU listing so Add supplier stays selectable
+      // after refresh / reopen. Custom / general-part lines skip this.
+      if (_brandVersionId != null) {
+        await _catalog.createSupplierListing(
+          brandVersionId: _brandVersionId!,
+          supplierId: id,
+          sku: '',
+        );
+      }
       final suppliers = await _db.taxonomyDao.listSuppliers();
       if (!mounted) return;
-      Supplier? created;
-      for (final s in suppliers) {
-        if (s.id == id) {
-          created = s;
-          break;
-        }
-      }
-      if (created == null) return;
-      final added = created;
-      setState(() {
-        _allSuppliers = suppliers;
-        if (!_supplierChoices.any((s) => s.id == id)) {
-          _supplierChoices = [..._supplierChoices, added];
-        }
-        split.supplierId = id;
-      });
+      _allSuppliers = suppliers;
+      await _refreshSupplierChoices();
+      if (!mounted) return;
+      if (!_supplierChoices.any((s) => s.id == id)) return;
+      setState(() => split.supplierId = id);
     } on StateError catch (e) {
       if (mounted) _toast(e.message);
     }
