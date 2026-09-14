@@ -42,11 +42,29 @@ String formatQty(double value) {
   return value.toString();
 }
 
+/// Job list title for a catalog part, including a tombstone marker.
+String jobLinePartListLabel({
+  required String name,
+  required bool removedFromCatalog,
+}) =>
+    removedFromCatalog ? '$name (removed)' : name;
+
+/// Catalog-part picker subtitle on the line editor.
+String jobLineCatalogPickLabel({
+  required String name,
+  String? brandVersionLabel,
+  required bool removedFromCatalog,
+}) {
+  final labeled =
+      brandVersionLabel == null ? name : '$name · $brandVersionLabel';
+  return removedFromCatalog ? '$labeled (removed from catalog)' : labeled;
+}
+
 /// Supplier ids the job-line editor may keep selected.
 ///
-/// Live (or tombstoned) catalog listings, plus ids already saved on the
-/// line when [preserveExistingSplits] is true so opening a deleted part
-/// cannot blank supplier splits.
+/// Live catalog listings, plus ids already saved on the line when
+/// [preserveExistingSplits] is true so opening a deleted part cannot blank
+/// supplier splits. Picking a different live variance must pass false.
 Set<String> jobLineEditorSupplierIds({
   required Iterable<String> listingSupplierIds,
   required Iterable<String?> existingSplitSupplierIds,

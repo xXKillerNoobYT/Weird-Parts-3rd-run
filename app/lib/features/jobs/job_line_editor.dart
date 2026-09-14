@@ -60,6 +60,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   final List<_SplitDraft> _splits = [];
 
   bool _useCustom = false;
+  bool _catalogPartMissing = false;
   bool _loading = true;
   bool _saving = false;
   bool _initialized = false;
@@ -154,12 +155,16 @@ class _JobLineEditorState extends State<JobLineEditor> {
     }
 
     List<BrandVersion> versions = [];
+    Part? storedPart;
     if (partId != null) {
+      storedPart = await _catalog.getPart(partId, includeDeleted: true);
       versions = await _catalog.listBrandVersionsForPart(
         partId,
-        includeDeleted: true,
+        includeDeleted: storedPart?.deletedAt != null,
       );
     }
+    final catalogPartMissing =
+        partId != null && (storedPart == null || storedPart.deletedAt != null);
 
     final tree = buildCatalogTree(
       await _catalog.loadTreeSnapshot(activeOnly: true),
@@ -174,6 +179,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _partId = partId;
       _brandVersionId = brandVersionId;
       _useCustom = useCustom;
+      _catalogPartMissing = catalogPartMissing;
       _customNameController.text = customName;
       _neededController.text = needed;
       _pullController.text = pull;
@@ -199,22 +205,24 @@ class _JobLineEditorState extends State<JobLineEditor> {
         break;
       }
     }
-    if (_brandVersionId == null) {
-      _pickLabel = name;
-      return;
-    }
-    BrandVersion? version;
-    for (final v in _brandVersions) {
-      if (v.id == _brandVersionId) {
-        version = v;
-        break;
+    String? versionLabel;
+    if (_brandVersionId != null) {
+      BrandVersion? version;
+      for (final v in _brandVersions) {
+        if (v.id == _brandVersionId) {
+          version = v;
+          break;
+        }
+      }
+      if (version != null) {
+        versionLabel = _brandVersionLabel(version);
       }
     }
-    if (version == null) {
-      _pickLabel = name;
-      return;
-    }
-    _pickLabel = '$name · ${_brandVersionLabel(version)}';
+    _pickLabel = jobLineCatalogPickLabel(
+      name: name,
+      brandVersionLabel: versionLabel,
+      removedFromCatalog: _catalogPartMissing,
+    );
   }
 
   Future<void> _applyPick(CatalogTreePick pick) async {
@@ -225,6 +233,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _partId = pick.partId;
       _brandVersionId = pick.brandVersionId;
       _brandVersions = versions;
+      _catalogPartMissing = false;
     });
     _refreshPickLabel();
     await _refreshSupplierChoices();
@@ -244,25 +253,22 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _refreshSupplierChoices({
     bool preserveExistingSplits = false,
   }) async {
+    final keepSplits = preserveExistingSplits || _catalogPartMissing;
     List<Supplier> choices;
-    if (_brandVersionId != null) {
-      // Include tombstoned listings so a deleted catalog part cannot
-      // look like it has no suppliers and wipe saved splits.
-      final listings = await _catalog.listingsForBrandVersion(
-        _brandVersionId!,
-        includeDeleted: true,
-      );
+    if (_catalogPartMissing) {
+      // Tombstoned listings are gone from the live picker. Keep every live
+      // supplier so saved splits stay visible and Add supplier still works.
+      choices = List.of(_allSuppliers);
+    } else if (_brandVersionId != null) {
+      final listings = await _catalog.listingsForBrandVersion(_brandVersionId!);
       final ids = jobLineEditorSupplierIds(
         listingSupplierIds: listings.map((l) => l.supplierId),
         existingSplitSupplierIds: _splits.map((s) => s.supplierId),
-        preserveExistingSplits: preserveExistingSplits,
+        preserveExistingSplits: keepSplits,
       );
       choices = _allSuppliers.where((s) => ids.contains(s.id)).toList();
     } else if (_partId != null) {
-      final part = await _catalog.getPart(
-        _partId!,
-        includeDeleted: true,
-      );
+      final part = await _catalog.getPart(_partId!);
       final preferred = part?.defaultSupplierId;
       choices = List.of(_allSuppliers);
       if (preferred != null) {
@@ -279,6 +285,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (!mounted) return;
     setState(() {
       _supplierChoices = choices;
+      if (keepSplits) return;
       final allowed = choices.map((s) => s.id).toSet();
       for (final split in _splits) {
         if (split.supplierId != null && !allowed.contains(split.supplierId)) {
@@ -301,8 +308,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
       final id = await _maintenance.createSupplier(name);
       // Brand-version splits only list suppliers with a listing on that
       // version. Hang an empty-SKU listing so Add supplier stays selectable
-      // after refresh / reopen. Custom / general-part lines skip this.
-      if (_brandVersionId != null) {
+      // after refresh / reopen. Custom / general-part / deleted-part lines
+      // skip this — do not write a listing onto a tombstoned variance.
+      if (_brandVersionId != null && !_catalogPartMissing) {
         await _catalog.createSupplierListing(
           brandVersionId: _brandVersionId!,
           supplierId: id,
@@ -507,6 +515,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
         _brandVersions = versions;
         _parts = parts;
         _tree = tree;
+        _catalogPartMissing = false;
         _customNameController.clear();
       });
       _refreshPickLabel();
@@ -592,6 +601,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                         _partId = null;
                         _brandVersionId = null;
                         _brandVersions = [];
+                        _catalogPartMissing = false;
                       } else {
                         _customNameController.clear();
                       }
@@ -628,7 +638,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                     trailing: const Icon(Icons.account_tree_outlined),
                     onTap: _saving ? null : _pickFromTree,
                   ),
-                  if (_partId != null)
+                  if (_partId != null && !_catalogPartMissing)
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
