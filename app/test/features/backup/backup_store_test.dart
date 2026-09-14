@@ -332,7 +332,7 @@ void main() {
     );
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
     expect(Directory(p.join(dest.path, kRestoreStagingName)).existsSync(), isFalse);
-    expect(live.readAsStringSync(), isNot('obsolete'));
+    expect(File(p.join(docs.path, kSqliteFileName)).readAsStringSync(), 'obsolete');
   });
 
   test('startup rolls bak back when staging is gone mid-swap', () async {

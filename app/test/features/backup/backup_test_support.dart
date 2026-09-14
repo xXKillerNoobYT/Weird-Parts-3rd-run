@@ -27,7 +27,8 @@ Future<String?> readSqliteSetting(Directory dir, String key) async {
     NativeDatabase(File(p.join(dir.path, kSqliteFileName))),
   );
   try {
-    return db.settingsDao.getSetting(key);
+    final value = await db.settingsDao.getSetting(key);
+    return value;
   } finally {
     await db.close();
   }
