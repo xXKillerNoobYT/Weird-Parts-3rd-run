@@ -384,8 +384,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.settings_backup_restore));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Restore'));
+      expect(find.text('Restore this backup?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Restore'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find
