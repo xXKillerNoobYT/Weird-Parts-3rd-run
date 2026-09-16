@@ -143,6 +143,7 @@ class _JobDetailPageState extends State<JobDetailPage> {
                   },
                 ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'job-detail-fab',
         onPressed: () => _openEditor(),
         tooltip: 'Add line',
         child: const Icon(Icons.add),

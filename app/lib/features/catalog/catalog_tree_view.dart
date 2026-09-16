@@ -33,7 +33,15 @@ class CatalogTreeView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (nodes.isEmpty) {
-      return const Center(child: Text('No folders or parts yet'));
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No folders or parts yet. Add a part, then create Category → Type → Variant on that part.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
     }
     return ListView(
       children: [

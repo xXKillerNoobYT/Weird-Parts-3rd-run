@@ -179,6 +179,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
             categoryId: part.categoryId,
             styleId: part.styleId,
             typeId: part.typeId,
+            requireNestedTaxonomy: false,
           );
         case CatalogTreeKind.brand:
           if (node.brandId != null) {
@@ -309,6 +310,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'maintenance-fab',
         onPressed: _add,
         tooltip: _kind == _Kind.types ? 'Add category' : 'Add',
         child: const Icon(Icons.add),
