@@ -161,10 +161,12 @@ class BackupStore {
     final leftoverPhotos = Directory(p.join(leftoverStaging.path, 'part_photos'));
     final leftoverSqlite = File(p.join(leftoverStaging.path, kSqliteFileName));
     final liveSqlite = File(p.join(live.path, kSqliteFileName));
-    // Sqlite is already live; leftover photos still match it. Do not delete
-    // them to make room for a new restore — a later failure would leave that
-    // shop without images.
-    final keepUnfinishedPhotos = leftoverPhotos.existsSync() &&
+    final swapMarker = File(p.join(live.path, kRestoreSwapMarkerName));
+    // Only a live marker means photos still belong to an in-progress restore.
+    // Rollback already deletes the marker; leftover staging after that is junk
+    // and must not block a later Restore.
+    final keepUnfinishedPhotos = swapMarker.existsSync() &&
+        leftoverPhotos.existsSync() &&
         !leftoverSqlite.existsSync() &&
         liveSqlite.existsSync();
     if (keepUnfinishedPhotos) {

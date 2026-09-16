@@ -508,6 +508,36 @@ void main() {
     expect(await readSqliteSetting(dest, 'marker'), 'new');
   });
 
+  test('leftover staging without a swap marker does not block restore', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-junk-stage-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'junk.jpg')).writeAsBytesSync([9]);
+
+    await BackupStore(supportDir: dest).replaceWithPayload(
+      payload: BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13),
+        sourceDeviceId: 'dev-a',
+        sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'new'),
+        photos: const {},
+      ),
+      reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+    );
+
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(
+      File(p.join(staging.path, 'part_photos', 'junk.jpg')).existsSync(),
+      isFalse,
+    );
+  });
+
   test('failed recover rename keeps staging and marker', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-keep-stage-');
     addTearDown(() {

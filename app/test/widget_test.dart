@@ -712,7 +712,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Decora GFI'), findsOneWidget);
 
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Back to jobs'));
     await tester.pumpAndSettle();
     await tester.tap(_navLabel('Catalog'));
     await tester.pumpAndSettle();

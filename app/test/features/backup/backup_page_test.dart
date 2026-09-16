@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
-import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_page.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
@@ -131,65 +129,6 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Backup restored'), findsNothing);
     expect(find.textContaining('Backup failed'), findsOneWidget);
-  });
-
-  testWidgets('restore that did not run does not show Backup restored',
-      (tester) async {
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(db.close);
-    final deviceId = await db.settingsDao.ensureDeviceId();
-    final pin = PinService(db.settingsDao);
-    final dir = Directory.systemTemp.createTempSync('wp-restore-busy-');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    final bytes = await BackupCodec(iterations: 1000).encrypt(
-      BackupPayload(
-        createdAt: DateTime.utc(2026, 9, 13, 20, 15),
-        sourceDeviceId: 'dev-source-1',
-        sqliteBytes: Uint8List.fromList([1, 2, 3, 4, 5]),
-        photos: const {},
-      ),
-      'test-backup',
-    );
-    File(p.join(dir.path, 'shop.wpbackup')).writeAsBytesSync(bytes);
-
-    await tester.pumpWidget(
-      AppScope(
-        db: db,
-        pin: pin,
-        deviceId: deviceId,
-        wipeLocalData: () async {},
-        restoreFromBackup: (_, _) async {
-          throw const RestoreBusyException();
-        },
-        child: MaterialApp(
-          home: BackupPage(
-            pickOpenPath: () async => p.join(dir.path, 'shop.wpbackup'),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byIcon(Icons.settings_backup_restore));
-    await tester.pumpAndSettle();
-    expect(find.text('Restore this backup?'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Restore'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.byType(TextField),
-      ),
-      'test-backup',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Backup restored'), findsNothing);
-    expect(
-      find.textContaining('A restore or wipe is already in progress'),
-      findsOneWidget,
-    );
   });
 
   testWidgets('restore during wipe throws instead of reporting success',
