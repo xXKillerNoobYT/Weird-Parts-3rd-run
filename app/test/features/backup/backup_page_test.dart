@@ -140,13 +140,17 @@ void main() {
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pump();
-    // Encrypt does not schedule frames, so pumpAndSettle can return too soon.
-    await tester.pump(const Duration(seconds: 5));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 200 && !out.existsSync(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
     expect(find.textContaining('Backup failed'), findsNothing);
-    expect(find.text('Backup saved'), findsOneWidget);
     expect(out.existsSync(), isTrue);
+    expect(find.text('Backup saved'), findsOneWidget);
   });
 
   testWidgets('unsupported save location reports Backup failed, not a crash',
