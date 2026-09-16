@@ -4,10 +4,13 @@ import 'package:path/path.dart' as p;
 
 const kSqliteFileName = 'wired_parts.sqlite';
 const kRestoreSwapMarkerName = 'restore_swap.marker';
+const kRestoreSwapMarkerInProgress = 'in-progress';
+const kRestoreSwapMarkerNoPhotos = 'in-progress-no-photos';
 const kSqliteRestoreBakName = '$kSqliteFileName.restore-bak';
 const kPhotosRestoreBakName = 'part_photos.restore-bak';
 const kRestoreStagingName = 'restore_staging';
 const kRestoreStagingNextName = 'restore_staging.next';
+const _sqliteSidecarSuffixes = ['-wal', '-shm', '-journal'];
 
 /// Prefer Application Support. If that file is missing, copy a Phase 1
 /// Documents DB (and WAL/SHM sidecars) so an upgrade does not look empty.
@@ -54,6 +57,7 @@ File resolveSqliteFile({
 void recoverInterruptedRestore({
   required Directory supportDir,
   void Function()? beforeReplaceLivePhotos,
+  void Function()? beforeDeleteSqliteSidecars,
 }) {
   final marker = File(p.join(supportDir.path, kRestoreSwapMarkerName));
   if (!marker.existsSync()) return;
@@ -65,6 +69,12 @@ void recoverInterruptedRestore({
   final staging = Directory(p.join(supportDir.path, kRestoreStagingName));
   final stagedSqlite = File(p.join(staging.path, kSqliteFileName));
   final stagedPhotos = Directory(p.join(staging.path, 'part_photos'));
+  // Capture before promoting sqlite: a photo backup onto a shop with no
+  // folder looks like leftover live photos once staging is gone.
+  final hadStagedSqlite = stagedSqlite.existsSync();
+  final hadStagedPhotos = stagedPhotos.existsSync();
+  final noPhotoBackup =
+      _markerSaysNoPhotos(marker) || (hadStagedSqlite && !hadStagedPhotos);
 
   var sqliteFromBak = false;
   Object? error;
@@ -72,11 +82,15 @@ void recoverInterruptedRestore({
     if (stagedSqlite.existsSync()) {
       if (!liveSqlite.existsSync()) {
         stagedSqlite.renameSync(liveSqlite.path);
-        _deleteSqliteSidecarsSync(liveSqlite);
       }
     } else if (!liveSqlite.existsSync() && bakSqlite.existsSync()) {
       bakSqlite.renameSync(liveSqlite.path);
       sqliteFromBak = true;
+    }
+
+    if (liveSqlite.existsSync()) {
+      beforeDeleteSqliteSidecars?.call();
+      _deleteSqliteSidecarsSync(liveSqlite);
     }
 
     // Staged photos belong to the new shop. Do not apply them after rolling
@@ -100,14 +114,17 @@ void recoverInterruptedRestore({
         }
       }
     } else if (!sqliteFromBak &&
+        noPhotoBackup &&
         liveSqlite.existsSync() &&
         !stagedSqlite.existsSync() &&
         !stagedPhotos.existsSync() &&
         livePhotos.existsSync() &&
         bakSqlite.existsSync() &&
         !bakPhotos.existsSync()) {
-      // Sqlite from a no-photo backup is already live; leftover live photos
-      // were never parked and belong to the previous shop.
+      // No-photo backup: leftover live photos were never parked and belong
+      // to the previous shop. Do not park when staging is already gone and
+      // the marker does not say the backup had no photos — those images
+      // are the restored backup.
       beforeReplaceLivePhotos?.call();
       livePhotos.renameSync(bakPhotos.path);
     } else if (!livePhotos.existsSync() && bakPhotos.existsSync()) {
@@ -130,8 +147,9 @@ void recoverInterruptedRestore({
       stagedPhotos.existsSync() && !sqliteFromBak;
   final pendingStaging =
       (stagedSqlite.existsSync() && !liveOk) || photosUnfinished;
+  final sidecarsPending = _sqliteSidecarsExist(liveSqlite);
 
-  if (liveOk && !pendingStaging) {
+  if (liveOk && !pendingStaging && !sidecarsPending) {
     try {
       if (marker.existsSync()) marker.deleteSync();
     } catch (_) {}
@@ -145,13 +163,24 @@ void recoverInterruptedRestore({
   }
 }
 
+bool _markerSaysNoPhotos(File marker) {
+  try {
+    return marker.readAsStringSync().trim() == kRestoreSwapMarkerNoPhotos;
+  } catch (_) {
+    return false;
+  }
+}
+
+bool _sqliteSidecarsExist(File sqlite) {
+  for (final suffix in _sqliteSidecarSuffixes) {
+    if (File('${sqlite.path}$suffix').existsSync()) return true;
+  }
+  return false;
+}
+
 void _deleteSqliteSidecarsSync(File sqlite) {
-  for (final suffix in const ['-wal', '-shm', '-journal']) {
+  for (final suffix in _sqliteSidecarSuffixes) {
     final side = File('${sqlite.path}$suffix');
-    if (side.existsSync()) {
-      try {
-        side.deleteSync();
-      } catch (_) {}
-    }
+    if (side.existsSync()) side.deleteSync();
   }
 }

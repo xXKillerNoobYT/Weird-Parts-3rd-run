@@ -417,7 +417,33 @@ void main() {
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
   });
 
-  test('empty-photo restore parks leftover live photos after sqlite commit',
+  test('photo restore onto a shop without photos keeps live photos if marker remains',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-keep-restored-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync([1]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'restored.jpg')).writeAsBytesSync([9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+    resolveSqliteFile(supportDir: dest);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+    expect(
+      File(p.join(dest.path, 'part_photos', 'restored.jpg')).readAsBytesSync(),
+      [9],
+    );
+    expect(
+      Directory(p.join(dest.path, kPhotosRestoreBakName)).existsSync(),
+      isFalse,
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+  });
+
+  test('empty-photo recover parks leftover photos when marker says no photos',
       () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-empty-photos-');
     addTearDown(() => dest.deleteSync(recursive: true));
@@ -428,7 +454,7 @@ void main() {
     Directory(p.join(dest.path, 'part_photos')).createSync();
     File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
     File(p.join(dest.path, kRestoreSwapMarkerName))
-        .writeAsStringSync('in-progress');
+        .writeAsStringSync(kRestoreSwapMarkerNoPhotos);
 
     resolveSqliteFile(supportDir: dest);
     expect(await readSqliteSetting(dest, 'marker'), 'new');
@@ -623,6 +649,41 @@ void main() {
     expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isFalse);
   });
 
+  test('recover keeps marker if sqlite sidecar delete fails', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-wal-keep-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([2, 2]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+    recoverInterruptedRestore(
+      supportDir: dest,
+      beforeDeleteSqliteSidecars: () {
+        throw StateError('sidecar delete');
+      },
+    );
+
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
+    expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isTrue);
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),
+      isTrue,
+    );
+
+    recoverInterruptedRestore(supportDir: dest);
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),
+      isFalse,
+    );
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+  });
+
   test('writeBytesAtomically replaces an existing backup without a leftover tmp',
       () async {
     final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-');
@@ -656,6 +717,43 @@ void main() {
     expect(dest.readAsBytesSync(), [1, 2, 3]);
     expect(File('${dest.path}.tmp').existsSync(), isTrue);
     expect(File('${dest.path}.tmp').readAsBytesSync(), [9, 9, 9, 9]);
+    expect(File('${dest.path}.old').existsSync(), isFalse);
+  });
+
+  test('atomic write recovers dest from tmp after park-before-rename crash',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-tmp-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final dest = File(p.join(dir.path, 'shop.wpbackup'));
+    File('${dest.path}.old').writeAsBytesSync([1, 2, 3]);
+    File('${dest.path}.tmp').writeAsBytesSync([9, 9, 9, 9]);
+
+    await recoverParkedAtomicWrite(dest);
+    expect(dest.readAsBytesSync(), [9, 9, 9, 9]);
+    expect(File('${dest.path}.tmp').existsSync(), isFalse);
+    expect(File('${dest.path}.old').readAsBytesSync(), [1, 2, 3]);
+  });
+
+  test('atomic write recovers dest from old when tmp is gone', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-old-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final dest = File(p.join(dir.path, 'shop.wpbackup'));
+    File('${dest.path}.old').writeAsBytesSync([1, 2, 3]);
+
+    await recoverParkedAtomicWrite(dest);
+    expect(dest.readAsBytesSync(), [1, 2, 3]);
+    expect(File('${dest.path}.old').existsSync(), isFalse);
+  });
+
+  test('next export recovers a parked backup then replaces it', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-next-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final dest = File(p.join(dir.path, 'shop.wpbackup'));
+    File('${dest.path}.old').writeAsBytesSync([1, 2, 3]);
+
+    await writeBytesAtomically(dest, [7, 7]);
+    expect(dest.readAsBytesSync(), [7, 7]);
+    expect(File('${dest.path}.tmp').existsSync(), isFalse);
     expect(File('${dest.path}.old').existsSync(), isFalse);
   });
 

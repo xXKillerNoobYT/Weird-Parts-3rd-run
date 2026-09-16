@@ -21,11 +21,16 @@ const _sqliteMagic = [
 /// Write [bytes] to a sibling temp file, then replace [dest] by parking the
 /// previous file. Never delete the old copy until the new file is at [dest],
 /// and never delete the temp copy on failure.
+///
+/// If a previous attempt parked [dest] to `.old` and died before moving
+/// `.tmp` into place, [recoverParkedAtomicWrite] puts a complete file back
+/// at [dest] before this write starts.
 Future<void> writeBytesAtomically(
   File dest,
   List<int> bytes, {
   Future<void> Function()? beforeReplace,
 }) async {
+  await recoverParkedAtomicWrite(dest);
   final tmp = File('${dest.path}.tmp');
   final bak = File('${dest.path}.old');
   await tmp.writeAsBytes(bytes, flush: true);
@@ -52,6 +57,22 @@ Future<void> writeBytesAtomically(
       } catch (_) {}
     }
     rethrow;
+  }
+}
+
+/// If [dest] is missing after a crash between park-to-`.old` and rename of
+/// `.tmp`, finish the replace from `.tmp` or restore the previous file from
+/// `.old`. The picker only shows `.wpbackup`, so `.old` is otherwise lost.
+Future<void> recoverParkedAtomicWrite(File dest) async {
+  if (await dest.exists()) return;
+  final tmp = File('${dest.path}.tmp');
+  final bak = File('${dest.path}.old');
+  if (await tmp.exists()) {
+    await tmp.rename(dest.path);
+    return;
+  }
+  if (await bak.exists()) {
+    await bak.rename(dest.path);
   }
 }
 
@@ -313,7 +334,12 @@ class BackupStore {
       }
     }
 
-    await marker.writeAsString('in-progress', flush: true);
+    await marker.writeAsString(
+      await stagedPhotos.exists()
+          ? kRestoreSwapMarkerInProgress
+          : kRestoreSwapMarkerNoPhotos,
+      flush: true,
+    );
     try {
       if (await bakSqlite.exists()) await bakSqlite.delete();
       if (await bakPhotos.exists()) await bakPhotos.delete(recursive: true);
