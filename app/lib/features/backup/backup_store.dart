@@ -61,6 +61,7 @@ class BackupStore {
     this.photosDir,
     this.afterLiveSwap,
     this.afterParkLive,
+    this.beforeReplaceLivePhotos,
     this.failSidecarDelete = false,
     this.failStagingDelete = false,
   });
@@ -73,6 +74,9 @@ class BackupStore {
 
   /// Test hook: runs after live files are parked to bak, before staged rename.
   final Future<void> Function()? afterParkLive;
+
+  /// Test hook: passed to [recoverInterruptedRestore] before replacing live photos.
+  final void Function()? beforeReplaceLivePhotos;
 
   /// Test hook: pretend WAL/SHM delete failed.
   final bool failSidecarDelete;
@@ -148,9 +152,28 @@ class BackupStore {
   }) async {
     final live = await _support();
     await live.create(recursive: true);
-    recoverInterruptedRestore(supportDir: live);
+    recoverInterruptedRestore(
+      supportDir: live,
+      beforeReplaceLivePhotos: beforeReplaceLivePhotos,
+    );
 
-    final staging = Directory(p.join(live.path, kRestoreStagingName));
+    final leftoverStaging = Directory(p.join(live.path, kRestoreStagingName));
+    final leftoverPhotos = Directory(p.join(leftoverStaging.path, 'part_photos'));
+    final leftoverSqlite = File(p.join(leftoverStaging.path, kSqliteFileName));
+    final liveSqlite = File(p.join(live.path, kSqliteFileName));
+    // Sqlite is already live; leftover photos still match it. Do not delete
+    // them to make room for a new restore — a later failure would leave that
+    // shop without images.
+    final keepUnfinishedPhotos = leftoverPhotos.existsSync() &&
+        !leftoverSqlite.existsSync() &&
+        liveSqlite.existsSync();
+    if (keepUnfinishedPhotos) {
+      throw const BackupFormatException(
+        'Previous restore photos are still applying. Restart the app and try again.',
+      );
+    }
+
+    final staging = leftoverStaging;
     if (await staging.exists()) {
       await staging.delete(recursive: true);
     }
@@ -210,12 +233,34 @@ class BackupStore {
         throw const BackupFormatException('Backup database is damaged');
       }
       final tables = await db.customSelect(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'parts'",
+        "SELECT name FROM sqlite_master WHERE type = 'table'",
       ).get();
-      if (tables.isEmpty) {
-        throw const BackupFormatException(
-          'Backup database is missing shop tables',
-        );
+      final names = {
+        for (final row in tables) '${row.data['name']}',
+      };
+      const requiredTables = [
+        'device_profiles',
+        'app_settings',
+        'categories',
+        'styles',
+        'types',
+        'devices',
+        'brands',
+        'suppliers',
+        'parts',
+        'part_devices',
+        'brand_versions',
+        'supplier_listings',
+        'jobs',
+        'job_lines',
+        'order_splits',
+      ];
+      for (final name in requiredTables) {
+        if (!names.contains(name)) {
+          throw const BackupFormatException(
+            'Backup database is missing shop tables',
+          );
+        }
       }
     } on BackupFormatException {
       rethrow;

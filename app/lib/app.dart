@@ -35,6 +35,12 @@ class AppScope extends InheritedWidget {
       db != old.db || pin != old.pin || deviceId != old.deviceId;
 }
 
+class RestoreBusyException implements Exception {
+  const RestoreBusyException();
+  @override
+  String toString() => 'A restore or wipe is already in progress';
+}
+
 class WiredPartsApp extends StatefulWidget {
   const WiredPartsApp({
     required this.db,
@@ -83,7 +89,9 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
   }
 
   Future<void> _restoreFromBackup(List<int> fileBytes, String password) async {
-    if (_wiping) return;
+    if (_wiping) {
+      throw const RestoreBusyException();
+    }
     _wiping = true;
     final keepDeviceId = _deviceId;
     var closed = false;

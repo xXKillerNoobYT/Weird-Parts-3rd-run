@@ -1,11 +1,20 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_page.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
+import 'package:wired_parts/features/reset/local_data_reset.dart';
+import 'package:wired_parts/features/shell/home_shell.dart';
 
 Widget _page({
   required AppDatabase db,
@@ -74,4 +83,187 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Encrypt backup'), findsNothing);
   });
+
+  testWidgets('unsupported save location reports Backup failed, not a crash',
+      (tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: MaterialApp(
+          home: BackupPage(
+            pickSavePath: ({required suggestedName}) async {
+              throw UnsupportedError('getSaveLocation');
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.save_alt));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ).first,
+      'test-backup',
+    );
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ).at(1),
+      'test-backup',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Backup restored'), findsNothing);
+    expect(find.textContaining('Backup failed'), findsOneWidget);
+  });
+
+  testWidgets('restore that did not run does not show Backup restored',
+      (tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    final dir = Directory.systemTemp.createTempSync('wp-restore-busy-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final bytes = await BackupCodec(iterations: 1000).encrypt(
+      BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13, 20, 15),
+        sourceDeviceId: 'dev-source-1',
+        sqliteBytes: Uint8List.fromList([1, 2, 3, 4, 5]),
+        photos: const {},
+      ),
+      'test-backup',
+    );
+    File(p.join(dir.path, 'shop.wpbackup')).writeAsBytesSync(bytes);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {
+          throw const RestoreBusyException();
+        },
+        child: MaterialApp(
+          home: BackupPage(
+            pickOpenPath: () async => p.join(dir.path, 'shop.wpbackup'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.settings_backup_restore));
+    await tester.pumpAndSettle();
+    expect(find.text('Restore this backup?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Restore'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'test-backup',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Backup restored'), findsNothing);
+    expect(
+      find.textContaining('A restore or wipe is already in progress'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('restore during wipe throws instead of reporting success',
+      (tester) async {
+    final dir = Directory.systemTemp.createTempSync('wp-app-busy-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([1]);
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final gate = Completer<void>();
+
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: deviceId,
+        reopenDatabase: () => AppDatabase.forTesting(NativeDatabase.memory()),
+        reset: _HangReset(gate, supportDir: dir, documentsDir: dir),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scope = tester.widget<AppScope>(find.byType(AppScope));
+    final wipe = scope.wipeLocalData();
+    await tester.pump();
+    await expectLater(
+      scope.restoreFromBackup([1], 'x'),
+      throwsA(isA<RestoreBusyException>()),
+    );
+    gate.complete();
+    await wipe;
+  });
+
+  testWidgets('leaving backup after closed db does not throw', (tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: const MaterialApp(home: HomeShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('More'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Backup & restore'));
+    await tester.pumpAndSettle();
+    expect(find.text('Export encrypted backup'), findsOneWidget);
+
+    await db.close();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Backup & restore'), findsOneWidget);
+  });
+}
+
+class _HangReset extends LocalDataReset {
+  _HangReset(this.gate, {super.supportDir, super.documentsDir});
+
+  final Completer<void> gate;
+
+  @override
+  Future<void> wipeFiles() => gate.future;
 }

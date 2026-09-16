@@ -97,11 +97,11 @@ class _BackupPageState extends State<BackupPage> {
       confirm: true,
     );
     if (password == null || !mounted) return;
-    final path = await _savePath();
-    if (path == null || !mounted) return;
 
     setState(() => _busy = true);
     try {
+      final path = await _savePath();
+      if (path == null || !mounted) return;
       await scope.db.customStatement('PRAGMA wal_checkpoint(FULL);');
       final sqliteFile = await _store.sqliteFile();
       if (!await sqliteFile.exists()) {

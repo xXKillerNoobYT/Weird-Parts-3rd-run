@@ -66,6 +66,42 @@ void main() {
     );
   });
 
+  test('replaceWithPayload refuses a backup missing shop tables', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-schema-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
+
+    final badDir = Directory.systemTemp.createTempSync('wp-bak-bad-schema-');
+    addTearDown(() => badDir.deleteSync(recursive: true));
+    final sqlite = File(p.join(badDir.path, kSqliteFileName));
+    final db = AppDatabase.forTesting(NativeDatabase(sqlite));
+    await db.settingsDao.setSetting('marker', 'bad');
+    await db.customStatement('DROP TABLE jobs');
+    await db.close();
+
+    await expectLater(
+      BackupStore(supportDir: dest).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: Uint8List.fromList(sqlite.readAsBytesSync()),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(
+        isA<BackupFormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('missing shop tables'),
+        ),
+      ),
+    );
+    expect(await readSqliteSetting(dest, 'marker'), 'old');
+  });
+
   test('codec plus store round-trip a file backup', () async {
     final dir = Directory.systemTemp.createTempSync('wp-bak-rt-');
     addTearDown(() => dir.deleteSync(recursive: true));
@@ -428,6 +464,48 @@ void main() {
       File(p.join(staging.path, 'part_photos', 'new.jpg')).existsSync(),
       isFalse,
     );
+  });
+
+  test('retry restore does not delete unfinished staged photos', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-retry-photos-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync([1]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'new.jpg')).writeAsBytesSync([9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    await expectLater(
+      BackupStore(
+        supportDir: dest,
+        beforeReplaceLivePhotos: () {
+          throw StateError('photo replace');
+        },
+      ).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'retry'),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(isA<BackupFormatException>()),
+    );
+
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
+    expect(
+      File(p.join(staging.path, 'part_photos', 'new.jpg')).readAsBytesSync(),
+      [9],
+    );
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
   });
 
   test('failed recover rename keeps staging and marker', () async {

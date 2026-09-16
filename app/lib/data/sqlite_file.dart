@@ -7,6 +7,7 @@ const kRestoreSwapMarkerName = 'restore_swap.marker';
 const kSqliteRestoreBakName = '$kSqliteFileName.restore-bak';
 const kPhotosRestoreBakName = 'part_photos.restore-bak';
 const kRestoreStagingName = 'restore_staging';
+const kRestoreStagingNextName = 'restore_staging.next';
 
 /// Prefer Application Support. If that file is missing, copy a Phase 1
 /// Documents DB (and WAL/SHM sidecars) so an upgrade does not look empty.

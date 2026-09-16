@@ -81,16 +81,20 @@ class _MoreTabState extends State<_MoreTab> {
     final scope = AppScope.of(context);
     final pin = scope.pin;
     final db = scope.db;
-    final set = await pin.isPinSet();
-    final at = await db.settingsDao.getSetting(kLastBackupAtKey);
-    final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
-    if (!mounted) return;
-    setState(() {
-      _pinSet = set;
-      _unlocked = pin.isUnlocked;
-      _lastBackupAt = at;
-      _lastBackupSource = source;
-    });
+    try {
+      final set = await pin.isPinSet();
+      final at = await db.settingsDao.getSetting(kLastBackupAtKey);
+      final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
+      if (!mounted) return;
+      setState(() {
+        _pinSet = set;
+        _unlocked = pin.isUnlocked;
+        _lastBackupAt = at;
+        _lastBackupSource = source;
+      });
+    } catch (_) {
+      // Restore may have closed the live connection; AppScope rebuild reloads.
+    }
   }
 
   Future<void> _setOrChangePin() async {
