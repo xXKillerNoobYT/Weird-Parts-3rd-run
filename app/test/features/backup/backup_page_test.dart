@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -8,11 +9,14 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_page.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
+
+import 'backup_test_support.dart';
 
 Widget _page({
   required AppDatabase db,
@@ -245,6 +249,176 @@ void main() {
     gate.complete();
     await wipe;
   });
+
+  testWidgets('restore succeeds if keepLocalDeviceId fails after the swap', (
+    tester,
+  ) async {
+    final dest = Directory.systemTemp.createTempSync('wp-app-keep-id-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'local-shop'),
+    );
+
+    final sqlite = await sqliteBytesWithSetting(
+      key: 'marker',
+      value: 'from-backup',
+    );
+    final bytes = await BackupCodec(iterations: 1000).encrypt(
+      BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13, 18),
+        sourceDeviceId: 'source-device',
+        sqliteBytes: sqlite,
+        photos: const {},
+      ),
+      'pw',
+    );
+
+    const destId = 'dest-device-keep';
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.settingsDao.keepLocalDeviceId(destId);
+    var keepAttempts = 0;
+
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: destId,
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+        reopenDatabase: () => AppDatabase.forTesting(
+          NativeDatabase(File(p.join(dest.path, kSqliteFileName))),
+        ),
+        keepLocalDeviceId: (next, id) async {
+          keepAttempts++;
+          throw StateError('keep id');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scope = tester.widget<AppScope>(find.byType(AppScope));
+    await scope.restoreFromBackup(bytes, 'pw');
+    await tester.pumpAndSettle();
+
+    expect(keepAttempts, 2);
+    final live = tester.widget<AppScope>(find.byType(AppScope));
+    expect(live.deviceId, destId);
+    expect(await live.db.settingsDao.getSetting('marker'), 'from-backup');
+    addTearDown(live.db.close);
+  });
+
+  testWidgets('restore succeeds if keepLocalDeviceId fails after the swap', (
+    tester,
+  ) async {
+    final dest = Directory.systemTemp.createTempSync('wp-app-keep-id-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'local-shop'),
+    );
+
+    final sqlite = await sqliteBytesWithSetting(
+      key: 'marker',
+      value: 'from-backup',
+    );
+    final bytes = await BackupCodec(iterations: 1000).encrypt(
+      BackupPayload(
+        createdAt: DateTime.utc(2026, 9, 13, 18),
+        sourceDeviceId: 'source-device',
+        sqliteBytes: sqlite,
+        photos: const {},
+      ),
+      'pw',
+    );
+
+    const destId = 'dest-device-keep';
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.settingsDao.keepLocalDeviceId(destId);
+    var keepAttempts = 0;
+
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: destId,
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+        reopenDatabase: () => AppDatabase.forTesting(
+          NativeDatabase(File(p.join(dest.path, kSqliteFileName))),
+        ),
+        keepLocalDeviceId: (next, id) async {
+          keepAttempts++;
+          throw StateError('keep id');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scope = tester.widget<AppScope>(find.byType(AppScope));
+    await scope.restoreFromBackup(bytes, 'pw');
+    await tester.pumpAndSettle();
+
+    expect(keepAttempts, 2);
+    final live = tester.widget<AppScope>(find.byType(AppScope));
+    expect(live.deviceId, destId);
+    expect(await live.db.settingsDao.getSetting('marker'), 'from-backup');
+    addTearDown(live.db.close);
+  });
+
+  testWidgets(
+    'Backup restored when restoreFromBackup returns after identity skip',
+    (tester) async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      final deviceId = await db.settingsDao.ensureDeviceId();
+      final pin = PinService(db.settingsDao);
+      final dir = Directory.systemTemp.createTempSync('wp-restore-ok-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final backup = File(p.join(dir.path, 'shop.wpbackup'));
+      backup.writeAsBytesSync(
+        await BackupCodec(iterations: 1000).encrypt(
+          BackupPayload(
+            createdAt: DateTime.utc(2026, 9, 13, 18),
+            sourceDeviceId: 'source-device',
+            sqliteBytes: await sqliteBytesWithSetting(
+              key: 'marker',
+              value: 'from-backup',
+            ),
+            photos: const {},
+          ),
+          'pw',
+        ),
+      );
+
+      await tester.pumpWidget(
+        AppScope(
+          db: db,
+          pin: pin,
+          deviceId: deviceId,
+          wipeLocalData: () async {},
+          restoreFromBackup: (_, _) async {},
+          child: MaterialApp(
+            home: BackupPage(pickOpenPath: () async => backup.path),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.settings_backup_restore));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Restore'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find
+            .descendant(
+              of: find.byType(AlertDialog),
+              matching: find.byType(TextField),
+            )
+            .first,
+        'pw',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Backup restored'), findsOneWidget);
+      expect(find.textContaining('Restore failed'), findsNothing);
+    },
+  );
 
   testWidgets('export lock stays busy after Backup page is popped', (
     tester,

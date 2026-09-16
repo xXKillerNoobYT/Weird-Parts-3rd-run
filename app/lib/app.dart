@@ -48,6 +48,7 @@ class WiredPartsApp extends StatefulWidget {
     required this.deviceId,
     this.reopenDatabase,
     this.reset = const LocalDataReset(),
+    this.keepLocalDeviceId,
     super.key,
   });
 
@@ -56,6 +57,11 @@ class WiredPartsApp extends StatefulWidget {
   final String deviceId;
   final AppDatabase Function()? reopenDatabase;
   final LocalDataReset reset;
+
+  /// Test hook: identity write after a committed swap. Production uses
+  /// [SettingsDao.keepLocalDeviceId]. Failures are retried then ignored.
+  final Future<void> Function(AppDatabase db, String deviceId)?
+  keepLocalDeviceId;
 
   @override
   State<WiredPartsApp> createState() => _WiredPartsAppState();
@@ -112,7 +118,9 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
         photosDir: widget.reset.photosDir,
       ).replaceWithPayload(payload: payload, reset: widget.reset);
       next = widget.reopenDatabase?.call() ?? AppDatabase();
-      await next.settingsDao.keepLocalDeviceId(keepDeviceId);
+      // Swap already committed; rollback copies are gone. Identity and
+      // stamps must not report Restore failed.
+      await _keepLocalDeviceIdBestEffort(next, keepDeviceId);
       try {
         await next.partsDao.relativizeAbsolutePhotoPaths();
         await next.settingsDao.setSetting(
@@ -123,17 +131,13 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
           kLastBackupSourceKey,
           payload.sourceDeviceId,
         );
-      } catch (_) {
-        // Swap already committed and this device's id is kept.
-      }
+      } catch (_) {}
       if (!mounted) return;
       setState(() => _bindLive(next!, keepDeviceId));
     } catch (e) {
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
-        try {
-          await next.settingsDao.keepLocalDeviceId(keepDeviceId);
-        } catch (_) {}
+        await _keepLocalDeviceIdBestEffort(next, keepDeviceId);
         if (mounted) {
           setState(() => _bindLive(next!, keepDeviceId));
         }
@@ -141,6 +145,22 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       rethrow;
     } finally {
       _wiping = false;
+    }
+  }
+
+  Future<void> _keepLocalDeviceIdBestEffort(AppDatabase next, String id) async {
+    Future<void> once() {
+      final hook = widget.keepLocalDeviceId;
+      if (hook != null) return hook(next, id);
+      return next.settingsDao.keepLocalDeviceId(id);
+    }
+
+    try {
+      await once();
+    } catch (_) {
+      try {
+        await once();
+      } catch (_) {}
     }
   }
 
