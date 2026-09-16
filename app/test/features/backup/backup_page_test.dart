@@ -139,11 +139,13 @@ void main() {
       'test-backup',
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    // Encrypt does not schedule frames, so pumpAndSettle can return too soon.
+    await tester.pump(const Duration(seconds: 5));
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Backup saved'), findsOneWidget);
     expect(find.textContaining('Backup failed'), findsNothing);
+    expect(find.text('Backup saved'), findsOneWidget);
     expect(out.existsSync(), isTrue);
   });
 
