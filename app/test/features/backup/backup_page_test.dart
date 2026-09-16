@@ -255,29 +255,31 @@ void main() {
   ) async {
     final dest = Directory.systemTemp.createTempSync('wp-app-keep-id-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
-      await sqliteBytesWithSetting(key: 'marker', value: 'local-shop'),
-    );
-
-    final sqlite = await sqliteBytesWithSetting(
-      key: 'marker',
-      value: 'from-backup',
-    );
-    final bytes = await BackupCodec(iterations: 1000).encrypt(
-      BackupPayload(
-        createdAt: DateTime.utc(2026, 9, 13, 18),
-        sourceDeviceId: 'source-device',
-        sqliteBytes: sqlite,
-        photos: const {},
-      ),
-      'pw',
-    );
-
+    late Uint8List bytes;
     const destId = 'dest-device-keep';
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
-    await db.settingsDao.keepLocalDeviceId(destId);
     var keepAttempts = 0;
+
+    await tester.runAsync(() async {
+      File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+        await sqliteBytesWithSetting(key: 'marker', value: 'local-shop'),
+      );
+      final sqlite = await sqliteBytesWithSetting(
+        key: 'marker',
+        value: 'from-backup',
+      );
+      bytes = await BackupCodec(iterations: 1000).encrypt(
+        BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13, 18),
+          sourceDeviceId: 'source-device',
+          sqliteBytes: sqlite,
+          photos: const {},
+        ),
+        'pw',
+      );
+      await db.settingsDao.keepLocalDeviceId(destId);
+    });
 
     await tester.pumpWidget(
       WiredPartsApp(
@@ -294,72 +296,51 @@ void main() {
         },
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
     final scope = tester.widget<AppScope>(find.byType(AppScope));
-    await scope.restoreFromBackup(bytes, 'pw');
-    await tester.pumpAndSettle();
+    await tester.runAsync(() => scope.restoreFromBackup(bytes, 'pw'));
+    await tester.pump();
 
     expect(keepAttempts, 2);
     final live = tester.widget<AppScope>(find.byType(AppScope));
     expect(live.deviceId, destId);
-    expect(await live.db.settingsDao.getSetting('marker'), 'from-backup');
+    await tester.runAsync(() async {
+      expect(await live.db.settingsDao.getSetting('marker'), 'from-backup');
+    });
     addTearDown(live.db.close);
   });
 
-  testWidgets('restore succeeds if keepLocalDeviceId fails after the swap', (
+  testWidgets('wipe during restore throws instead of silent success', (
     tester,
   ) async {
-    final dest = Directory.systemTemp.createTempSync('wp-app-keep-id-');
-    addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
-      await sqliteBytesWithSetting(key: 'marker', value: 'local-shop'),
-    );
-
-    final sqlite = await sqliteBytesWithSetting(
-      key: 'marker',
-      value: 'from-backup',
-    );
-    final bytes = await BackupCodec(iterations: 1000).encrypt(
-      BackupPayload(
-        createdAt: DateTime.utc(2026, 9, 13, 18),
-        sourceDeviceId: 'source-device',
-        sqliteBytes: sqlite,
-        photos: const {},
-      ),
-      'pw',
-    );
-
-    const destId = 'dest-device-keep';
+    final dir = Directory.systemTemp.createTempSync('wp-wipe-during-restore-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([1]);
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
-    await db.settingsDao.keepLocalDeviceId(destId);
-    var keepAttempts = 0;
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final gate = Completer<void>();
 
     await tester.pumpWidget(
       WiredPartsApp(
         db: db,
         pin: PinService(db.settingsDao),
-        deviceId: destId,
-        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
-        reopenDatabase: () => AppDatabase.forTesting(
-          NativeDatabase(File(p.join(dest.path, kSqliteFileName))),
-        ),
-        keepLocalDeviceId: (next, id) async {
-          keepAttempts++;
-          throw StateError('keep id');
-        },
+        deviceId: deviceId,
+        reopenDatabase: () => AppDatabase.forTesting(NativeDatabase.memory()),
+        reset: LocalDataReset(supportDir: dir, documentsDir: dir),
+        beforeRestore: () => gate.future,
       ),
     );
     await tester.pumpAndSettle();
     final scope = tester.widget<AppScope>(find.byType(AppScope));
-    await scope.restoreFromBackup(bytes, 'pw');
-    await tester.pumpAndSettle();
-
-    expect(keepAttempts, 2);
-    final live = tester.widget<AppScope>(find.byType(AppScope));
-    expect(live.deviceId, destId);
-    expect(await live.db.settingsDao.getSetting('marker'), 'from-backup');
-    addTearDown(live.db.close);
+    final restore = scope.restoreFromBackup([1], 'x');
+    await tester.pump();
+    await expectLater(
+      scope.wipeLocalData(),
+      throwsA(isA<RestoreBusyException>()),
+    );
+    gate.complete();
+    await expectLater(restore, throwsA(isA<BackupFormatException>()));
   });
 
   testWidgets(
@@ -372,8 +353,9 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('wp-restore-ok-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final backup = File(p.join(dir.path, 'shop.wpbackup'));
-      backup.writeAsBytesSync(
-        await BackupCodec(iterations: 1000).encrypt(
+      late Uint8List bytes;
+      await tester.runAsync(() async {
+        bytes = await BackupCodec(iterations: 1000).encrypt(
           BackupPayload(
             createdAt: DateTime.utc(2026, 9, 13, 18),
             sourceDeviceId: 'source-device',
@@ -384,8 +366,9 @@ void main() {
             photos: const {},
           ),
           'pw',
-        ),
-      );
+        );
+      });
+      backup.writeAsBytesSync(bytes);
 
       await tester.pumpWidget(
         AppScope(

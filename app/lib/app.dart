@@ -49,6 +49,7 @@ class WiredPartsApp extends StatefulWidget {
     this.reopenDatabase,
     this.reset = const LocalDataReset(),
     this.keepLocalDeviceId,
+    this.beforeRestore,
     super.key,
   });
 
@@ -62,6 +63,9 @@ class WiredPartsApp extends StatefulWidget {
   /// [SettingsDao.keepLocalDeviceId]. Failures are retried then ignored.
   final Future<void> Function(AppDatabase db, String deviceId)?
   keepLocalDeviceId;
+
+  /// Test hook: after `_wiping` is set, before decrypt. Production is a no-op.
+  final Future<void> Function()? beforeRestore;
 
   @override
   State<WiredPartsApp> createState() => _WiredPartsAppState();
@@ -83,7 +87,9 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
   }
 
   Future<void> _wipeLocalData() async {
-    if (_wiping) return;
+    if (_wiping) {
+      throw const RestoreBusyException();
+    }
     if (!BackupIo.tryStart()) {
       throw const RestoreBusyException();
     }
@@ -107,6 +113,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     var closed = false;
     AppDatabase? next;
     try {
+      await widget.beforeRestore?.call();
       final payload = await BackupCodec().decrypt(
         Uint8List.fromList(fileBytes),
         password,
