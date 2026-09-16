@@ -73,6 +73,7 @@ void recoverInterruptedRestore({
   // folder looks like leftover live photos once staging is gone.
   final hadStagedSqlite = stagedSqlite.existsSync();
   final hadStagedPhotos = stagedPhotos.existsSync();
+  final hadLiveSqlite = liveSqlite.existsSync();
   final noPhotoBackup =
       _markerSaysNoPhotos(marker) || (hadStagedSqlite && !hadStagedPhotos);
 
@@ -88,7 +89,10 @@ void recoverInterruptedRestore({
       sqliteFromBak = true;
     }
 
-    if (liveSqlite.existsSync()) {
+    // Only strip leftover WAL/SHM from the previous shop after this recover
+    // placed sqlite. Live-shop sidecars must stay: export and later startups
+    // can see a leftover marker while the connection is already open.
+    if (!hadLiveSqlite && liveSqlite.existsSync()) {
       beforeDeleteSqliteSidecars?.call();
       _deleteSqliteSidecarsSync(liveSqlite);
     }
@@ -147,7 +151,11 @@ void recoverInterruptedRestore({
       stagedPhotos.existsSync() && !sqliteFromBak;
   final pendingStaging =
       (stagedSqlite.existsSync() && !liveOk) || photosUnfinished;
-  final sidecarsPending = _sqliteSidecarsExist(liveSqlite);
+  // Sidecars only block completing this recover if we just placed sqlite.
+  // A leftover marker beside an already-live shop must not retry deletes
+  // forever — those files may be the running shop's WAL.
+  final sidecarsPending =
+      !hadLiveSqlite && liveOk && _sqliteSidecarsExist(liveSqlite);
 
   if (liveOk && !pendingStaging && !sidecarsPending) {
     try {

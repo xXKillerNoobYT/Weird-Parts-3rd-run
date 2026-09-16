@@ -649,7 +649,8 @@ void main() {
     expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isFalse);
   });
 
-  test('recover keeps marker if sqlite sidecar delete fails', () async {
+  test('recover keeps marker if sqlite sidecar delete fails after promote',
+      () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-wal-keep-');
     addTearDown(() => dest.deleteSync(recursive: true));
 
@@ -674,6 +675,47 @@ void main() {
       File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),
       isTrue,
     );
+
+    recoverInterruptedRestore(supportDir: dest);
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-wal')).readAsBytesSync(),
+      [2, 2],
+    );
+    expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isTrue);
+  });
+
+  test('leftover marker does not delete WAL of an already-live shop', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-live-wal-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'live'),
+    );
+    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([9, 9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+    resolveSqliteFile(supportDir: dest);
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-wal')).readAsBytesSync(),
+      [9, 9],
+    );
+  });
+
+  test('recover strips leftover WAL only after promoting staged sqlite',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-wal-strip-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([2, 2]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerInProgress);
 
     recoverInterruptedRestore(supportDir: dest);
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
