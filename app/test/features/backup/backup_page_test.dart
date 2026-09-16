@@ -361,6 +361,50 @@ void main() {
     expect(BackupIo.isBusy, isFalse);
   });
 
+  testWidgets('wipe rejects while BackupIo is held', (tester) async {
+    expect(BackupIo.tryStart(), isTrue);
+    addTearDown(BackupIo.end);
+
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final dir = Directory.systemTemp.createTempSync('wp-wipe-busy-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        reset: LocalDataReset(supportDir: dir, documentsDir: dir),
+        reopenDatabase: () => AppDatabase.forTesting(NativeDatabase.memory()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('More'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset / wipe all data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Wipe everything'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Wipe failed'), findsOneWidget);
+    expect(find.textContaining('already in progress'), findsOneWidget);
+    expect(BackupIo.isBusy, isTrue);
+  });
+
   testWidgets('leaving backup after closed db does not throw', (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);

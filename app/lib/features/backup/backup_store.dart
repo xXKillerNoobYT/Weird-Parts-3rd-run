@@ -81,12 +81,14 @@ Future<void> writeBytesAtomically(
   List<int> bytes, {
   Directory? stagingDir,
   Future<void> Function()? beforeReplace,
+  Future<void> Function()? afterParkCopy,
   Future<void> Function()? afterPlace,
 }) async {
   await recoverParkedAtomicWrite(dest, stagingDir: stagingDir);
   final staging = await _backupWriteStaging(stagingDir);
   final tmp = _backupWriteTmp(staging, dest);
   final bak = _backupWriteBak(staging, dest);
+  final bakPart = _backupWriteBakPartial(staging, dest);
   await tmp.writeAsBytes(bytes, flush: true);
   var parked = false;
   try {
@@ -94,7 +96,19 @@ Future<void> writeBytesAtomically(
       if (await bak.exists()) {
         await bak.delete();
       }
-      await dest.copy(bak.path);
+      if (await bakPart.exists()) {
+        await bakPart.delete();
+      }
+      final destLen = await dest.length();
+      await dest.copy(bakPart.path);
+      await afterParkCopy?.call();
+      if (!await bakPart.exists() || await bakPart.length() != destLen) {
+        try {
+          if (await bakPart.exists()) await bakPart.delete();
+        } catch (_) {}
+        throw const FileSystemException('Failed to park the previous backup');
+      }
+      await bakPart.rename(bak.path);
       parked = true;
     }
     await beforeReplace?.call();
@@ -130,6 +144,12 @@ Future<void> recoverParkedAtomicWrite(
   final staging = await _backupWriteStaging(stagingDir);
   final tmp = _backupWriteTmp(staging, dest);
   final bak = _backupWriteBak(staging, dest);
+  final bakPart = _backupWriteBakPartial(staging, dest);
+  if (await bakPart.exists()) {
+    try {
+      await bakPart.delete();
+    } catch (_) {}
+  }
   final tmpExists = await tmp.exists();
   final bakExists = await bak.exists();
   final destExists = await dest.exists();
@@ -228,6 +248,10 @@ File _backupWriteTmp(Directory staging, File dest) =>
 
 File _backupWriteBak(Directory staging, File dest) =>
     File(p.join(staging.path, 'backup_write_${backupWriteKey(dest.path)}.old'));
+
+File _backupWriteBakPartial(Directory staging, File dest) => File(
+  p.join(staging.path, 'backup_write_${backupWriteKey(dest.path)}.old.part'),
+);
 
 Future<void> _placeBackupWrite(File tmp, File dest) async {
   try {

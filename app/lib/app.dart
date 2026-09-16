@@ -25,7 +25,7 @@ class AppScope extends InheritedWidget {
   final String deviceId;
   final Future<void> Function() wipeLocalData;
   final Future<void> Function(List<int> fileBytes, String password)
-      restoreFromBackup;
+  restoreFromBackup;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;
@@ -78,6 +78,9 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
 
   Future<void> _wipeLocalData() async {
     if (_wiping) return;
+    if (!BackupIo.tryStart()) {
+      throw const RestoreBusyException();
+    }
     _wiping = true;
     try {
       await _db.close();
@@ -85,6 +88,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       await _reopen();
     } finally {
       _wiping = false;
+      BackupIo.end();
     }
   }
 

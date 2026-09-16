@@ -455,8 +455,8 @@ void main() {
     expect(await readSqliteSetting(dest, 'marker'), 'new');
     expect(Directory(p.join(dest.path, 'part_photos')).existsSync(), isFalse);
     expect(
-      File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg')).existsSync(),
-      isTrue,
+      Directory(p.join(dest.path, kPhotosRestoreBakName)).existsSync(),
+      isFalse,
     );
     expect(
       File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
@@ -523,6 +523,10 @@ void main() {
       isFalse,
     );
     expect(
+      File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
+      isFalse,
+    );
+    expect(
       File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
       isFalse,
     );
@@ -552,9 +556,12 @@ void main() {
         isFalse,
       );
       expect(
-        File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg'))
-            .readAsBytesSync(),
-        [1],
+        Directory(p.join(dest.path, kPhotosRestoreBakName)).existsSync(),
+        isFalse,
+      );
+      expect(
+        File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
+        isFalse,
       );
       expect(
         File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
@@ -589,9 +596,12 @@ void main() {
         isFalse,
       );
       expect(
-        File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg'))
-            .readAsBytesSync(),
-        [1],
+        Directory(p.join(dest.path, kPhotosRestoreBakName)).existsSync(),
+        isFalse,
+      );
+      expect(
+        File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
+        isFalse,
       );
       expect(
         File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
@@ -1048,6 +1058,49 @@ void main() {
     expect(_stagingBak(staging, dest).readAsBytesSync(), [1, 2, 3]);
   });
 
+  test('atomic write does not restore a truncated parked bak', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-atomic-short-');
+    final staging = Directory.systemTemp.createTempSync('wp-bak-stage-short-');
+    addTearDown(() {
+      dir.deleteSync(recursive: true);
+      staging.deleteSync(recursive: true);
+    });
+    final dest = File(p.join(dir.path, 'shop.wpbackup'))
+      ..writeAsBytesSync([1, 2, 3]);
+
+    await expectLater(
+      writeBytesAtomically(
+        dest,
+        [9, 9, 9, 9],
+        stagingDir: staging,
+        afterParkCopy: () async {
+          _stagingBakPartial(staging, dest).writeAsBytesSync([1]);
+        },
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(dest.readAsBytesSync(), [1, 2, 3]);
+    expect(_stagingBak(staging, dest).existsSync(), isFalse);
+    expect(_stagingBakPartial(staging, dest).existsSync(), isFalse);
+  });
+
+  test('recover drops an incomplete parked bak partial', () async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-rec-part-');
+    final staging = Directory.systemTemp.createTempSync('wp-bak-rec-part-st-');
+    addTearDown(() {
+      dir.deleteSync(recursive: true);
+      staging.deleteSync(recursive: true);
+    });
+    final dest = File(p.join(dir.path, 'shop.wpbackup'))
+      ..writeAsBytesSync([1, 2, 3]);
+    _stagingBakPartial(staging, dest).writeAsBytesSync([1]);
+
+    await recoverParkedAtomicWrite(dest, stagingDir: staging);
+    expect(dest.readAsBytesSync(), [1, 2, 3]);
+    expect(_stagingBakPartial(staging, dest).existsSync(), isFalse);
+  });
+
   test(
     'recover restores bak over truncated dest when tmp also exists',
     () async {
@@ -1349,12 +1402,12 @@ void main() {
         [2],
       );
       expect(
-        File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg')).existsSync(),
-        isTrue,
+        Directory(p.join(dest.path, kPhotosRestoreBakName)).existsSync(),
+        isFalse,
       );
       expect(
         File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
-        isTrue,
+        isFalse,
       );
       expect(
         File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
@@ -1417,3 +1470,7 @@ File _stagingTmp(Directory staging, File dest) =>
 
 File _stagingBak(Directory staging, File dest) =>
     File(p.join(staging.path, 'backup_write_${backupWriteKey(dest.path)}.old'));
+
+File _stagingBakPartial(Directory staging, File dest) => File(
+  p.join(staging.path, 'backup_write_${backupWriteKey(dest.path)}.old.part'),
+);

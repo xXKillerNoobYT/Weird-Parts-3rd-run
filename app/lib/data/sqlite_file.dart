@@ -271,6 +271,12 @@ void recoverInterruptedRestore({
     try {
       if (staging.existsSync()) staging.deleteSync(recursive: true);
     } catch (_) {}
+    try {
+      if (bakSqlite.existsSync()) bakSqlite.deleteSync();
+    } catch (_) {}
+    try {
+      if (bakPhotos.existsSync()) bakPhotos.deleteSync(recursive: true);
+    } catch (_) {}
   }
 
   if (error != null &&
