@@ -398,6 +398,9 @@ class BackupStore {
         'Previous restore photos are still applying. Restart the app and try again.',
       );
     }
+    // Same as [resolveSqliteFile]: a finished recover must not leave Home
+    // and Backup warning that restore did not finish.
+    restoreRecoverError = null;
 
     final staging = leftoverStaging;
     if (await staging.exists()) {

@@ -930,6 +930,98 @@ void main() {
     expect(await readSqliteSetting(dest, 'marker'), 'new');
   });
 
+  test(
+    'replaceWithPayload clears restoreRecoverError after recover succeeds',
+    () async {
+      final dest = Directory.systemTemp.createTempSync('wp-bak-clear-err-');
+      addTearDown(() {
+        restoreRecoverError = null;
+        dest.deleteSync(recursive: true);
+      });
+      restoreRecoverError = StateError('photo replace');
+
+      File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+        await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+      );
+      final staging = Directory(p.join(dest.path, kRestoreStagingName))
+        ..createSync();
+      File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(
+        await sqliteBytesWithSetting(key: 'marker', value: 'staged'),
+      );
+      File(p.join(dest.path, kRestoreSwapMarkerName))
+          .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+      await BackupStore(supportDir: dest).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: await sqliteBytesWithSetting(
+            key: 'marker',
+            value: 'new',
+          ),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      );
+
+      expect(restoreRecoverError, isNull);
+      expect(
+        File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
+        isFalse,
+      );
+      expect(await readSqliteSetting(dest, 'marker'), 'new');
+    },
+  );
+
+  test(
+    'replaceWithPayload keeps restoreRecoverError when recover still fails',
+    () async {
+      final dest = Directory.systemTemp.createTempSync('wp-bak-keep-err-');
+      addTearDown(() {
+        restoreRecoverError = null;
+        dest.deleteSync(recursive: true);
+      });
+      restoreRecoverError = StateError('photo replace');
+
+      final restored = await sqliteBytesWithSetting(
+        key: 'marker',
+        value: 'new',
+      );
+      File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+      File(p.join(dest.path, kPhotosRestoreBakName)).writeAsBytesSync([1]);
+      Directory(p.join(dest.path, 'part_photos')).createSync();
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+      final staging = Directory(p.join(dest.path, kRestoreStagingName))
+        ..createSync();
+      Directory(p.join(staging.path, 'part_photos')).createSync();
+      File(p.join(staging.path, 'part_photos', 'new.jpg'))
+          .writeAsBytesSync([9]);
+      File(p.join(dest.path, kRestoreSwapMarkerName))
+          .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+      await expectLater(
+        BackupStore(supportDir: dest).replaceWithPayload(
+          payload: BackupPayload(
+            createdAt: DateTime.utc(2026, 9, 13),
+            sourceDeviceId: 'dev-a',
+            sqliteBytes: await sqliteBytesWithSetting(
+              key: 'marker',
+              value: 'retry',
+            ),
+            photos: const {},
+          ),
+          reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+        ),
+        throwsA(anything),
+      );
+      expect(restoreRecoverError, isNotNull);
+      expect(
+        File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
+        isTrue,
+      );
+    },
+  );
+
   test('export sqliteFile does not recover against leftover marker', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-export-live-');
     addTearDown(() {
