@@ -6,6 +6,7 @@ const kSqliteFileName = 'wired_parts.sqlite';
 const kRestoreSwapMarkerName = 'restore_swap.marker';
 const kRestoreSwapMarkerInProgress = 'in-progress';
 const kRestoreSwapMarkerNoPhotos = 'in-progress-no-photos';
+const kRestoreSwapMarkerRollback = 'rolling-back';
 const kSqliteRestoreBakName = '$kSqliteFileName.restore-bak';
 const kPhotosRestoreBakName = 'part_photos.restore-bak';
 const kRestoreStagingName = 'restore_staging';
@@ -89,12 +90,15 @@ void recoverInterruptedRestore({
   final hadStagedSqlite = stagedSqlite.existsSync();
   final hadStagedPhotos = stagedPhotos.existsSync();
   final hadLiveSqlite = liveSqlite.existsSync();
+  final rollingBack = _markerSaysRollback(marker);
   final noPhotoBackup =
       _markerSaysNoPhotos(marker) || (hadStagedSqlite && !hadStagedPhotos);
 
   // Marker was written but live sqlite was never parked. Staged files are a
-  // never-started swap; keep the live shop and drop the restore.
-  if (hadLiveSqlite && hadStagedSqlite) {
+  // never-started swap; keep the live shop and drop the restore. Skip this
+  // during rollback: live sqlite may already be the restored bak while
+  // staging still holds the failed restore.
+  if (!rollingBack && hadLiveSqlite && hadStagedSqlite) {
     try {
       if (staging.existsSync()) staging.deleteSync(recursive: true);
     } catch (_) {}
@@ -107,7 +111,15 @@ void recoverInterruptedRestore({
   var sqliteFromBak = false;
   Object? error;
   try {
-    if (stagedSqlite.existsSync()) {
+    if (rollingBack && bakSqlite.existsSync()) {
+      if (liveSqlite.existsSync()) {
+        try {
+          liveSqlite.deleteSync();
+        } catch (_) {}
+      }
+      bakSqlite.renameSync(liveSqlite.path);
+      sqliteFromBak = true;
+    } else if (stagedSqlite.existsSync()) {
       if (!liveSqlite.existsSync()) {
         stagedSqlite.renameSync(liveSqlite.path);
       }
@@ -119,14 +131,25 @@ void recoverInterruptedRestore({
     // Only strip leftover WAL/SHM from the previous shop after this recover
     // placed sqlite. Live-shop sidecars must stay: export and later startups
     // can see a leftover marker while the connection is already open.
-    if (!hadLiveSqlite && liveSqlite.existsSync()) {
+    // Rollback replaces live sqlite at the same path, so its WAL is the
+    // failed restore's, not the bak shop's.
+    if (liveSqlite.existsSync() && (!hadLiveSqlite || sqliteFromBak)) {
       beforeDeleteSqliteSidecars?.call();
       _deleteSqliteSidecarsSync(liveSqlite);
     }
 
-    // Staged photos belong to the new shop. Do not apply them after rolling
-    // sqlite back from bak.
-    if (stagedPhotos.existsSync() && !sqliteFromBak) {
+    if (rollingBack && bakPhotos.existsSync()) {
+      if (livePhotos.existsSync()) {
+        try {
+          livePhotos.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+      if (!livePhotos.existsSync() && bakPhotos.existsSync()) {
+        bakPhotos.renameSync(livePhotos.path);
+      }
+    } else if (stagedPhotos.existsSync() && !sqliteFromBak) {
+      // Staged photos belong to the new shop. Do not apply them after
+      // rolling sqlite back from bak.
       if (!livePhotos.existsSync()) {
         stagedPhotos.renameSync(livePhotos.path);
       } else if (!stagedSqlite.existsSync() && liveSqlite.existsSync()) {
@@ -173,9 +196,11 @@ void recoverInterruptedRestore({
   final liveOk = liveSqlite.existsSync();
   // Staged photos are unfinished even when the old live folder is still
   // sitting in the way. Deleting staging here would drop the backup images
-  // and leave no marker for the next startup to retry.
+  // and leave no marker for the next startup to retry. Rollback leftover
+  // staging is the failed restore, not photos to finish.
   final photosUnfinished =
-      stagedPhotos.existsSync() && !sqliteFromBak;
+      !rollingBack && stagedPhotos.existsSync() && !sqliteFromBak;
+  final rollbackPhotosPending = rollingBack && bakPhotos.existsSync();
   final pendingStaging =
       (stagedSqlite.existsSync() && !liveOk) || photosUnfinished;
   if (hadLiveSqlite && liveOk && !pendingStaging) {
@@ -188,13 +213,14 @@ void recoverInterruptedRestore({
   // Sidecars only block completing this recover if we just placed sqlite,
   // or leftover WAL/SHM from that place is still older than the live file.
   // Newer sidecars belong to an already-open shop and must stay.
-  final sidecarsPending = liveOk &&
+  final sidecarsPending =
+      liveOk &&
       ((!hadLiveSqlite && _sqliteSidecarsExist(liveSqlite)) ||
           (hadLiveSqlite &&
               !pendingStaging &&
               _staleSqliteSidecarsExist(liveSqlite)));
 
-  if (liveOk && !pendingStaging && !sidecarsPending) {
+  if (liveOk && !pendingStaging && !sidecarsPending && !rollbackPhotosPending) {
     try {
       if (marker.existsSync()) marker.deleteSync();
     } catch (_) {}
@@ -203,7 +229,8 @@ void recoverInterruptedRestore({
     } catch (_) {}
   }
 
-  if (error != null && (!liveOk || pendingStaging || sidecarsPending)) {
+  if (error != null &&
+      (!liveOk || pendingStaging || sidecarsPending || rollbackPhotosPending)) {
     throw error;
   }
 }
@@ -211,6 +238,14 @@ void recoverInterruptedRestore({
 bool _markerSaysNoPhotos(File marker) {
   try {
     return marker.readAsStringSync().trim() == kRestoreSwapMarkerNoPhotos;
+  } catch (_) {
+    return false;
+  }
+}
+
+bool _markerSaysRollback(File marker) {
+  try {
+    return marker.readAsStringSync().trim() == kRestoreSwapMarkerRollback;
   } catch (_) {
     return false;
   }

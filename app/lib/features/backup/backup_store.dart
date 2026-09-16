@@ -17,8 +17,22 @@ const kLastBackupSourceKey = 'last_backup_source_device';
 const kBackupAlreadyInProgressMessage = 'Backup already in progress';
 
 const _sqliteMagic = [
-  0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
-  0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
+  0x53,
+  0x51,
+  0x4c,
+  0x69,
+  0x74,
+  0x65,
+  0x20,
+  0x66,
+  0x6f,
+  0x72,
+  0x6d,
+  0x61,
+  0x74,
+  0x20,
+  0x33,
+  0x00,
 ];
 
 /// App-level export/restore lock. Page `_busy` dies with [BackupPage]; this
@@ -39,20 +53,35 @@ class BackupIo {
   static void end() {
     _busy = false;
   }
+
+  /// Wait until a backup/restore is not running, then hold the lock for
+  /// [body]. Photo mutations use this so export's sqlite-then-photos snapshot
+  /// cannot race a replace.
+  static Future<T> waitAndRun<T>(Future<T> Function() body) async {
+    while (!tryStart()) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    try {
+      return await body();
+    } finally {
+      end();
+    }
+  }
 }
 
 /// Write [bytes] in app-controlled staging, then replace [dest]. Never write
 /// `${dest}.tmp` / `${dest}.old`: the macOS sandbox only allows the user-picked
-/// file. Never delete the old copy until the new file is at [dest], and never
-/// delete the temp copy on failure.
+/// file. Never delete [dest] until the new file is actually there. A failed
+/// or truncated place restores the parked backup even when [dest] still exists.
 ///
-/// If a previous attempt parked [dest] and died before placing the new file,
-/// [recoverParkedAtomicWrite] puts a complete file back at [dest] first.
+/// If a previous attempt died mid-replace, [recoverParkedAtomicWrite] puts a
+/// complete file back at [dest] first.
 Future<void> writeBytesAtomically(
   File dest,
   List<int> bytes, {
   Directory? stagingDir,
   Future<void> Function()? beforeReplace,
+  Future<void> Function()? afterPlace,
 }) async {
   await recoverParkedAtomicWrite(dest, stagingDir: stagingDir);
   final staging = await _backupWriteStaging(stagingDir);
@@ -66,49 +95,81 @@ Future<void> writeBytesAtomically(
         await bak.delete();
       }
       await dest.copy(bak.path);
-      await dest.delete();
       parked = true;
     }
     await beforeReplace?.call();
     await _placeBackupWrite(tmp, dest);
+    await afterPlace?.call();
+    if (!await _destHasLength(dest, bytes.length)) {
+      throw const FileSystemException(
+        'Backup replace did not produce a complete file',
+      );
+    }
     if (parked) {
       try {
         if (await bak.exists()) await bak.delete();
       } catch (_) {}
     }
   } catch (e) {
-    if (parked && await bak.exists() && !await dest.exists()) {
+    if (parked && await bak.exists()) {
       try {
         await bak.copy(dest.path);
-        await bak.delete();
       } catch (_) {}
     }
     rethrow;
   }
 }
 
-/// If [dest] is missing after a crash between park and place, finish from the
-/// staged `.tmp` or restore the previous file from `.old`. Also recovers
-/// leftover sibling `${dest}.tmp` / `${dest}.old` from older builds.
+/// If a crash left [dest] missing or truncated, finish from staging `.tmp` or
+/// restore the previous file from `.old`. Also recovers leftover sibling
+/// `${dest}.tmp` / `${dest}.old` from older builds.
 Future<void> recoverParkedAtomicWrite(
   File dest, {
   Directory? stagingDir,
 }) async {
-  if (await dest.exists()) return;
   final staging = await _backupWriteStaging(stagingDir);
   final tmp = _backupWriteTmp(staging, dest);
   final bak = _backupWriteBak(staging, dest);
-  if (await tmp.exists()) {
+  final tmpExists = await tmp.exists();
+  final bakExists = await bak.exists();
+  final destExists = await dest.exists();
+
+  if (tmpExists) {
+    final tmpLen = await tmp.length();
+    if (destExists && await dest.length() == tmpLen) {
+      try {
+        await tmp.delete();
+      } catch (_) {}
+      try {
+        if (bakExists) await bak.delete();
+      } catch (_) {}
+      return;
+    }
+    if (bakExists) {
+      await bak.copy(dest.path);
+      return;
+    }
     await _placeBackupWrite(tmp, dest);
     return;
   }
-  if (await bak.exists()) {
+
+  if (!destExists && bakExists) {
     await bak.copy(dest.path);
     try {
       await bak.delete();
     } catch (_) {}
     return;
   }
+
+  if (destExists) {
+    if (bakExists) {
+      try {
+        await bak.delete();
+      } catch (_) {}
+    }
+    return;
+  }
+
   final legacyTmp = File('${dest.path}.tmp');
   final legacyBak = File('${dest.path}.old');
   if (await legacyTmp.exists()) {
@@ -173,10 +234,20 @@ Future<void> _placeBackupWrite(File tmp, File dest) async {
     await tmp.rename(dest.path);
   } on FileSystemException {
     await tmp.copy(dest.path);
+    if (!await _destHasLength(dest, await tmp.length())) {
+      throw const FileSystemException(
+        'Backup replace did not produce a complete file',
+      );
+    }
     try {
       await tmp.delete();
     } catch (_) {}
   }
+}
+
+Future<bool> _destHasLength(File dest, int length) async {
+  if (!await dest.exists()) return false;
+  return await dest.length() == length;
 }
 
 class BackupStore {
@@ -284,14 +355,17 @@ class BackupStore {
     );
 
     final leftoverStaging = Directory(p.join(live.path, kRestoreStagingName));
-    final leftoverPhotos = Directory(p.join(leftoverStaging.path, 'part_photos'));
+    final leftoverPhotos = Directory(
+      p.join(leftoverStaging.path, 'part_photos'),
+    );
     final leftoverSqlite = File(p.join(leftoverStaging.path, kSqliteFileName));
     final liveSqlite = File(p.join(live.path, kSqliteFileName));
     final swapMarker = File(p.join(live.path, kRestoreSwapMarkerName));
     // Only a live marker means photos still belong to an in-progress restore.
     // Rollback already deletes the marker; leftover staging after that is junk
     // and must not block a later Restore.
-    final keepUnfinishedPhotos = swapMarker.existsSync() &&
+    final keepUnfinishedPhotos =
+        swapMarker.existsSync() &&
         leftoverPhotos.existsSync() &&
         !leftoverSqlite.existsSync() &&
         liveSqlite.existsSync();
@@ -337,13 +411,13 @@ class BackupStore {
     if (!await sqlite.exists()) {
       throw const BackupFormatException('Backup database is missing');
     }
-    final header = await sqlite.openRead(0, 16).fold<List<int>>(
-      <int>[],
-      (out, chunk) {
-        out.addAll(chunk);
-        return out;
-      },
-    );
+    final header = await sqlite.openRead(0, 16).fold<List<int>>(<int>[], (
+      out,
+      chunk,
+    ) {
+      out.addAll(chunk);
+      return out;
+    });
     if (header.length < 16) {
       throw const BackupFormatException('Backup database is damaged');
     }
@@ -360,12 +434,10 @@ class BackupStore {
       if (!ok) {
         throw const BackupFormatException('Backup database is damaged');
       }
-      final tables = await db.customSelect(
-        "SELECT name FROM sqlite_master WHERE type = 'table'",
-      ).get();
-      final names = {
-        for (final row in tables) '${row.data['name']}',
-      };
+      final tables = await db
+          .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .get();
+      final names = {for (final row in tables) '${row.data['name']}'};
       const requiredTables = [
         'device_profiles',
         'app_settings',
@@ -416,6 +488,9 @@ class BackupStore {
     var committed = false;
 
     Future<void> rollback() async {
+      // Persist the phase so a crash after sqlite is back, before bakPhotos
+      // rename, still restores those photos on the next startup.
+      await marker.writeAsString(kRestoreSwapMarkerRollback, flush: true);
       // Only restore bak files this swap parked. Leftover `.restore-bak`
       // from a previous committed swap is not this shop's backup.
       if (parkedSqlite && await bakSqlite.exists()) {
@@ -472,9 +547,14 @@ class BackupStore {
     } catch (e) {
       if (!committed) {
         await rollback();
-        try {
-          if (await marker.exists()) await marker.delete();
-        } catch (_) {}
+        final rollbackPending =
+            (parkedSqlite && await bakSqlite.exists()) ||
+            (parkedPhotos && await bakPhotos.exists());
+        if (!rollbackPending) {
+          try {
+            if (await marker.exists()) await marker.delete();
+          } catch (_) {}
+        }
       }
       rethrow;
     }

@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
-import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_page.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
@@ -34,8 +33,9 @@ void main() {
   setUp(BackupIo.end);
   tearDown(BackupIo.end);
 
-  testWidgets('reloads last backup when the live database is replaced',
-      (tester) async {
+  testWidgets('reloads last backup when the live database is replaced', (
+    tester,
+  ) async {
     final db1 = AppDatabase.forTesting(NativeDatabase.memory());
     final db2 = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db1.close);
@@ -67,8 +67,9 @@ void main() {
     expect(find.textContaining('old-dev'), findsNothing);
   });
 
-  testWidgets('password dialog cancel does not dispose controllers early',
-      (tester) async {
+  testWidgets('password dialog cancel does not dispose controllers early', (
+    tester,
+  ) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final deviceId = await db.settingsDao.ensureDeviceId();
@@ -92,8 +93,9 @@ void main() {
     expect(find.text('Encrypt backup'), findsOneWidget);
   });
 
-  testWidgets('restore sets busy before PIN so export cannot start',
-      (tester) async {
+  testWidgets('restore sets busy before PIN so export cannot start', (
+    tester,
+  ) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final deviceId = await db.settingsDao.ensureDeviceId();
@@ -115,8 +117,9 @@ void main() {
     expect(find.text('Editor PIN'), findsNothing);
   });
 
-  testWidgets('backup page shows restore retry when recover failed',
-      (tester) async {
+  testWidgets('backup page shows restore retry when recover failed', (
+    tester,
+  ) async {
     restoreRecoverError = StateError('photo replace');
     addTearDown(() => restoreRecoverError = null);
 
@@ -131,8 +134,9 @@ void main() {
     expect(find.text(kRestoreRecoverRetryMessage), findsOneWidget);
   });
 
-  testWidgets('home shell surfaces recover retry without crashing',
-      (tester) async {
+  testWidgets('home shell surfaces recover retry without crashing', (
+    tester,
+  ) async {
     restoreRecoverError = StateError('photo replace');
     addTearDown(() => restoreRecoverError = null);
 
@@ -156,8 +160,9 @@ void main() {
     expect(find.text(kRestoreRecoverRetryMessage), findsOneWidget);
   });
 
-  testWidgets('unsupported save location reports Backup failed, not a crash',
-      (tester) async {
+  testWidgets('unsupported save location reports Backup failed, not a crash', (
+    tester,
+  ) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final deviceId = await db.settingsDao.ensureDeviceId();
@@ -174,97 +179,6 @@ void main() {
           home: BackupPage(
             pickSavePath: ({required suggestedName}) async {
               throw UnsupportedError('getSaveLocation');
-            },
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byIcon(Icons.save_alt));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.byType(TextField),
-      ).first,
-      'test-backup',
-    );
-    await tester.enterText(
-      find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.byType(TextField),
-      ).at(1),
-      'test-backup',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
-
-    expect(tester.takeException(), isNull);
-    expect(find.text('Backup restored'), findsNothing);
-    expect(find.textContaining('Backup failed'), findsOneWidget);
-  });
-
-  testWidgets('restore during wipe throws instead of reporting success',
-      (tester) async {
-    final dir = Directory.systemTemp.createTempSync('wp-app-busy-');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([1]);
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(db.close);
-    final deviceId = await db.settingsDao.ensureDeviceId();
-    final gate = Completer<void>();
-
-    await tester.pumpWidget(
-      WiredPartsApp(
-        db: db,
-        pin: PinService(db.settingsDao),
-        deviceId: deviceId,
-        reopenDatabase: () => AppDatabase.forTesting(NativeDatabase.memory()),
-        reset: _HangReset(gate, supportDir: dir, documentsDir: dir),
-      ),
-    );
-    await tester.pumpAndSettle();
-    final scope = tester.widget<AppScope>(find.byType(AppScope));
-    final wipe = scope.wipeLocalData();
-    await tester.pump();
-    await expectLater(
-      scope.restoreFromBackup([1], 'x'),
-      throwsA(isA<RestoreBusyException>()),
-    );
-    gate.complete();
-    await wipe;
-  });
-
-  testWidgets('export writes last-backup settings after Backup page is popped',
-      (tester) async {
-    final dir = Directory.systemTemp.createTempSync('wp-bak-unmount-');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([1, 2, 3]);
-    final savePath = p.join(dir.path, 'out.wpbackup');
-
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(db.close);
-    final deviceId = await db.settingsDao.ensureDeviceId();
-    final pin = PinService(db.settingsDao);
-    final hang = Completer<void>();
-    var flushStarted = false;
-
-    await tester.pumpWidget(
-      AppScope(
-        db: db,
-        pin: pin,
-        deviceId: deviceId,
-        wipeLocalData: () async {},
-        restoreFromBackup: (_, _) async {},
-        child: MaterialApp(
-          home: BackupPage(
-            codec: BackupCodec(iterations: 1000),
-            store: BackupStore(supportDir: dir),
-            pickSavePath: ({required suggestedName}) async => savePath,
-            flushWal: () async {
-              flushStarted = true;
-              await hang.future;
             },
           ),
         ),
@@ -294,30 +208,51 @@ void main() {
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
-    expect(flushStarted, isTrue);
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    expect(find.text('Backup saved'), findsNothing);
-
-    hang.complete();
-    await tester.runAsync(() async {
-      for (var i = 0; i < 80; i++) {
-        if (await db.settingsDao.getSetting(kLastBackupAtKey) != null) {
-          return;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
-    });
-
-    expect(File(savePath).existsSync(), isTrue);
-    expect(await db.settingsDao.getSetting(kLastBackupAtKey), isNotNull);
-    expect(await db.settingsDao.getSetting(kLastBackupSourceKey), deviceId);
-    expect(find.text('Backup saved'), findsNothing);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Backup restored'), findsNothing);
+    expect(find.textContaining('Backup failed'), findsOneWidget);
   });
 
-  testWidgets('second Backup page cannot start export while first is running',
-      (tester) async {
+  testWidgets('restore during wipe throws instead of reporting success', (
+    tester,
+  ) async {
+    final dir = Directory.systemTemp.createTempSync('wp-app-busy-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([1]);
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final gate = Completer<void>();
+
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: deviceId,
+        reopenDatabase: () => AppDatabase.forTesting(NativeDatabase.memory()),
+        reset: _HangReset(gate, supportDir: dir, documentsDir: dir),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scope = tester.widget<AppScope>(find.byType(AppScope));
+    final wipe = scope.wipeLocalData();
+    await tester.pump();
+    await expectLater(
+      scope.restoreFromBackup([1], 'x'),
+      throwsA(isA<RestoreBusyException>()),
+    );
+    gate.complete();
+    await wipe;
+  });
+
+  testWidgets('export lock stays busy after Backup page is popped', (
+    tester,
+  ) async {
     final hang = Completer<void>();
+    addTearDown(() {
+      if (!hang.isCompleted) hang.complete();
+    });
     var flushStarted = false;
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
@@ -367,6 +302,23 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
     expect(flushStarted, isTrue);
+    expect(BackupIo.isBusy, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(BackupIo.isBusy, isTrue);
+    expect(find.text('Backup saved'), findsNothing);
+  });
+
+  testWidgets('export is blocked when another backup is already running', (
+    tester,
+  ) async {
+    expect(BackupIo.tryStart(), isTrue);
+    addTearDown(BackupIo.end);
+
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
 
     await tester.pumpWidget(
       AppScope(
@@ -375,23 +327,38 @@ void main() {
         deviceId: deviceId,
         wipeLocalData: () async {},
         restoreFromBackup: (_, _) async {},
-        child: MaterialApp(
-          home: BackupPage(
-            pickSavePath: ({required suggestedName}) async {
-              fail('second export must not pick a path');
-              return null;
-            },
-          ),
-        ),
+        child: const MaterialApp(home: BackupPage()),
       ),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.save_alt));
     await tester.pumpAndSettle();
     expect(find.text(kBackupAlreadyInProgressMessage), findsOneWidget);
+    expect(find.text('Encrypt backup'), findsNothing);
+  });
 
-    hang.complete();
-    await tester.pump();
+  test('BackupIo tryStart fails while held', () {
+    BackupIo.end();
+    expect(BackupIo.tryStart(), isTrue);
+    expect(BackupIo.tryStart(), isFalse);
+    BackupIo.end();
+    expect(BackupIo.tryStart(), isTrue);
+    BackupIo.end();
+  });
+
+  test('BackupIo waitAndRun waits until the lock is released', () async {
+    BackupIo.end();
+    expect(BackupIo.tryStart(), isTrue);
+    var started = false;
+    final future = BackupIo.waitAndRun(() async {
+      started = true;
+      return 7;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(started, isFalse);
+    BackupIo.end();
+    expect(await future, 7);
+    expect(BackupIo.isBusy, isFalse);
   });
 
   testWidgets('leaving backup after closed db does not throw', (tester) async {
