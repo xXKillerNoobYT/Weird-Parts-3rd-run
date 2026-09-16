@@ -713,7 +713,9 @@ void main() {
       isTrue,
     );
 
-    recoverInterruptedRestore(supportDir: dest);
+    addTearDown(() => restoreRecoverError = null);
+    expect(() => resolveSqliteFile(supportDir: dest), returnsNormally);
+    expect(restoreRecoverError, isNull);
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
     expect(
       File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),

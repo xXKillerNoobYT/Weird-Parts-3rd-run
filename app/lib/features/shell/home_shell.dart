@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../data/sqlite_file.dart';
 import '../backup/backup_page.dart';
 import '../backup/backup_store.dart';
 import '../catalog/catalog_page.dart';
@@ -8,7 +9,6 @@ import '../catalog/tree_edit_prompts.dart';
 import '../jobs/jobs_page.dart';
 import '../maintenance/maintenance_page.dart';
 import '../pin/pin_gate.dart';
-import '../../data/sqlite_file.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
