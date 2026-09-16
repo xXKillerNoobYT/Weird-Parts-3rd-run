@@ -488,9 +488,15 @@ class BackupStore {
     var committed = false;
 
     Future<void> rollback() async {
-      // Persist the phase so a crash after sqlite is back, before bakPhotos
-      // rename, still restores those photos on the next startup.
-      await marker.writeAsString(kRestoreSwapMarkerRollback, flush: true);
+      // Persist which files this swap parked so a crash after sqlite is
+      // back, before bakPhotos rename, still restores those photos — and so
+      // leftover bak from an earlier committed restore is not trusted.
+      final phase = rollbackSwapMarker(
+        parkedSqlite: parkedSqlite,
+        parkedPhotos: parkedPhotos,
+      );
+      if (phase == null) return;
+      await marker.writeAsString(phase, flush: true);
       // Only restore bak files this swap parked. Leftover `.restore-bak`
       // from a previous committed swap is not this shop's backup.
       if (parkedSqlite && await bakSqlite.exists()) {

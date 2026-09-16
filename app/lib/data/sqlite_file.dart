@@ -7,6 +7,22 @@ const kRestoreSwapMarkerName = 'restore_swap.marker';
 const kRestoreSwapMarkerInProgress = 'in-progress';
 const kRestoreSwapMarkerNoPhotos = 'in-progress-no-photos';
 const kRestoreSwapMarkerRollback = 'rolling-back';
+const kRestoreSwapMarkerRollbackSqlite = 'rolling-back-sqlite';
+const kRestoreSwapMarkerRollbackPhotos = 'rolling-back-photos';
+const kRestoreSwapMarkerRollbackBoth = 'rolling-back-sqlite-photos';
+
+/// Marker body for an in-progress rollback. Null when nothing was parked —
+/// leftover `.restore-bak` from an earlier committed restore is not this swap.
+String? rollbackSwapMarker({
+  required bool parkedSqlite,
+  required bool parkedPhotos,
+}) {
+  if (parkedSqlite && parkedPhotos) return kRestoreSwapMarkerRollbackBoth;
+  if (parkedSqlite) return kRestoreSwapMarkerRollbackSqlite;
+  if (parkedPhotos) return kRestoreSwapMarkerRollbackPhotos;
+  return null;
+}
+
 const kSqliteRestoreBakName = '$kSqliteFileName.restore-bak';
 const kPhotosRestoreBakName = 'part_photos.restore-bak';
 const kRestoreStagingName = 'restore_staging';
@@ -91,6 +107,8 @@ void recoverInterruptedRestore({
   final hadStagedPhotos = stagedPhotos.existsSync();
   final hadLiveSqlite = liveSqlite.existsSync();
   final rollingBack = _markerSaysRollback(marker);
+  final rollbackSqlite = _markerRollbackSqlite(marker);
+  final rollbackPhotos = _markerRollbackPhotos(marker);
   final noPhotoBackup =
       _markerSaysNoPhotos(marker) || (hadStagedSqlite && !hadStagedPhotos);
 
@@ -111,12 +129,23 @@ void recoverInterruptedRestore({
   var sqliteFromBak = false;
   Object? error;
   try {
-    if (rollingBack && bakSqlite.existsSync()) {
+    if (rollbackSqlite && bakSqlite.existsSync()) {
+      // This swap parked sqlite. Replace live even if a failed restore
+      // already renamed staged sqlite into place.
       if (liveSqlite.existsSync()) {
         try {
           liveSqlite.deleteSync();
         } catch (_) {}
       }
+      bakSqlite.renameSync(liveSqlite.path);
+      sqliteFromBak = true;
+    } else if (rollingBack &&
+        !rollbackSqlite &&
+        !rollbackPhotos &&
+        !liveSqlite.existsSync() &&
+        bakSqlite.existsSync()) {
+      // Legacy bare `rolling-back`: only fill a missing live file. Do not
+      // replace a live shop with leftover bak from an earlier restore.
       bakSqlite.renameSync(liveSqlite.path);
       sqliteFromBak = true;
     } else if (stagedSqlite.existsSync()) {
@@ -138,13 +167,22 @@ void recoverInterruptedRestore({
       _deleteSqliteSidecarsSync(liveSqlite);
     }
 
-    if (rollingBack && bakPhotos.existsSync()) {
-      if (livePhotos.existsSync()) {
-        try {
-          livePhotos.deleteSync(recursive: true);
-        } catch (_) {}
-      }
-      if (!livePhotos.existsSync() && bakPhotos.existsSync()) {
+    if (rollingBack) {
+      // Leftover staged photos are the failed restore, never apply them.
+      if (rollbackPhotos && bakPhotos.existsSync()) {
+        if (livePhotos.existsSync()) {
+          try {
+            livePhotos.deleteSync(recursive: true);
+          } catch (_) {}
+        }
+        if (!livePhotos.existsSync() && bakPhotos.existsSync()) {
+          bakPhotos.renameSync(livePhotos.path);
+        }
+      } else if (!rollbackSqlite &&
+          !rollbackPhotos &&
+          !livePhotos.existsSync() &&
+          bakPhotos.existsSync()) {
+        // Legacy bare `rolling-back`: fill missing live photos only.
         bakPhotos.renameSync(livePhotos.path);
       }
     } else if (stagedPhotos.existsSync() && !sqliteFromBak) {
@@ -200,7 +238,13 @@ void recoverInterruptedRestore({
   // staging is the failed restore, not photos to finish.
   final photosUnfinished =
       !rollingBack && stagedPhotos.existsSync() && !sqliteFromBak;
-  final rollbackPhotosPending = rollingBack && bakPhotos.existsSync();
+  final rollbackPhotosPending =
+      bakPhotos.existsSync() &&
+      (rollbackPhotos ||
+          (rollingBack &&
+              !rollbackSqlite &&
+              !rollbackPhotos &&
+              !livePhotos.existsSync()));
   final pendingStaging =
       (stagedSqlite.existsSync() && !liveOk) || photosUnfinished;
   if (hadLiveSqlite && liveOk && !pendingStaging) {
@@ -243,12 +287,32 @@ bool _markerSaysNoPhotos(File marker) {
   }
 }
 
-bool _markerSaysRollback(File marker) {
+String _markerText(File marker) {
   try {
-    return marker.readAsStringSync().trim() == kRestoreSwapMarkerRollback;
+    return marker.readAsStringSync().trim();
   } catch (_) {
-    return false;
+    return '';
   }
+}
+
+bool _markerSaysRollback(File marker) {
+  final text = _markerText(marker);
+  return text == kRestoreSwapMarkerRollback ||
+      text == kRestoreSwapMarkerRollbackSqlite ||
+      text == kRestoreSwapMarkerRollbackPhotos ||
+      text == kRestoreSwapMarkerRollbackBoth;
+}
+
+bool _markerRollbackSqlite(File marker) {
+  final text = _markerText(marker);
+  return text == kRestoreSwapMarkerRollbackSqlite ||
+      text == kRestoreSwapMarkerRollbackBoth;
+}
+
+bool _markerRollbackPhotos(File marker) {
+  final text = _markerText(marker);
+  return text == kRestoreSwapMarkerRollbackPhotos ||
+      text == kRestoreSwapMarkerRollbackBoth;
 }
 
 bool _sqliteSidecarsExist(File sqlite) {

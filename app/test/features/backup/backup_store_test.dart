@@ -1269,7 +1269,7 @@ void main() {
       File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg'))
           .writeAsBytesSync([1]);
       File(p.join(dest.path, kRestoreSwapMarkerName))
-          .writeAsStringSync(kRestoreSwapMarkerRollback);
+          .writeAsStringSync(kRestoreSwapMarkerRollbackBoth);
 
       resolveSqliteFile(supportDir: dest);
       expect(await readSqliteSetting(dest, 'marker'), 'old');
@@ -1283,6 +1283,124 @@ void main() {
       );
     },
   );
+
+  test('rollback recover does not apply leftover staged photos', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-rollback-staged-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'old'),
+    );
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'new.jpg')).writeAsBytesSync([9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerRollbackBoth);
+
+    resolveSqliteFile(supportDir: dest);
+    expect(await readSqliteSetting(dest, 'marker'), 'old');
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).readAsBytesSync(),
+      [1],
+    );
+    expect(
+      File(p.join(dest.path, 'part_photos', 'new.jpg')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
+      isFalse,
+    );
+    expect(
+      Directory(p.join(dest.path, kRestoreStagingName)).existsSync(),
+      isFalse,
+    );
+  });
+
+  test(
+    'rollback recover does not replace live shop with leftover bak',
+    () async {
+      final dest = Directory.systemTemp.createTempSync(
+        'wp-bak-rollback-leftover-',
+      );
+      addTearDown(() => dest.deleteSync(recursive: true));
+
+      File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+        await sqliteBytesWithSetting(key: 'marker', value: 'live'),
+      );
+      Directory(p.join(dest.path, 'part_photos')).createSync();
+      File(p.join(dest.path, 'part_photos', 'live.jpg')).writeAsBytesSync([2]);
+      File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync(
+        await sqliteBytesWithSetting(key: 'marker', value: 'leftover'),
+      );
+      Directory(p.join(dest.path, kPhotosRestoreBakName)).createSync();
+      File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg'))
+          .writeAsBytesSync([1]);
+      File(p.join(dest.path, kRestoreSwapMarkerName))
+          .writeAsStringSync(kRestoreSwapMarkerRollback);
+
+      resolveSqliteFile(supportDir: dest);
+      expect(await readSqliteSetting(dest, 'marker'), 'live');
+      expect(
+        File(p.join(dest.path, 'part_photos', 'live.jpg')).readAsBytesSync(),
+        [2],
+      );
+      expect(
+        File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg')).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test('rollback does not write a marker when nothing was parked', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-rollback-none-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    await expectLater(
+      BackupStore(
+        supportDir: dest,
+        afterParkLive: () async {
+          throw StateError('crash before any park');
+        },
+      ).replaceWithPayload(
+        payload: BackupPayload(
+          createdAt: DateTime.utc(2026, 9, 13),
+          sourceDeviceId: 'dev-a',
+          sqliteBytes: await sqliteBytesWithSetting(
+            key: 'marker',
+            value: 'new',
+          ),
+          photos: const {},
+        ),
+        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(
+      File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, kSqliteRestoreBakName)).existsSync(),
+      isFalse,
+    );
+    expect(
+      Directory(p.join(dest.path, kPhotosRestoreBakName)).existsSync(),
+      isFalse,
+    );
+  });
 }
 
 class _ThrowingDocsReset extends LocalDataReset {
