@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -12,27 +14,50 @@ import 'backup_codec.dart';
 
 const kLastBackupAtKey = 'last_backup_at';
 const kLastBackupSourceKey = 'last_backup_source_device';
+const kBackupAlreadyInProgressMessage = 'Backup already in progress';
 
 const _sqliteMagic = [
   0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
   0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
 ];
 
-/// Write [bytes] to a sibling temp file, then replace [dest] by parking the
-/// previous file. Never delete the old copy until the new file is at [dest],
-/// and never delete the temp copy on failure.
+/// App-level export/restore lock. Page `_busy` dies with [BackupPage]; this
+/// does not, so a second Backup route cannot race the same write.
+class BackupIo {
+  BackupIo._();
+
+  static var _busy = false;
+
+  static bool get isBusy => _busy;
+
+  static bool tryStart() {
+    if (_busy) return false;
+    _busy = true;
+    return true;
+  }
+
+  static void end() {
+    _busy = false;
+  }
+}
+
+/// Write [bytes] in app-controlled staging, then replace [dest]. Never write
+/// `${dest}.tmp` / `${dest}.old`: the macOS sandbox only allows the user-picked
+/// file. Never delete the old copy until the new file is at [dest], and never
+/// delete the temp copy on failure.
 ///
-/// If a previous attempt parked [dest] to `.old` and died before moving
-/// `.tmp` into place, [recoverParkedAtomicWrite] puts a complete file back
-/// at [dest] before this write starts.
+/// If a previous attempt parked [dest] and died before placing the new file,
+/// [recoverParkedAtomicWrite] puts a complete file back at [dest] first.
 Future<void> writeBytesAtomically(
   File dest,
   List<int> bytes, {
+  Directory? stagingDir,
   Future<void> Function()? beforeReplace,
 }) async {
-  await recoverParkedAtomicWrite(dest);
-  final tmp = File('${dest.path}.tmp');
-  final bak = File('${dest.path}.old');
+  await recoverParkedAtomicWrite(dest, stagingDir: stagingDir);
+  final staging = await _backupWriteStaging(stagingDir);
+  final tmp = _backupWriteTmp(staging, dest);
+  final bak = _backupWriteBak(staging, dest);
   await tmp.writeAsBytes(bytes, flush: true);
   var parked = false;
   try {
@@ -40,11 +65,12 @@ Future<void> writeBytesAtomically(
       if (await bak.exists()) {
         await bak.delete();
       }
-      await dest.rename(bak.path);
+      await dest.copy(bak.path);
+      await dest.delete();
       parked = true;
     }
     await beforeReplace?.call();
-    await tmp.rename(dest.path);
+    await _placeBackupWrite(tmp, dest);
     if (parked) {
       try {
         if (await bak.exists()) await bak.delete();
@@ -53,26 +79,103 @@ Future<void> writeBytesAtomically(
   } catch (e) {
     if (parked && await bak.exists() && !await dest.exists()) {
       try {
-        await bak.rename(dest.path);
+        await bak.copy(dest.path);
+        await bak.delete();
       } catch (_) {}
     }
     rethrow;
   }
 }
 
-/// If [dest] is missing after a crash between park-to-`.old` and rename of
-/// `.tmp`, finish the replace from `.tmp` or restore the previous file from
-/// `.old`. The picker only shows `.wpbackup`, so `.old` is otherwise lost.
-Future<void> recoverParkedAtomicWrite(File dest) async {
+/// If [dest] is missing after a crash between park and place, finish from the
+/// staged `.tmp` or restore the previous file from `.old`. Also recovers
+/// leftover sibling `${dest}.tmp` / `${dest}.old` from older builds.
+Future<void> recoverParkedAtomicWrite(
+  File dest, {
+  Directory? stagingDir,
+}) async {
   if (await dest.exists()) return;
-  final tmp = File('${dest.path}.tmp');
-  final bak = File('${dest.path}.old');
+  final staging = await _backupWriteStaging(stagingDir);
+  final tmp = _backupWriteTmp(staging, dest);
+  final bak = _backupWriteBak(staging, dest);
   if (await tmp.exists()) {
-    await tmp.rename(dest.path);
+    await _placeBackupWrite(tmp, dest);
     return;
   }
   if (await bak.exists()) {
-    await bak.rename(dest.path);
+    await bak.copy(dest.path);
+    try {
+      await bak.delete();
+    } catch (_) {}
+    return;
+  }
+  final legacyTmp = File('${dest.path}.tmp');
+  final legacyBak = File('${dest.path}.old');
+  if (await legacyTmp.exists()) {
+    await legacyTmp.rename(dest.path);
+    return;
+  }
+  if (await legacyBak.exists()) {
+    await legacyBak.rename(dest.path);
+  }
+}
+
+String backupWriteKey(String destPath) =>
+    sha256.convert(utf8.encode(destPath)).toString().substring(0, 24);
+
+bool walCheckpointIsBusy(Map<String, Object?> row) {
+  final busy = row['busy'] ?? (row.isEmpty ? 1 : row.values.first);
+  if (busy is int) return busy != 0;
+  if (busy is BigInt) return busy != BigInt.zero;
+  return '$busy' != '0';
+}
+
+/// Flush WAL into the main sqlite file before export reads it. A nonzero
+/// `busy` result is not an exception; retry, then fail so the backup cannot
+/// omit recent commits.
+Future<void> checkpointWalForExport(AppDatabase db) async {
+  for (var attempt = 0; attempt < 8; attempt++) {
+    final rows = await db.customSelect('PRAGMA wal_checkpoint(FULL)').get();
+    if (rows.isEmpty || !walCheckpointIsBusy(rows.first.data)) return;
+    await Future<void>.delayed(Duration(milliseconds: 25 * (attempt + 1)));
+  }
+  throw const BackupFormatException(
+    'Database is busy; could not flush WAL for export',
+  );
+}
+
+Future<Directory> _backupWriteStaging(Directory? stagingDir) async {
+  if (stagingDir != null) {
+    await stagingDir.create(recursive: true);
+    return stagingDir;
+  }
+  try {
+    final dir = await getApplicationSupportDirectory();
+    await dir.create(recursive: true);
+    return dir;
+  } catch (_) {
+    final dir = Directory(
+      p.join(Directory.systemTemp.path, 'wired_parts_backup_write'),
+    );
+    await dir.create(recursive: true);
+    return dir;
+  }
+}
+
+File _backupWriteTmp(Directory staging, File dest) =>
+    File(p.join(staging.path, 'backup_write_${backupWriteKey(dest.path)}.tmp'));
+
+File _backupWriteBak(Directory staging, File dest) =>
+    File(p.join(staging.path, 'backup_write_${backupWriteKey(dest.path)}.old'));
+
+Future<void> _placeBackupWrite(File tmp, File dest) async {
+  try {
+    await tmp.rename(dest.path);
+  } on FileSystemException {
+    await tmp.copy(dest.path);
+    try {
+      await tmp.delete();
+    } catch (_) {}
   }
 }
 
@@ -114,9 +217,11 @@ class BackupStore {
     return Directory(p.join(dir.path, 'part_photos'));
   }
 
+  /// Live sqlite path for export. Does not recover: recover is a closed-DB
+  /// startup path, and the shop connection is already open.
   Future<File> sqliteFile() async {
     final dir = await _support();
-    return resolveSqliteFile(supportDir: dir);
+    return File(p.join(dir.path, kSqliteFileName));
   }
 
   Future<BackupPayload> collect({

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +31,9 @@ Widget _page({
 }
 
 void main() {
+  setUp(BackupIo.end);
+  tearDown(BackupIo.end);
+
   testWidgets('reloads last backup when the live database is replaced',
       (tester) async {
     final db1 = AppDatabase.forTesting(NativeDatabase.memory());
@@ -246,7 +248,7 @@ void main() {
     final deviceId = await db.settingsDao.ensureDeviceId();
     final pin = PinService(db.settingsDao);
     final hang = Completer<void>();
-    final codec = _HangEncryptCodec(hang);
+    var flushStarted = false;
 
     await tester.pumpWidget(
       AppScope(
@@ -257,9 +259,13 @@ void main() {
         restoreFromBackup: (_, _) async {},
         child: MaterialApp(
           home: BackupPage(
-            codec: codec,
+            codec: BackupCodec(iterations: 1000),
             store: BackupStore(supportDir: dir),
             pickSavePath: ({required suggestedName}) async => savePath,
+            flushWal: () async {
+              flushStarted = true;
+              await hang.future;
+            },
           ),
         ),
       ),
@@ -287,24 +293,19 @@ void main() {
       'test-backup',
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pump();
-    await tester.runAsync(() async {
-      for (var i = 0; i < 50 && !codec.started; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
-    });
-    expect(codec.started, isTrue);
+    await tester.pumpAndSettle();
+    expect(flushStarted, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     expect(find.text('Backup saved'), findsNothing);
 
     hang.complete();
     await tester.runAsync(() async {
-      for (var i = 0; i < 50; i++) {
+      for (var i = 0; i < 80; i++) {
         if (await db.settingsDao.getSetting(kLastBackupAtKey) != null) {
           return;
         }
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       }
     });
 
@@ -312,6 +313,85 @@ void main() {
     expect(await db.settingsDao.getSetting(kLastBackupAtKey), isNotNull);
     expect(await db.settingsDao.getSetting(kLastBackupSourceKey), deviceId);
     expect(find.text('Backup saved'), findsNothing);
+  });
+
+  testWidgets('second Backup page cannot start export while first is running',
+      (tester) async {
+    final hang = Completer<void>();
+    var flushStarted = false;
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: MaterialApp(
+          home: BackupPage(
+            pickSavePath: ({required suggestedName}) async =>
+                '/tmp/unused.wpbackup',
+            flushWal: () async {
+              flushStarted = true;
+              await hang.future;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.save_alt));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find
+          .descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(TextField),
+          )
+          .first,
+      'test-backup',
+    );
+    await tester.enterText(
+      find
+          .descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(TextField),
+          )
+          .at(1),
+      'test-backup',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(flushStarted, isTrue);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: MaterialApp(
+          home: BackupPage(
+            pickSavePath: ({required suggestedName}) async {
+              fail('second export must not pick a path');
+              return null;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.save_alt));
+    await tester.pumpAndSettle();
+    expect(find.text(kBackupAlreadyInProgressMessage), findsOneWidget);
+
+    hang.complete();
+    await tester.pump();
   });
 
   testWidgets('leaving backup after closed db does not throw', (tester) async {
@@ -357,18 +437,4 @@ class _HangReset extends LocalDataReset {
 
   @override
   Future<void> wipeFiles() => gate.future;
-}
-
-class _HangEncryptCodec extends BackupCodec {
-  _HangEncryptCodec(this.gate) : super(iterations: 1000);
-
-  final Completer<void> gate;
-  var started = false;
-
-  @override
-  Future<Uint8List> encrypt(BackupPayload payload, String password) async {
-    started = true;
-    await gate.future;
-    return Uint8List.fromList(kBackupMagic);
-  }
 }

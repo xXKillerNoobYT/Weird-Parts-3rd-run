@@ -20,6 +20,7 @@ class BackupPage extends StatefulWidget {
     this.store,
     this.pickSavePath,
     this.pickOpenPath,
+    this.flushWal,
     super.key,
   });
 
@@ -27,6 +28,8 @@ class BackupPage extends StatefulWidget {
   final BackupStore? store;
   final BackupSavePicker? pickSavePath;
   final BackupOpenPicker? pickOpenPath;
+  /// Test hook. Production flushes WAL with [checkpointWalForExport].
+  final Future<void> Function()? flushWal;
 
   @override
   State<BackupPage> createState() => _BackupPageState();
@@ -90,6 +93,13 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _export() async {
     if (_busy) return;
+    if (!BackupIo.tryStart()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(kBackupAlreadyInProgressMessage)),
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       final scope = AppScope.of(context);
@@ -102,7 +112,11 @@ class _BackupPageState extends State<BackupPage> {
       if (password == null || !mounted) return;
       final path = await _savePath();
       if (path == null || !mounted) return;
-      await scope.db.customStatement('PRAGMA wal_checkpoint(FULL);');
+      if (widget.flushWal != null) {
+        await widget.flushWal!();
+      } else {
+        await checkpointWalForExport(scope.db);
+      }
       final sqliteFile = await _store.sqliteFile();
       if (!await sqliteFile.exists()) {
         throw const BackupFormatException('No local database to export');
@@ -139,12 +153,20 @@ class _BackupPageState extends State<BackupPage> {
         SnackBar(content: Text('Backup failed: $e')),
       );
     } finally {
+      BackupIo.end();
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _restore() async {
     if (_busy) return;
+    if (!BackupIo.tryStart()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(kBackupAlreadyInProgressMessage)),
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       final scope = AppScope.of(context);
@@ -184,6 +206,7 @@ class _BackupPageState extends State<BackupPage> {
         SnackBar(content: Text('Restore failed: $e')),
       );
     } finally {
+      BackupIo.end();
       if (mounted) setState(() => _busy = false);
     }
   }
