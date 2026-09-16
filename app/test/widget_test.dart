@@ -864,5 +864,95 @@ void main() {
     expect(find.text('SupplyHouse'), findsWidgets);
     expect(find.text('No SKU'), findsOneWidget);
   });
+
+  testWidgets(
+      'deleted catalog part still shows job name, splits, and no Open catalog',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    final supplierId = await db.taxonomyDao.insertSupplier(
+      id: newId(),
+      name: 'SupplyHouse',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Watts',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Isolation valve',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'W-123',
+      deviceId: deviceId,
+      varianceName: 'White',
+    );
+    await db.partsDao.insertSupplierListing(
+      id: newId(),
+      brandVersionId: bvId,
+      supplierId: supplierId,
+      sku: 'SH-1',
+      deviceId: deviceId,
+    );
+    final jobId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Boiler',
+      deviceId: deviceId,
+    );
+    final lineId = await db.jobsDao.insertJobLine(
+      id: newId(),
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: bvId,
+      neededQty: 10,
+      shopPullQty: 4,
+      deviceId: deviceId,
+    );
+    await db.jobsDao.replaceOrderSplits(
+      lineId: lineId,
+      splits: [(supplierId: supplierId, qty: 6)],
+      deviceId: deviceId,
+    );
+    await db.partsDao.softDeletePart(partId);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Boiler'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Isolation valve (removed)'), findsOneWidget);
+    expect(find.textContaining('SupplyHouse 6'), findsOneWidget);
+
+    await tester.tap(find.text('Isolation valve (removed)'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('removed from catalog'),
+      findsOneWidget,
+    );
+    expect(find.text('Open catalog part'), findsNothing);
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('Add supplier'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Isolation valve (removed)'), findsOneWidget);
+    expect(find.textContaining('SupplyHouse 6'), findsOneWidget);
+
+    final splits = await db.jobsDao.orderSplitsForLine(lineId);
+    expect(splits, hasLength(1));
+    expect(splits.first.supplierId, supplierId);
+    expect(splits.first.quantity, 6);
+  });
 }
 
