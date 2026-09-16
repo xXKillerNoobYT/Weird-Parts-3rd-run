@@ -288,19 +288,25 @@ void main() {
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pump();
-    for (var i = 0; i < 50 && !codec.started; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-    }
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50 && !codec.started; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
     expect(codec.started, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     expect(find.text('Backup saved'), findsNothing);
 
     hang.complete();
-    for (var i = 0; i < 50; i++) {
-      if (await db.settingsDao.getSetting(kLastBackupAtKey) != null) break;
-      await tester.pump(const Duration(milliseconds: 20));
-    }
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50; i++) {
+        if (await db.settingsDao.getSetting(kLastBackupAtKey) != null) {
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
 
     expect(File(savePath).existsSync(), isTrue);
     expect(await db.settingsDao.getSetting(kLastBackupAtKey), isNotNull);
