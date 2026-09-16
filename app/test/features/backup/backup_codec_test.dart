@@ -53,6 +53,30 @@ void main() {
     );
   });
 
+  test('rejects a newer backup header version', () {
+    final header = utf8.encode(
+      jsonEncode({
+        'v': 2,
+        'kdf': 'pbkdf2-sha256',
+        'iterations': 1000,
+        'salt': base64Encode(Uint8List(16)),
+        'nonce': base64Encode(Uint8List(12)),
+        'createdAt': '2026-09-13T20:00:00.000Z',
+        'sourceDeviceId': 'dev-x',
+      }),
+    );
+    expect(
+      () => parseHeaderBytes(Uint8List.fromList(header)),
+      throwsA(
+        isA<BackupFormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('Unsupported backup version'),
+        ),
+      ),
+    );
+  });
+
   test('rejects attacker-chosen huge PBKDF2 iterations', () {
     final header = utf8.encode(
       jsonEncode({

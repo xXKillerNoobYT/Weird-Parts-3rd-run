@@ -417,6 +417,60 @@ void main() {
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
   });
 
+  test('empty-photo restore parks leftover live photos after sqlite commit',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-empty-photos-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync([1]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    resolveSqliteFile(supportDir: dest);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg')).readAsBytesSync(),
+      [1],
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+  });
+
+  test('empty-photo recover parks live photos after promoting staged sqlite',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-empty-staged-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteRestoreBakName)).writeAsBytesSync([1]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync('in-progress');
+
+    resolveSqliteFile(supportDir: dest);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).existsSync(),
+      isFalse,
+    );
+    expect(
+      File(p.join(dest.path, kPhotosRestoreBakName, 'old.jpg')).readAsBytesSync(),
+      [1],
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+  });
+
   test('failed photo replace keeps staged photos and marker', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-photo-keep-');
     addTearDown(() => dest.deleteSync(recursive: true));

@@ -89,17 +89,16 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _export() async {
     if (_busy) return;
-    final scope = AppScope.of(context);
-    if (!await ensurePinUnlocked(context, scope.pin)) return;
-    if (!mounted) return;
-    final password = await _promptPassword(
-      title: 'Encrypt backup',
-      confirm: true,
-    );
-    if (password == null || !mounted) return;
-
     setState(() => _busy = true);
     try {
+      final scope = AppScope.of(context);
+      if (!await ensurePinUnlocked(context, scope.pin)) return;
+      if (!mounted) return;
+      final password = await _promptPassword(
+        title: 'Encrypt backup',
+        confirm: true,
+      );
+      if (password == null || !mounted) return;
       final path = await _savePath();
       if (path == null || !mounted) return;
       await scope.db.customStatement('PRAGMA wal_checkpoint(FULL);');
@@ -114,19 +113,23 @@ class _BackupPageState extends State<BackupPage> {
       );
       final bytes = await _codec.encrypt(payload, password);
       await writeBytesAtomically(File(path), bytes);
-      await scope.db.settingsDao.setSetting(
-        kLastBackupAtKey,
-        payload.createdAt.toIso8601String(),
-      );
-      await scope.db.settingsDao.setSetting(
-        kLastBackupSourceKey,
-        payload.sourceDeviceId,
-      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Backup saved')),
       );
-      await _reloadMeta();
+      try {
+        await scope.db.settingsDao.setSetting(
+          kLastBackupAtKey,
+          payload.createdAt.toIso8601String(),
+        );
+        await scope.db.settingsDao.setSetting(
+          kLastBackupSourceKey,
+          payload.sourceDeviceId,
+        );
+        await _reloadMeta();
+      } catch (_) {
+        // File is already saved. Last-backup stamps are best-effort.
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -8,11 +8,14 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_page.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
+
+import 'backup_test_support.dart';
 
 Widget _page({
   required AppDatabase db,
@@ -76,10 +79,72 @@ void main() {
     await tester.tap(find.byIcon(Icons.save_alt));
     await tester.pumpAndSettle();
     expect(find.text('Encrypt backup'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.save_alt), warnIfMissed: false);
+    await tester.pump();
+    expect(find.text('Encrypt backup'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('Encrypt backup'), findsNothing);
+    await tester.tap(find.byIcon(Icons.save_alt));
+    await tester.pumpAndSettle();
+    expect(find.text('Encrypt backup'), findsOneWidget);
+  });
+
+  testWidgets('export shows Backup saved after the file is written',
+      (tester) async {
+    final dir = Directory.systemTemp.createTempSync('wp-bak-export-ok-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'src'),
+    );
+    final out = File(p.join(dir.path, 'out.wpbackup'));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: MaterialApp(
+          home: BackupPage(
+            codec: BackupCodec(iterations: 1000),
+            store: BackupStore(supportDir: dir),
+            pickSavePath: ({required suggestedName}) async => out.path,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.save_alt));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ).first,
+      'test-backup',
+    );
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ).at(1),
+      'test-backup',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Backup saved'), findsOneWidget);
+    expect(find.textContaining('Backup failed'), findsNothing);
+    expect(out.existsSync(), isTrue);
   });
 
   testWidgets('unsupported save location reports Backup failed, not a crash',

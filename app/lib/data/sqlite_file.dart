@@ -99,6 +99,17 @@ void recoverInterruptedRestore({
           stagedPhotos.renameSync(livePhotos.path);
         }
       }
+    } else if (!sqliteFromBak &&
+        liveSqlite.existsSync() &&
+        !stagedSqlite.existsSync() &&
+        !stagedPhotos.existsSync() &&
+        livePhotos.existsSync() &&
+        bakSqlite.existsSync() &&
+        !bakPhotos.existsSync()) {
+      // Sqlite from a no-photo backup is already live; leftover live photos
+      // were never parked and belong to the previous shop.
+      beforeReplaceLivePhotos?.call();
+      livePhotos.renameSync(bakPhotos.path);
     } else if (!livePhotos.existsSync() && bakPhotos.existsSync()) {
       // Only roll bak photos when this recovery also rolled sqlite back.
       // A committed sqlite swap with missing live photos must not attach

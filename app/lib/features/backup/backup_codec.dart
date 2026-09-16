@@ -7,6 +7,7 @@ import 'package:cryptography/cryptography.dart';
 /// File magic `WPB1`. Header JSON is unencrypted (date + source device + KDF).
 /// Payload is AES-256-GCM; key is PBKDF2-HMAC-SHA256 of the backup password.
 const kBackupMagic = [0x57, 0x50, 0x42, 0x31];
+const kBackupHeaderVersion = 1;
 const kDefaultPbkdf2Iterations = 120000;
 const kMaxPbkdf2Iterations = 250000;
 
@@ -61,7 +62,7 @@ class BackupCodec {
     final salt = _randomBytes(16);
     final nonce = _randomBytes(12);
     final headerMap = <String, Object>{
-      'v': 1,
+      'v': kBackupHeaderVersion,
       'kdf': 'pbkdf2-sha256',
       'iterations': iterations,
       'salt': base64Encode(salt),
@@ -175,6 +176,9 @@ BackupHeader parseHeaderBytes(Uint8List headerBytes) {
     throw const BackupFormatException('Invalid backup header');
   }
   final map = Map<String, Object?>.from(decoded);
+  if (map['v'] != kBackupHeaderVersion) {
+    throw const BackupFormatException('Unsupported backup version');
+  }
   final createdRaw = map['createdAt'] as String?;
   final device = map['sourceDeviceId'] as String?;
   final kdf = map['kdf'] as String?;
