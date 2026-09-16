@@ -88,6 +88,29 @@ void main() {
     expect(find.text('Encrypt backup'), findsOneWidget);
   });
 
+  testWidgets('restore sets busy before PIN so export cannot start',
+      (tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    await pin.setPin('1234');
+
+    await tester.pumpWidget(_page(db: db, pin: pin, deviceId: deviceId));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.settings_backup_restore));
+    await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.save_alt), warnIfMissed: false);
+    await tester.pump();
+    expect(find.text('Editor PIN'), findsOneWidget);
+    expect(find.text('Encrypt backup'), findsNothing);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsNothing);
+  });
+
   testWidgets('unsupported save location reports Backup failed, not a crash',
       (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());

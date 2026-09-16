@@ -417,6 +417,35 @@ void main() {
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
   });
 
+  test('pre-park crash abandons staged restore and keeps live shop', () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-pre-park-');
+    addTearDown(() => dest.deleteSync(recursive: true));
+
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'live'),
+    );
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(
+      await sqliteBytesWithSetting(key: 'marker', value: 'staged'),
+    );
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'new.jpg')).writeAsBytesSync([9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+    resolveSqliteFile(supportDir: dest);
+    expect(await readSqliteSetting(dest, 'marker'), 'live');
+    expect(
+      File(p.join(dest.path, 'part_photos', 'old.jpg')).readAsBytesSync(),
+      [1],
+    );
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
+    expect(Directory(p.join(dest.path, kRestoreStagingName)).existsSync(), isFalse);
+  });
+
   test('photo restore onto a shop without photos keeps live photos if marker remains',
       () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-keep-restored-');
@@ -513,11 +542,14 @@ void main() {
     File(p.join(dest.path, kRestoreSwapMarkerName))
         .writeAsStringSync('in-progress');
 
-    recoverInterruptedRestore(
-      supportDir: dest,
-      beforeReplaceLivePhotos: () {
-        throw StateError('photo replace');
-      },
+    expect(
+      () => recoverInterruptedRestore(
+        supportDir: dest,
+        beforeReplaceLivePhotos: () {
+          throw StateError('photo replace');
+        },
+      ),
+      throwsA(isA<StateError>()),
     );
 
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
@@ -577,7 +609,7 @@ void main() {
         ),
         reset: LocalDataReset(supportDir: dest, documentsDir: dest),
       ),
-      throwsA(isA<BackupFormatException>()),
+      throwsA(isA<StateError>()),
     );
 
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
@@ -662,11 +694,14 @@ void main() {
     File(p.join(dest.path, kRestoreSwapMarkerName))
         .writeAsStringSync(kRestoreSwapMarkerInProgress);
 
-    recoverInterruptedRestore(
-      supportDir: dest,
-      beforeDeleteSqliteSidecars: () {
-        throw StateError('sidecar delete');
-      },
+    expect(
+      () => recoverInterruptedRestore(
+        supportDir: dest,
+        beforeDeleteSqliteSidecars: () {
+          throw StateError('sidecar delete');
+        },
+      ),
+      throwsA(isA<StateError>()),
     );
 
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);

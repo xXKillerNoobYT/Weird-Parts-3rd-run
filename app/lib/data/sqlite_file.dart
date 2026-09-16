@@ -77,6 +77,18 @@ void recoverInterruptedRestore({
   final noPhotoBackup =
       _markerSaysNoPhotos(marker) || (hadStagedSqlite && !hadStagedPhotos);
 
+  // Marker was written but live sqlite was never parked. Staged files are a
+  // never-started swap; keep the live shop and drop the restore.
+  if (hadLiveSqlite && hadStagedSqlite) {
+    try {
+      if (staging.existsSync()) staging.deleteSync(recursive: true);
+    } catch (_) {}
+    try {
+      if (marker.existsSync()) marker.deleteSync();
+    } catch (_) {}
+    return;
+  }
+
   var sqliteFromBak = false;
   Object? error;
   try {
@@ -166,7 +178,7 @@ void recoverInterruptedRestore({
     } catch (_) {}
   }
 
-  if (error != null && !liveOk) {
+  if (error != null && (!liveOk || pendingStaging || sidecarsPending)) {
     throw error;
   }
 }

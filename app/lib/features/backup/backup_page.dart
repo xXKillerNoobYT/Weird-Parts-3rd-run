@@ -142,11 +142,11 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _restore() async {
     if (_busy) return;
-    final scope = AppScope.of(context);
-    if (!await ensurePinUnlocked(context, scope.pin)) return;
-    if (!mounted) return;
     setState(() => _busy = true);
     try {
+      final scope = AppScope.of(context);
+      if (!await ensurePinUnlocked(context, scope.pin)) return;
+      if (!mounted) return;
       final path = await _openPath();
       if (path == null || !mounted) return;
       final fileBytes = await File(path).readAsBytes();
