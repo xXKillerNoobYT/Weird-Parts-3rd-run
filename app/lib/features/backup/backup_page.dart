@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../data/sqlite_file.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../pin/pin_gate.dart';
 import 'backup_codec.dart';
@@ -113,10 +114,6 @@ class _BackupPageState extends State<BackupPage> {
       );
       final bytes = await _codec.encrypt(payload, password);
       await writeBytesAtomically(File(path), bytes);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Backup saved')),
-      );
       try {
         await scope.db.settingsDao.setSetting(
           kLastBackupAtKey,
@@ -126,10 +123,16 @@ class _BackupPageState extends State<BackupPage> {
           kLastBackupSourceKey,
           payload.sourceDeviceId,
         );
-        await _reloadMeta();
       } catch (_) {
         // File is already saved. Last-backup stamps are best-effort.
       }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup saved')),
+      );
+      try {
+        await _reloadMeta();
+      } catch (_) {}
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -204,6 +207,12 @@ class _BackupPageState extends State<BackupPage> {
       appBar: AppBar(title: const Text('Backup & restore')),
       body: ListView(
         children: [
+          if (restoreRecoverError != null)
+            const ListTile(
+              leading: Icon(Icons.warning_amber_outlined),
+              title: Text('Restore did not finish'),
+              subtitle: Text(kRestoreRecoverRetryMessage),
+            ),
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('Last backup'),

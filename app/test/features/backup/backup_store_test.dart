@@ -689,8 +689,10 @@ void main() {
     final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
     final staging = Directory(p.join(dest.path, kRestoreStagingName))
       ..createSync();
+    final wal = File(p.join(dest.path, '$kSqliteFileName-wal'))
+      ..writeAsBytesSync([2, 2]);
+    wal.setLastModifiedSync(DateTime.now().subtract(const Duration(seconds: 2)));
     File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
-    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([2, 2]);
     File(p.join(dest.path, kRestoreSwapMarkerName))
         .writeAsStringSync(kRestoreSwapMarkerInProgress);
 
@@ -714,8 +716,8 @@ void main() {
     recoverInterruptedRestore(supportDir: dest);
     expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isFalse);
     expect(
-      File(p.join(dest.path, '$kSqliteFileName-wal')).readAsBytesSync(),
-      [2, 2],
+      File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),
+      isFalse,
     );
     expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isTrue);
   });
@@ -726,6 +728,9 @@ void main() {
 
     File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
       await sqliteBytesWithSetting(key: 'marker', value: 'live'),
+    );
+    File(p.join(dest.path, kSqliteFileName)).setLastModifiedSync(
+      DateTime.now().subtract(const Duration(seconds: 2)),
     );
     File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([9, 9]);
     File(p.join(dest.path, kRestoreSwapMarkerName))
@@ -757,6 +762,36 @@ void main() {
     expect(
       File(p.join(dest.path, '$kSqliteFileName-wal')).existsSync(),
       isFalse,
+    );
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+  });
+
+  test('resolveSqliteFile does not throw when photo recover fails after live sqlite',
+      () async {
+    final dest = Directory.systemTemp.createTempSync('wp-bak-launch-');
+    addTearDown(() {
+      restoreRecoverError = null;
+      dest.deleteSync(recursive: true);
+    });
+
+    final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
+    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(restored);
+    File(p.join(dest.path, kPhotosRestoreBakName)).writeAsBytesSync([1]);
+    Directory(p.join(dest.path, 'part_photos')).createSync();
+    File(p.join(dest.path, 'part_photos', 'old.jpg')).writeAsBytesSync([1]);
+    final staging = Directory(p.join(dest.path, kRestoreStagingName))
+      ..createSync();
+    Directory(p.join(staging.path, 'part_photos')).createSync();
+    File(p.join(staging.path, 'part_photos', 'new.jpg')).writeAsBytesSync([9]);
+    File(p.join(dest.path, kRestoreSwapMarkerName))
+        .writeAsStringSync(kRestoreSwapMarkerInProgress);
+
+    expect(() => resolveSqliteFile(supportDir: dest), returnsNormally);
+    expect(restoreRecoverError, isNotNull);
+    expect(File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(), isTrue);
+    expect(
+      File(p.join(staging.path, 'part_photos', 'new.jpg')).existsSync(),
+      isTrue,
     );
     expect(await readSqliteSetting(dest, 'marker'), 'new');
   });

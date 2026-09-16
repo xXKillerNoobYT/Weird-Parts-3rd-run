@@ -111,6 +111,47 @@ void main() {
     expect(find.text('Editor PIN'), findsNothing);
   });
 
+  testWidgets('backup page shows restore retry when recover failed',
+      (tester) async {
+    restoreRecoverError = StateError('photo replace');
+    addTearDown(() => restoreRecoverError = null);
+
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(_page(db: db, pin: pin, deviceId: deviceId));
+    await tester.pumpAndSettle();
+    expect(find.text('Restore did not finish'), findsOneWidget);
+    expect(find.text(kRestoreRecoverRetryMessage), findsOneWidget);
+  });
+
+  testWidgets('home shell surfaces recover retry without crashing',
+      (tester) async {
+    restoreRecoverError = StateError('photo replace');
+    addTearDown(() => restoreRecoverError = null);
+
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: deviceId,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: const MaterialApp(home: HomeShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text(kRestoreRecoverRetryMessage), findsOneWidget);
+  });
+
   testWidgets('unsupported save location reports Backup failed, not a crash',
       (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());

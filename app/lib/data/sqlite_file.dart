@@ -10,7 +10,13 @@ const kSqliteRestoreBakName = '$kSqliteFileName.restore-bak';
 const kPhotosRestoreBakName = 'part_photos.restore-bak';
 const kRestoreStagingName = 'restore_staging';
 const kRestoreStagingNextName = 'restore_staging.next';
+const kRestoreRecoverRetryMessage =
+    'Restore did not finish. Restart the app to retry.';
 const _sqliteSidecarSuffixes = ['-wal', '-shm', '-journal'];
+
+/// Set when [resolveSqliteFile] catches a recover failure after live sqlite
+/// is already present. Cleared when recover finishes. Launch must still start.
+Object? restoreRecoverError;
 
 /// Prefer Application Support. If that file is missing, copy a Phase 1
 /// Documents DB (and WAL/SHM sidecars) so an upgrade does not look empty.
@@ -23,7 +29,16 @@ File resolveSqliteFile({
   String fileName = kSqliteFileName,
 }) {
   supportDir.createSync(recursive: true);
-  recoverInterruptedRestore(supportDir: supportDir);
+  try {
+    recoverInterruptedRestore(supportDir: supportDir);
+    restoreRecoverError = null;
+  } catch (e) {
+    final dest = File(p.join(supportDir.path, fileName));
+    if (!dest.existsSync()) rethrow;
+    // Live shop is already on disk. Do not brick launch; keep marker/staging
+    // and surface [restoreRecoverError] in the UI.
+    restoreRecoverError = e;
+  }
   final dest = File(p.join(supportDir.path, fileName));
   if (dest.existsSync()) return dest;
 
@@ -163,11 +178,21 @@ void recoverInterruptedRestore({
       stagedPhotos.existsSync() && !sqliteFromBak;
   final pendingStaging =
       (stagedSqlite.existsSync() && !liveOk) || photosUnfinished;
-  // Sidecars only block completing this recover if we just placed sqlite.
-  // A leftover marker beside an already-live shop must not retry deletes
-  // forever — those files may be the running shop's WAL.
-  final sidecarsPending =
-      !hadLiveSqlite && liveOk && _sqliteSidecarsExist(liveSqlite);
+  if (hadLiveSqlite && liveOk && !pendingStaging) {
+    try {
+      _deleteStaleSqliteSidecarsSync(liveSqlite);
+    } catch (e) {
+      error ??= e;
+    }
+  }
+  // Sidecars only block completing this recover if we just placed sqlite,
+  // or leftover WAL/SHM from that place is still older than the live file.
+  // Newer sidecars belong to an already-open shop and must stay.
+  final sidecarsPending = liveOk &&
+      ((!hadLiveSqlite && _sqliteSidecarsExist(liveSqlite)) ||
+          (hadLiveSqlite &&
+              !pendingStaging &&
+              _staleSqliteSidecarsExist(liveSqlite)));
 
   if (liveOk && !pendingStaging && !sidecarsPending) {
     try {
@@ -202,5 +227,28 @@ void _deleteSqliteSidecarsSync(File sqlite) {
   for (final suffix in _sqliteSidecarSuffixes) {
     final side = File('${sqlite.path}$suffix');
     if (side.existsSync()) side.deleteSync();
+  }
+}
+
+bool _staleSqliteSidecarsExist(File sqlite) {
+  if (!sqlite.existsSync()) return false;
+  final sqliteMtime = sqlite.lastModifiedSync();
+  for (final suffix in _sqliteSidecarSuffixes) {
+    final side = File('${sqlite.path}$suffix');
+    if (side.existsSync() && side.lastModifiedSync().isBefore(sqliteMtime)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void _deleteStaleSqliteSidecarsSync(File sqlite) {
+  if (!sqlite.existsSync()) return;
+  final sqliteMtime = sqlite.lastModifiedSync();
+  for (final suffix in _sqliteSidecarSuffixes) {
+    final side = File('${sqlite.path}$suffix');
+    if (!side.existsSync()) continue;
+    if (!side.lastModifiedSync().isBefore(sqliteMtime)) continue;
+    side.deleteSync();
   }
 }

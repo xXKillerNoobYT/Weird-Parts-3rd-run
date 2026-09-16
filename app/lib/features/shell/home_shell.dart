@@ -8,6 +8,7 @@ import '../catalog/tree_edit_prompts.dart';
 import '../jobs/jobs_page.dart';
 import '../maintenance/maintenance_page.dart';
 import '../pin/pin_gate.dart';
+import '../../data/sqlite_file.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -18,6 +19,20 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+  var _didReportRecover = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didReportRecover || restoreRecoverError == null) return;
+    _didReportRecover = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(kRestoreRecoverRetryMessage)),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
