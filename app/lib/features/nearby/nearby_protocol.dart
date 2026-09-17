@@ -4,7 +4,9 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 const kNearbyServiceType = '_wiredpart._tcp';
-const kNearbyUdpPort = 45454;
+/// Shared Mac/Windows UDP beacon port. Not 45454: Windows (Hyper-V/WinNAT-style)
+/// reserves ~44700–48799 on Impure even when `netsh excludedportrange` is empty.
+const kNearbyUdpPort = 41000;
 const kNearbyMulticastGroup = '239.55.12.42';
 const kNearbyProto = 'wiredpart-link';
 const kNearbyProtoVersion = 1;

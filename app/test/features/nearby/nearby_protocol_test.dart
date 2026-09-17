@@ -51,6 +51,18 @@ void main() {
     expect(peer.port, 41234);
   });
 
+  test('UDP beacon port sits outside the Windows reserved LAN band', () {
+    const reservedLo = 44700;
+    const reservedHi = 48799;
+    expect(kNearbyUdpPort, isNot(45454));
+    expect(
+      kNearbyUdpPort < reservedLo || kNearbyUdpPort > reservedHi,
+      isTrue,
+      reason: 'Windows Impure refuses UDP ~44700–48799',
+    );
+    expect(kNearbyUdpPort, inInclusiveRange(1024, 65535));
+  });
+
   test('who query is not a peer', () {
     final map = decodeBeacon(encodeWhoQuery());
     expect(isWhoQuery(map), isTrue);
