@@ -1,0 +1,12 @@
+@echo off
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+set "ProgramFiles(x86)=C:\Program Files (x86)"
+set "PATH=%USERPROFILE%\flutter\bin;C:\Program Files\Git\bin;C:\Program Files\Git\cmd;%PATH%"
+set "CL=/FS"
+set "CMAKE_BUILD_PARALLEL_LEVEL=1"
+cd /d "%~dp0"
+echo LAUNCH_START %DATE% %TIME%> "%~dp0build_launch.log"
+if exist "windows\flutter\ephemeral" rmdir /s /q "windows\flutter\ephemeral"
+if exist "build\windows" rmdir /s /q "build\windows"
+flutter run -d windows >> "%~dp0build_launch.log" 2>&1
+echo LAUNCH_EXIT=%ERRORLEVEL%>> "%~dp0build_launch.log"

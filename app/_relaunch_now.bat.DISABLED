@@ -1,0 +1,11 @@
+@echo off
+setlocal
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
+set "PATH=C:\Users\weird\flutter\bin;C:\Program Files\Git\bin;C:\Program Files\Git\cmd;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\System32;%PATH%"
+set "ProgramFiles(x86)=C:\Program Files (x86)"
+set "CMAKE_BUILD_PARALLEL_LEVEL=1"
+subst W: "C:\Users\weird\.GitHub\Weird-Parts-3rd-run" >nul 2>&1
+cd /d W:\app || exit /b 2
+echo LAUNCH_START %DATE% %TIME%
+call C:\Users\weird\flutter\bin\flutter.bat run -d windows
+echo EXIT=%ERRORLEVEL%

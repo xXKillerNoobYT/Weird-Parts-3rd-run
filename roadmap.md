@@ -33,7 +33,8 @@ Reference drafts (rough, not binding detail yet):
 | Identity now       | Device ID; no accounts                                                                                                                             |
 | Identity later     | Local user profiles, peer sync + backup (before cloud)                                                                                             |
 | Permissions later  | **Hats** (admin-assigned roles) — replace/extend PIN                                                                                               |
-| AI                 | On-device later; **MCP + 3rd-party AI** sooner than cloud, permissioned by logged-in user + MCP settings                                           |
+| AI (external)      | **MCP + 3rd-party AI** sooner than cloud; permissioned by user + MCP settings — **external AI only**                                               |
+| AI (internal / on-device) | Wanted: onboard/internal AI with access to **all read MCP tools** on the device (local shop data / context)                                 |
 | Catalog identity   | **General Part** is the default (info, no MPN). Brand versions optional when brand matters. Part has a **default supplier**.                       |
 | Job line tracking  | Needed / shop-pull separate from orders. **Order splits**: multiple supplier+qty rows per line. Brand optional on the line; else default supplier. |
 | Cloud              | Far future, optional                                                                                                                               |
@@ -41,6 +42,14 @@ Reference drafts (rough, not binding detail yet):
 | Auto sync          | **Later (Phase 7)** — auto/background nearby sync after manual **two-way** Sync Now is solid; still local-first, no internet |
 | Detail policy      | End goal saved; work out screen/module detail **as we build**                                                                                      |
 
+
+### AI tracks (Isaac clarification)
+
+Do **not** treat “MCP + 3rd-party” as the only AI story.
+
+- **External AI** — MCP + 3rd-party AI sooner than company cloud; permissioned by user + MCP settings. The locked “AI (external)” row applies to this track only.
+- **Internal / on-device AI** — Wanted: onboard/internal AI with access to all **read** MCP tools that run on the device (local MCP tool surface for reading shop data / context).
+- **Platform onboard AI (parked research)** — Apple has OS-built-in AI; assume Android has something similar; Windows and Mac at least on some machines. Acknowledge as a track alongside external MCP AI — **not** a commitment of availability.
 
 ---
 
@@ -104,6 +113,7 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 ### Phase 6 — Hardening
 
 - [ ] Permissions, performance, sync recovery, multi-device testing
+- [ ] Crash recovery prompt (finished / non–agent-debug): if the app crashes or dies unexpectedly, ask whether to restart — Yes → restart on homepage; No → stay closed. Intentional window **X** must quit with no restart (distinguish crash recovery vs normal close; no silent relaunch)
 
 ### Phase 7 — Auto / background nearby sync (later)
 
@@ -119,7 +129,8 @@ Do **not** fully spec these now. Pull from `docs/end-goal/` when a phase starts.
 
 - [ ] Hats data layer + admin (roles from MERGE-PLAN; confirm with Bob)
 - [ ] Local user profiles (peer sync + backup)
-- [ ] MCP bridge (tool permissions per user / settings)
+- [ ] MCP bridge — external AI tool permissions per user / settings
+- [ ] Internal / on-device AI with access to all read MCP tools on device (shop data / context)
 - [ ] Warehouse stock, locations, movements
 - [ ] Restock orders / receiving / returns
 - [ ] Dashboard, clock, notebooks, panel schedule
@@ -143,6 +154,7 @@ From end-goal drafts — park here, decide in context:
 4. Smart Cards vs chip filters on lists
 5. SF Symbols vs Material icons
 6. Tablet/Mac: sidebar+detail vs scaled phone layout
+7. Platform onboard AI (Apple / Android / Windows / Mac) — research only; availability not committed
 
 ---
 
