@@ -28,5 +28,11 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_wiredpart._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Find other Wired Parts devices on this Wi‑Fi to copy the shop. Not internet and not Bluetooth.</string>
 </dict>
 </plist>

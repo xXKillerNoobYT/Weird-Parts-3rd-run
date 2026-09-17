@@ -8,6 +8,8 @@ import '../catalog/catalog_page.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../jobs/jobs_page.dart';
 import '../maintenance/maintenance_page.dart';
+import '../nearby/nearby_page.dart';
+import '../nearby/nearby_protocol.dart';
 import '../pin/pin_gate.dart';
 
 class HomeShell extends StatefulWidget {
@@ -83,6 +85,8 @@ class _MoreTabState extends State<_MoreTab> {
   var _didInitPin = false;
   String? _lastBackupAt;
   String? _lastBackupSource;
+  String? _lastNearbyAt;
+  String? _lastNearbyPeer;
 
   @override
   void didChangeDependencies() {
@@ -100,12 +104,16 @@ class _MoreTabState extends State<_MoreTab> {
       final set = await pin.isPinSet();
       final at = await db.settingsDao.getSetting(kLastBackupAtKey);
       final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
+      final nearbyAt = await db.settingsDao.getSetting(kLastNearbyAtKey);
+      final nearbyPeer = await db.settingsDao.getSetting(kLastNearbyPeerKey);
       if (!mounted) return;
       setState(() {
         _pinSet = set;
         _unlocked = pin.isUnlocked;
         _lastBackupAt = at;
         _lastBackupSource = source;
+        _lastNearbyAt = nearbyAt;
+        _lastNearbyPeer = nearbyPeer;
       });
     } catch (_) {
       // Restore may have closed the live connection; AppScope rebuild reloads.
@@ -196,6 +204,14 @@ class _MoreTabState extends State<_MoreTab> {
     await _refreshPinState();
   }
 
+  void _openNearby() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const NearbyPage()))
+        .then((_) {
+      if (mounted) _refreshPinState();
+    });
+  }
+
   void _openBackup() {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const BackupPage()))
@@ -246,6 +262,9 @@ class _MoreTabState extends State<_MoreTab> {
     final backupSubtitle = _lastBackupAt == null
         ? 'No backup on this device yet'
         : '${_formatBackupStamp(_lastBackupAt!)} · ${_lastBackupSource ?? 'unknown'}';
+    final nearbySubtitle = _lastNearbyAt == null
+        ? 'Find, pair, send shop on this Wi‑Fi'
+        : 'Last copy ${_formatBackupStamp(_lastNearbyAt!)} · ${shortId(_lastNearbyPeer ?? 'peer')}';
 
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
@@ -256,6 +275,12 @@ class _MoreTabState extends State<_MoreTab> {
             title: const Text('Maintenance'),
             subtitle: const Text('Types tree, brands, suppliers'),
             onTap: _openMaintenance,
+          ),
+          ListTile(
+            leading: const Icon(Icons.wifi_tethering),
+            title: const Text('Nearby'),
+            subtitle: Text(nearbySubtitle),
+            onTap: _openNearby,
           ),
           ListTile(
             leading: const Icon(Icons.cloud_download_outlined),

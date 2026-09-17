@@ -55,7 +55,7 @@ Reference drafts (rough, not binding detail yet):
 - [x] App scaffold
 - [x] **Phase 1 — Local core** complete (`feature/phase-1-local-core`)
 
-**Current focus:** Phase 2 — file-tree catalog, Variance under Brands, job Requested / Split / Left to Pull/Order.
+**Current focus:** Phase 4 — nearby Wi‑Fi one-way link (discover / pair / send shop). Hardware proof still needs Mac Studio + Windows Impure on the house LAN.
 
 ---
 
@@ -85,13 +85,14 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 
 ### Phase 3 — Backup
 
-- [ ] Encrypted export / import
-- [ ] Show backup date + source device
+- [x] Encrypted export / import
+- [x] Show backup date + source device
 
 ### Phase 4 — Nearby link (one-way test only)
 
-- [ ] Manual discover / pair / verify code
-- [ ] One-way test transfer (BT and/or local Wi‑Fi) — engineering step only, not the product sync UX
+- [x] Manual discover / pair / verify code (More → Nearby, Wi‑Fi/mDNS; not Bluetooth)
+- [x] One-way shop copy over local Wi‑Fi (progress + failure on screen; not product Sync Now)
+- [ ] Hardware proof: Crystal Mac Studio + Windows Impure on the same LAN
 
 ### Phase 5 — Two-way sync (one session, both directions)
 
