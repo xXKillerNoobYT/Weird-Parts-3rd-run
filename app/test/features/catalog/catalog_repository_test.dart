@@ -7,6 +7,7 @@ import 'package:image/image.dart' as img;
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:path/path.dart' as p;
+import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
 import 'package:wired_parts/features/catalog/catalog_tree.dart';
 import 'package:wired_parts/features/catalog/part_photo_store.dart';
@@ -20,13 +21,17 @@ void main() {
   late CatalogRepository catalog;
 
   setUp(() async {
+    BackupIo.end();
     db = AppDatabase.forTesting(NativeDatabase.memory());
     deviceId = await db.settingsDao.ensureDeviceId();
     pin = PinService(db.settingsDao);
     catalog = CatalogRepository(db, pin, deviceId);
   });
 
-  tearDown(() async => db.close());
+  tearDown(() async {
+    BackupIo.end();
+    await db.close();
+  });
 
   test('create part allowed when no PIN set', () async {
     final id = await catalog.createGeneralPart(name: 'Valve');
@@ -124,27 +129,44 @@ void main() {
     );
   });
 
-  test('replacing a photo stores a new relative file and deletes the old one', () async {
-    final dir = Directory.systemTemp.createTempSync('wp-repo-photo-replace-');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    final bytes = Uint8List.fromList(
-      img.encodePng(img.Image(width: 8, height: 8)),
-    );
-    final id = await catalog.createGeneralPart(name: 'Swap photo');
-    final first = await catalog.attachPhoto(partId: id, bytes: bytes, root: dir);
-    await Future<void>.delayed(const Duration(milliseconds: 2));
-    final second = await catalog.attachPhoto(partId: id, bytes: bytes, root: dir);
-    expect(second, isNot(first));
-    expect(p.isAbsolute(second), isFalse);
-    expect(
-      (await const PartPhotoStore().resolveFile(first, root: dir)).existsSync(),
-      isFalse,
-    );
-    expect(
-      (await const PartPhotoStore().resolveFile(second, root: dir)).existsSync(),
-      isTrue,
-    );
-  });
+  test(
+    'replacing a photo stores a new relative file and deletes the old one',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('wp-repo-photo-replace-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final bytes = Uint8List.fromList(
+        img.encodePng(img.Image(width: 8, height: 8)),
+      );
+      final id = await catalog.createGeneralPart(name: 'Swap photo');
+      final first = await catalog.attachPhoto(
+        partId: id,
+        bytes: bytes,
+        root: dir,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      final second = await catalog.attachPhoto(
+        partId: id,
+        bytes: bytes,
+        root: dir,
+      );
+      expect(second, isNot(first));
+      expect(p.isAbsolute(second), isFalse);
+      expect(
+        (await const PartPhotoStore().resolveFile(
+          first,
+          root: dir,
+        )).existsSync(),
+        isFalse,
+      );
+      expect(
+        (await const PartPhotoStore().resolveFile(
+          second,
+          root: dir,
+        )).existsSync(),
+        isTrue,
+      );
+    },
+  );
 
   test('delete part is PIN-gated and tombstones the row', () async {
     final dir = Directory.systemTemp.createTempSync('wp-del-tombstone-');
@@ -180,7 +202,10 @@ void main() {
     );
     await catalog.deletePart(id, root: dir);
     expect(
-      (await const PartPhotoStore().resolveFile(stored, root: dir)).existsSync(),
+      (await const PartPhotoStore().resolveFile(
+        stored,
+        root: dir,
+      )).existsSync(),
       isFalse,
     );
   });
@@ -213,10 +238,7 @@ void main() {
     );
 
     await expectLater(
-      catalog.deleteEmptyFolder(
-        kind: CatalogTreeKind.category,
-        id: occupiedId,
-      ),
+      catalog.deleteEmptyFolder(kind: CatalogTreeKind.category, id: occupiedId),
       throwsA(isA<StateError>()),
     );
     expect(
@@ -226,10 +248,7 @@ void main() {
 
     await pin.setPin('2468');
     await expectLater(
-      catalog.deleteEmptyFolder(
-        kind: CatalogTreeKind.category,
-        id: occupiedId,
-      ),
+      catalog.deleteEmptyFolder(kind: CatalogTreeKind.category, id: occupiedId),
       throwsA(isA<StateError>()),
     );
   });
@@ -258,46 +277,45 @@ void main() {
     expect(await catalog.countJobLinesForPart(partId), 1);
   });
 
-  test('create general part with nested required refuses empty folders',
-      () async {
-    await expectLater(
-      catalog.createGeneralPart(
-        name: 'Unfiled',
-        requireNestedTaxonomy: true,
-      ),
-      throwsA(isA<StateError>()),
-    );
+  test(
+    'create general part with nested required refuses empty folders',
+    () async {
+      await expectLater(
+        catalog.createGeneralPart(name: 'Unfiled', requireNestedTaxonomy: true),
+        throwsA(isA<StateError>()),
+      );
 
-    final cat = await db.taxonomyDao.insertCategory(
-      id: newId(),
-      name: 'Outlet',
-      deviceId: deviceId,
-    );
-    final type = await db.taxonomyDao.insertStyle(
-      id: newId(),
-      categoryId: cat,
-      name: 'Decora',
-      deviceId: deviceId,
-    );
-    final variant = await db.taxonomyDao.insertType(
-      id: newId(),
-      styleId: type,
-      name: 'GFI',
-      deviceId: deviceId,
-    );
-    final id = await catalog.createGeneralPart(
-      name: 'Decora GFI',
-      categoryId: cat,
-      styleId: type,
-      typeId: variant,
-      requireNestedTaxonomy: true,
-    );
-    final part = await catalog.getPart(id);
-    expect(part!.name, 'Decora GFI');
-    expect(part.categoryId, cat);
-    expect(part.styleId, type);
-    expect(part.typeId, variant);
-  });
+      final cat = await db.taxonomyDao.insertCategory(
+        id: newId(),
+        name: 'Outlet',
+        deviceId: deviceId,
+      );
+      final type = await db.taxonomyDao.insertStyle(
+        id: newId(),
+        categoryId: cat,
+        name: 'Decora',
+        deviceId: deviceId,
+      );
+      final variant = await db.taxonomyDao.insertType(
+        id: newId(),
+        styleId: type,
+        name: 'GFI',
+        deviceId: deviceId,
+      );
+      final id = await catalog.createGeneralPart(
+        name: 'Decora GFI',
+        categoryId: cat,
+        styleId: type,
+        typeId: variant,
+        requireNestedTaxonomy: true,
+      );
+      final part = await catalog.getPart(id);
+      expect(part!.name, 'Decora GFI');
+      expect(part.categoryId, cat);
+      expect(part.styleId, type);
+      expect(part.typeId, variant);
+    },
+  );
 
   test('update part requires nested category type variant', () async {
     final id = await catalog.createGeneralPart(name: 'Unfiled');
@@ -428,162 +446,169 @@ void main() {
     );
   });
 
-  test('brand version before nested save still allows taxonomy update', () async {
-    final id = await catalog.createGeneralPart(name: 'Decora GFI');
-    final cat = await db.taxonomyDao.insertCategory(
-      id: newId(),
-      name: 'Outlet',
-      deviceId: deviceId,
-    );
-    final type = await db.taxonomyDao.insertStyle(
-      id: newId(),
-      categoryId: cat,
-      name: 'Decora',
-      deviceId: deviceId,
-    );
-    final variant = await db.taxonomyDao.insertType(
-      id: newId(),
-      styleId: type,
-      name: 'GFI',
-      deviceId: deviceId,
-    );
-    final brandId = await db.taxonomyDao.insertBrand(
-      id: newId(),
-      name: 'Leviton',
-      deviceId: deviceId,
-    );
-    await catalog.createBrandVersion(
-      partId: id,
-      brandId: brandId,
-      mpn: 'R50-W',
-      varianceName: 'White',
-      isMain: true,
-    );
-    final unsaved = await catalog.getPart(id);
-    expect(unsaved!.categoryId, isNull);
-    expect(unsaved.styleId, isNull);
-    expect(unsaved.typeId, isNull);
+  test(
+    'brand version before nested save still allows taxonomy update',
+    () async {
+      final id = await catalog.createGeneralPart(name: 'Decora GFI');
+      final cat = await db.taxonomyDao.insertCategory(
+        id: newId(),
+        name: 'Outlet',
+        deviceId: deviceId,
+      );
+      final type = await db.taxonomyDao.insertStyle(
+        id: newId(),
+        categoryId: cat,
+        name: 'Decora',
+        deviceId: deviceId,
+      );
+      final variant = await db.taxonomyDao.insertType(
+        id: newId(),
+        styleId: type,
+        name: 'GFI',
+        deviceId: deviceId,
+      );
+      final brandId = await db.taxonomyDao.insertBrand(
+        id: newId(),
+        name: 'Leviton',
+        deviceId: deviceId,
+      );
+      await catalog.createBrandVersion(
+        partId: id,
+        brandId: brandId,
+        mpn: 'R50-W',
+        varianceName: 'White',
+        isMain: true,
+      );
+      final unsaved = await catalog.getPart(id);
+      expect(unsaved!.categoryId, isNull);
+      expect(unsaved.styleId, isNull);
+      expect(unsaved.typeId, isNull);
 
-    await catalog.updatePart(
-      partId: id,
-      name: 'Decora GFI',
-      description: '',
-      uom: 'ea',
-      active: true,
-      categoryId: cat,
-      styleId: type,
-      typeId: variant,
-    );
-    final part = await catalog.getPart(id);
-    expect(part!.categoryId, cat);
-    expect(part.styleId, type);
-    expect(part.typeId, variant);
-    expect(await catalog.listBrandVersionsForPart(id), hasLength(1));
-  });
+      await catalog.updatePart(
+        partId: id,
+        name: 'Decora GFI',
+        description: '',
+        uom: 'ea',
+        active: true,
+        categoryId: cat,
+        styleId: type,
+        typeId: variant,
+      );
+      final part = await catalog.getPart(id);
+      expect(part!.categoryId, cat);
+      expect(part.styleId, type);
+      expect(part.typeId, variant);
+      expect(await catalog.listBrandVersionsForPart(id), hasLength(1));
+    },
+  );
 
-  test('deleted part keeps job-line name, variance, and supplier listings',
-      () async {
-    final dir = Directory.systemTemp.createTempSync('wp-del-splits-');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    final supplierId = await db.taxonomyDao.insertSupplier(
-      id: newId(),
-      name: 'Supply A',
-      deviceId: deviceId,
-    );
-    final brandId = await db.taxonomyDao.insertBrand(
-      id: newId(),
-      name: 'Leviton',
-      deviceId: deviceId,
-    );
-    final partId = await catalog.createGeneralPart(name: 'Decora outlet');
-    final bvId = await catalog.createBrandVersion(
-      partId: partId,
-      brandId: brandId,
-      mpn: 'LEV-W',
-      varianceName: 'White',
-      isMain: true,
-    );
-    await catalog.createSupplierListing(
-      brandVersionId: bvId,
-      supplierId: supplierId,
-      sku: 'SH-1',
-    );
-    final jobId = await db.jobsDao.insertJob(
-      id: newId(),
-      name: 'Panel',
-      deviceId: deviceId,
-    );
-    final lineId = await db.jobsDao.insertJobLine(
-      id: newId(),
-      jobId: jobId,
-      partId: partId,
-      brandVersionId: bvId,
-      neededQty: 10,
-      shopPullQty: 4,
-      deviceId: deviceId,
-    );
-    await db.jobsDao.replaceOrderSplits(
-      lineId: lineId,
-      splits: [(supplierId: supplierId, qty: 6)],
-      deviceId: deviceId,
-    );
+  test(
+    'deleted part keeps job-line name, variance, and supplier listings',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('wp-del-splits-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final supplierId = await db.taxonomyDao.insertSupplier(
+        id: newId(),
+        name: 'Supply A',
+        deviceId: deviceId,
+      );
+      final brandId = await db.taxonomyDao.insertBrand(
+        id: newId(),
+        name: 'Leviton',
+        deviceId: deviceId,
+      );
+      final partId = await catalog.createGeneralPart(name: 'Decora outlet');
+      final bvId = await catalog.createBrandVersion(
+        partId: partId,
+        brandId: brandId,
+        mpn: 'LEV-W',
+        varianceName: 'White',
+        isMain: true,
+      );
+      await catalog.createSupplierListing(
+        brandVersionId: bvId,
+        supplierId: supplierId,
+        sku: 'SH-1',
+      );
+      final jobId = await db.jobsDao.insertJob(
+        id: newId(),
+        name: 'Panel',
+        deviceId: deviceId,
+      );
+      final lineId = await db.jobsDao.insertJobLine(
+        id: newId(),
+        jobId: jobId,
+        partId: partId,
+        brandVersionId: bvId,
+        neededQty: 10,
+        shopPullQty: 4,
+        deviceId: deviceId,
+      );
+      await db.jobsDao.replaceOrderSplits(
+        lineId: lineId,
+        splits: [(supplierId: supplierId, qty: 6)],
+        deviceId: deviceId,
+      );
 
-    await catalog.deletePart(partId, root: dir);
+      await catalog.deletePart(partId, root: dir);
 
-    expect(await catalog.getPart(partId), isNull);
-    expect(await catalog.listBrandVersionsForPart(partId), isEmpty);
-    expect(await catalog.listingsForBrandVersion(bvId), isEmpty);
+      expect(await catalog.getPart(partId), isNull);
+      expect(await catalog.listBrandVersionsForPart(partId), isEmpty);
+      expect(await catalog.listingsForBrandVersion(bvId), isEmpty);
 
-    final named = await catalog.getPart(partId, includeDeleted: true);
-    expect(named!.name, 'Decora outlet');
-    expect(
-      (await catalog.listParts(activeOnly: false, includeDeleted: true))
-          .map((p) => p.id),
-      contains(partId),
-    );
-    final versions = await catalog.listBrandVersionsForPart(
-      partId,
-      includeDeleted: true,
-    );
-    expect(versions, hasLength(1));
-    expect(versions.first.id, bvId);
-    final listings = await catalog.listingsForBrandVersion(
-      bvId,
-      includeDeleted: true,
-    );
-    expect(listings.map((l) => l.supplierId), contains(supplierId));
+      final named = await catalog.getPart(partId, includeDeleted: true);
+      expect(named!.name, 'Decora outlet');
+      expect(
+        (await catalog.listParts(
+          activeOnly: false,
+          includeDeleted: true,
+        )).map((p) => p.id),
+        contains(partId),
+      );
+      final versions = await catalog.listBrandVersionsForPart(
+        partId,
+        includeDeleted: true,
+      );
+      expect(versions, hasLength(1));
+      expect(versions.first.id, bvId);
+      final listings = await catalog.listingsForBrandVersion(
+        bvId,
+        includeDeleted: true,
+      );
+      expect(listings.map((l) => l.supplierId), contains(supplierId));
 
-    final catalogTree = buildCatalogTree(await catalog.loadTreeSnapshot());
-    final pickerTree = buildCatalogTree(
-      await catalog.loadTreeSnapshot(activeOnly: true),
-    );
-    expect(_treeLabels(catalogTree), isNot(contains('Decora outlet')));
-    expect(_treeLabels(pickerTree), isNot(contains('Decora outlet')));
+      final catalogTree = buildCatalogTree(await catalog.loadTreeSnapshot());
+      final pickerTree = buildCatalogTree(
+        await catalog.loadTreeSnapshot(activeOnly: true),
+      );
+      expect(_treeLabels(catalogTree), isNot(contains('Decora outlet')));
+      expect(_treeLabels(pickerTree), isNot(contains('Decora outlet')));
 
-    final splits = await db.jobsDao.orderSplitsForLine(lineId);
-    expect(splits, hasLength(1));
-    expect(splits.first.supplierId, supplierId);
-    expect(splits.first.quantity, 6);
+      final splits = await db.jobsDao.orderSplitsForLine(lineId);
+      expect(splits, hasLength(1));
+      expect(splits.first.supplierId, supplierId);
+      expect(splits.first.quantity, 6);
 
-    final allowed = jobLineEditorSupplierIds(
-      listingSupplierIds: listings.map((l) => l.supplierId),
-      existingSplitSupplierIds: splits.map((s) => s.supplierId),
-      preserveExistingSplits: true,
-    );
-    expect(allowed, contains(supplierId));
+      final allowed = jobLineEditorSupplierIds(
+        listingSupplierIds: listings.map((l) => l.supplierId),
+        existingSplitSupplierIds: splits.map((s) => s.supplierId),
+        preserveExistingSplits: true,
+      );
+      expect(allowed, contains(supplierId));
 
-    await db.jobsDao.replaceOrderSplits(
-      lineId: lineId,
-      splits: [
-        for (final s in splits) (supplierId: s.supplierId, qty: s.quantity),
-      ],
-      deviceId: deviceId,
-    );
-    final saved = await db.jobsDao.orderSplitsForLine(lineId);
-    expect(saved, hasLength(1));
-    expect(saved.first.supplierId, supplierId);
-    expect(saved.first.quantity, 6);
-  });
+      await db.jobsDao.replaceOrderSplits(
+        lineId: lineId,
+        splits: [
+          for (final s in splits) (supplierId: s.supplierId, qty: s.quantity),
+        ],
+        deviceId: deviceId,
+      );
+      final saved = await db.jobsDao.orderSplitsForLine(lineId);
+      expect(saved, hasLength(1));
+      expect(saved.first.supplierId, supplierId);
+      expect(saved.first.quantity, 6);
+    },
+  );
 }
 
 Set<String> _treeLabels(List<CatalogTreeNode> nodes) {

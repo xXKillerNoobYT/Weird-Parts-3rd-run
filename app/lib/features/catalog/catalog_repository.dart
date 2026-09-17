@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../../core/new_id.dart';
 import '../../data/app_database.dart';
+import '../backup/backup_store.dart';
 import '../pin/pin_service.dart';
 import 'catalog_tree.dart';
 import 'part_photo_store.dart';
@@ -17,11 +18,10 @@ class CatalogRepository {
   Future<List<Part>> listParts({
     bool activeOnly = true,
     bool includeDeleted = false,
-  }) =>
-      _db.partsDao.listParts(
-        activeOnly: activeOnly,
-        includeDeleted: includeDeleted,
-      );
+  }) => _db.partsDao.listParts(
+    activeOnly: activeOnly,
+    includeDeleted: includeDeleted,
+  );
 
   Future<Part?> getPart(String partId, {bool includeDeleted = false}) =>
       _db.partsDao.getPart(partId, includeDeleted: includeDeleted);
@@ -29,20 +29,18 @@ class CatalogRepository {
   Future<List<BrandVersion>> listBrandVersionsForPart(
     String partId, {
     bool includeDeleted = false,
-  }) =>
-      _db.partsDao.listBrandVersionsForPart(
-        partId,
-        includeDeleted: includeDeleted,
-      );
+  }) => _db.partsDao.listBrandVersionsForPart(
+    partId,
+    includeDeleted: includeDeleted,
+  );
 
   Future<List<SupplierListing>> listingsForBrandVersion(
     String bvId, {
     bool includeDeleted = false,
-  }) =>
-      _db.partsDao.listingsForBrandVersion(
-        bvId,
-        includeDeleted: includeDeleted,
-      );
+  }) => _db.partsDao.listingsForBrandVersion(
+    bvId,
+    includeDeleted: includeDeleted,
+  );
 
   Future<CatalogTreeSnapshot> loadTreeSnapshot({bool activeOnly = false}) =>
       loadCatalogTreeSnapshot(_db, activeOnly: activeOnly);
@@ -54,18 +52,20 @@ class CatalogRepository {
     Directory? root,
   }) async {
     await _pin.requireUnlocked();
-    final part = await _db.partsDao.getPart(partId);
-    final previous = part?.photoPath;
-    final stored = await store.saveForPart(
-      partId: partId,
-      bytes: bytes,
-      root: root,
-    );
-    await _db.partsDao.setPhotoPath(partId, stored);
-    if (previous != null && previous.isNotEmpty && previous != stored) {
-      await store.deleteAt(previous, root: root);
-    }
-    return stored;
+    return BackupIo.waitAndRun(() async {
+      final part = await _db.partsDao.getPart(partId);
+      final previous = part?.photoPath;
+      final stored = await store.saveForPart(
+        partId: partId,
+        bytes: bytes,
+        root: root,
+      );
+      await _db.partsDao.setPhotoPath(partId, stored);
+      if (previous != null && previous.isNotEmpty && previous != stored) {
+        await store.deleteAt(previous, root: root);
+      }
+      return stored;
+    });
   }
 
   Future<void> clearPhoto(
@@ -74,12 +74,14 @@ class CatalogRepository {
     Directory? root,
   }) async {
     await _pin.requireUnlocked();
-    final part = await _db.partsDao.getPart(partId);
-    final existing = part?.photoPath;
-    await _db.partsDao.setPhotoPath(partId, null);
-    if (existing != null && existing.isNotEmpty) {
-      await store.deleteAt(existing, root: root);
-    }
+    await BackupIo.waitAndRun(() async {
+      final part = await _db.partsDao.getPart(partId);
+      final existing = part?.photoPath;
+      await _db.partsDao.setPhotoPath(partId, null);
+      if (existing != null && existing.isNotEmpty) {
+        await store.deleteAt(existing, root: root);
+      }
+    });
   }
 
   Future<String> createGeneralPart({
@@ -223,13 +225,15 @@ class CatalogRepository {
     Directory? root,
   }) async {
     await _pin.requireUnlocked();
-    final part = await _db.partsDao.getPart(partId);
-    await _db.partsDao.softDeletePart(partId);
-    final photo = part?.photoPath;
-    if (photo != null && photo.isNotEmpty) {
-      await store.deleteAt(photo, root: root);
-    }
-    await store.deleteAllForPart(partId, root: root);
+    await BackupIo.waitAndRun(() async {
+      final part = await _db.partsDao.getPart(partId);
+      await _db.partsDao.softDeletePart(partId);
+      final photo = part?.photoPath;
+      if (photo != null && photo.isNotEmpty) {
+        await store.deleteAt(photo, root: root);
+      }
+      await store.deleteAllForPart(partId, root: root);
+    });
   }
 
   /// Soft-deletes an empty category / type / variant folder.
