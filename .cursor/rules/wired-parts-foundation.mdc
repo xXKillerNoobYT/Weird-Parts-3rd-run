@@ -1,0 +1,32 @@
+---
+description: WiredPart foundation scope, local-first rules, and phase discipline
+alwaysApply: true
+---
+
+# Wired Parts / WiredPart — agent rules
+
+## Scope discipline
+
+- Build the **foundation** only: local-first Jobs + parts catalog (JPO), PIN-gated catalog edits, Drift/SQLite.
+- End-goal drafts live in `docs/end-goal/` — use for direction, **do not** implement full WiredPart modules (warehouse ledger, Hats UI, chat, fleet, MCP, cloud) until the current roadmap phase calls for them.
+- Track progress on `roadmap.md`. Prefer the active phase over speculative future work.
+
+## Architecture hard rules
+
+- **Local-first**: no accounts or central server required for foundation use.
+- Every device is a complete working copy; sync is user-initiated later (not Phase 1–2).
+- **Backup ≠ sync**. Never silently discard user data.
+- Catalog writes go through the **shared shop PIN** gate (`PinService` / `PinGate`).
+- `AppSettings` (PIN hash, etc.) is **local-only** until Phase 5 prep — do not invent sync for settings early.
+
+## Stack
+
+- Flutter app lives under `app/`.
+- Persistence: **Drift** + SQLite. Sync metadata (`revision`, `modifiedAt`, `deletedAt` tombstones) on syncable rows — no separate change-log table in Phase 1.
+- After schema/DAO changes: `dart run build_runner build --delete-conflicting-outputs` from `app/`.
+
+## Product model reminders
+
+- **General Part** is default identity; brand versions and supplier listings are optional.
+- Job lines track needed / shop-pull separately from **order splits** (supplier+qty rows).
+- Soft-delete via tombstones; prefer soft remove over hard delete for syncable entities.
