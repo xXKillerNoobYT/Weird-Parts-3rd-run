@@ -98,13 +98,17 @@ class NearbyWifiNetwork {
       uri.port,
       sourceAddress: bindAddress,
     );
-    final ready = task.socket.then(_bindStream);
+    final ready = task.socket.then(
+      (socket) => _bindStream(socket, outgoingPeer: uri.host),
+    );
     return ConnectionTask.fromSocket(ready, task.cancel);
   }
 
-  Socket _bindStream(Socket socket) {
+  Socket _bindStream(Socket socket, {String? outgoingPeer}) {
     try {
-      if (socket.address.address != address ||
+      if (socket.address.address != (outgoingPeer ?? address) ||
+          (outgoingPeer != null &&
+              socket.remoteAddress.address != outgoingPeer) ||
           !allowsPeer(socket.remoteAddress.address)) {
         throw const NearbyException('Wi-Fi changed. Open Nearby again.');
       }
