@@ -49,6 +49,7 @@ dependencies:
   multicast_dns: ^0.3.2
 
 dev_dependencies:
+  path_provider_platform_interface: ^2.1.3
   flutter_test:
     sdk: flutter
 
