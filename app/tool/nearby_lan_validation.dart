@@ -134,6 +134,12 @@ Future<void> seedValidationShop(
       );
     }
 
+    await related('jobs', 'deleted-job', {
+      'name': 'Synthetic deleted job',
+      'modified_at': 1700000060,
+      'deleted_at': 1700000060,
+      'revision': 7,
+    });
     await related('devices', 'device', {'name': 'Synthetic compatible device'});
     await related('brands', 'brand', {'name': 'Synthetic brand'});
     await related('suppliers', 'supplier', {'name': 'Synthetic supplier'});

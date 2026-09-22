@@ -157,6 +157,39 @@ class NearbyController {
         return;
       }
       final advertiseIps = ips.isNotEmpty ? ips : [server.address.address];
+      _peerSub = discovery.peers.listen(
+        (peers) {
+          if (generation != _lifecycle || _state.phase == NearbyPhase.starting) {
+            return;
+          }
+          final filtered = peers.where((p) => p.deviceId != deviceId).toList();
+          if (_state.phase == NearbyPhase.paired ||
+              _state.phase == NearbyPhase.pairing ||
+              _state.phase == NearbyPhase.offering ||
+              _state.phase == NearbyPhase.transferring) {
+            _emit(_state.copyWith(peers: filtered));
+            return;
+          }
+          if (_state.phase == NearbyPhase.success ||
+              _state.phase == NearbyPhase.failed) {
+            return;
+          }
+          final looking = filtered.isEmpty
+              ? 'Looking for Wired Parts on this Wi‑Fi. Open More → Nearby on the other device. If Windows or this Mac asks, allow Wired Parts on the network.'
+              : 'Tap a device to pair. You will both see a 6-digit code.';
+          _emit(
+            _state.copyWith(
+              phase: NearbyPhase.looking,
+              peers: filtered,
+              status: looking,
+              error: null,
+            ),
+          );
+        },
+        onError: (Object error) {
+          unawaited(_discoveryFailed(generation, error));
+        },
+      );
       _discoveryOwner = generation;
       await discovery.start(
         deviceId: deviceId,
@@ -169,32 +202,6 @@ class NearbyController {
         await _closeServer(server, wifi);
         return;
       }
-      _peerSub = discovery.peers.listen((peers) {
-        if (generation != _lifecycle) return;
-        final filtered = peers.where((p) => p.deviceId != deviceId).toList();
-        if (_state.phase == NearbyPhase.paired ||
-            _state.phase == NearbyPhase.pairing ||
-            _state.phase == NearbyPhase.offering ||
-            _state.phase == NearbyPhase.transferring) {
-          _emit(_state.copyWith(peers: filtered));
-          return;
-        }
-        if (_state.phase == NearbyPhase.success ||
-            _state.phase == NearbyPhase.failed) {
-          return;
-        }
-        final looking = filtered.isEmpty
-            ? 'Looking for Wired Parts on this Wi‑Fi. Open More → Nearby on the other device. If Windows or this Mac asks, allow Wired Parts on the network.'
-            : 'Tap a device to pair. You will both see a 6-digit code.';
-        _emit(
-          _state.copyWith(
-            phase: NearbyPhase.looking,
-            peers: filtered,
-            status: looking,
-            error: null,
-          ),
-        );
-      });
       _emit(
         NearbyViewState(
           phase: NearbyPhase.looking,
@@ -216,6 +223,16 @@ class NearbyController {
           'Could not listen on this Wi-Fi. Allow Wired Parts through the firewall and try again. $e',
         );
       }
+    }
+  }
+
+  Future<void> _discoveryFailed(int generation, Object error) async {
+    if (generation != _lifecycle || _disposed) return;
+    await stop();
+    if (!_disposed && _lifecycle == generation + 1) {
+      _fail(
+        'Nearby discovery stopped. Check local network access and reopen Nearby. $error',
+      );
     }
   }
 

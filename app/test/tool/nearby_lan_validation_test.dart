@@ -195,6 +195,16 @@ void main() {
       await seedValidationShop(db, workspace!);
       workspace!.markInitialized();
       final before = await validationReceipt(db, workspace!);
+      expect((before['jobs'] as List).single['id'], 'persist-receiver-job');
+      final tombstone = ((before['content'] as Map)['jobs'] as List)
+          .singleWhere((row) => row['id'] == 'persist-receiver-deleted-job');
+      expect(tombstone['name'], 'Synthetic deleted job');
+      expect(tombstone['origin_device_id'], 'lan-persist-receiver');
+      expect(tombstone['created_at'], 1700000000);
+      expect(tombstone['modified_at'], 1700000060);
+      expect(tombstone['deleted_at'], 1700000060);
+      expect(tombstone['revision'], 7);
+
       await db.jobsDao.insertJob(
         id: 'copied-job',
         name: 'received after seed',
@@ -224,6 +234,17 @@ void main() {
       expect(after['typeIds'], ['persist-receiver-type']);
       expect(after['variantIds'], ['persist-receiver-variant']);
       final content = after['content'] as Map;
+      expect(
+        (content['jobs'] as List).singleWhere(
+          (row) => row['id'] == 'persist-receiver-deleted-job',
+        ),
+        tombstone,
+      );
+      expect(
+        (after['jobs'] as List).map((row) => row['id']),
+        isNot(contains('persist-receiver-deleted-job')),
+      );
+
       expect(
         (content['jobs'] as List).firstWhere(
           (row) => row['id'] == 'persist-receiver-job',

@@ -5,18 +5,18 @@ This target invokes the production UI after redirecting every path-provider dire
 Build from `app` with the same run identifier on both hosts. Use a new identifier for each fresh experiment. Roles are exactly `sender` and `receiver`.
 
 ```sh
-flutter build macos --debug -t tool/nearby_lan_validation.dart --dart-define=LAN_VALIDATION_RUN=house-lan-20260922a --dart-define=LAN_VALIDATION_ROLE=sender
+flutter build macos --debug -t tool/nearby_lan_validation.dart --dart-define=LAN_VALIDATION_RUN=house-lan-20260922b --dart-define=LAN_VALIDATION_ROLE=sender
 ```
 
 ```powershell
-flutter build windows --debug -t tool/nearby_lan_validation.dart --dart-define=LAN_VALIDATION_RUN=house-lan-20260922a --dart-define=LAN_VALIDATION_ROLE=receiver
+flutter build windows --debug -t tool/nearby_lan_validation.dart --dart-define=LAN_VALIDATION_RUN=house-lan-20260922b --dart-define=LAN_VALIDATION_ROLE=receiver
 ```
 
 On Mac, copy the built app to the designated synthetic test location and use the independently verified sandbox identity `com.weirdtoo.wiredparts.lanvalidation.mac20260922`. Verify that copied app's signature, bundle identifier and sandbox/network entitlements before launch. Do not launch a build from the normal application location. On Windows, launch the validation executable from its dedicated build location. Record command, exit status, source revision, executable path, network interface and local LAN address per host.
 
 The runner derives its root from the native OS temporary directory plus `wired-parts-lan-<run>-<role>`. It accepts no custom storage root. It refuses pre-existing directories without a matching initialized ownership marker, interrupted initialization and symlinks. It acquires a sidecar process lock before inspecting or initializing the root and holds it while the app runs. The sidecar remains for safe lock identity across launches. Do not delete roots to retry. Use a fresh run identifier. A stopped app's original run/role can be relaunched to read the same fixture. Keep the same native bundle identity across launches. OS temporary storage is suitable only for this bounded validation, not long-term archives.
 
-Each role starts with its own synthetic job with a job number, Category, Type, Variant, part, brand, supplier, supplier listing, job line, order split, compatibility relation and locally generated PNG. Fixture IDs include the role, so receiver replacement is distinguishable from a merge. The fixed role-specific device ID remains local. The ownership marker and receipts live outside the shop's support directory and survive a shop replacement.
+Each role starts with its own synthetic job with a job number, a soft-deleted job, Category, Type, Variant, part, brand, supplier, supplier listing, job line, order split, compatibility relation and locally generated PNG. The deleted job retains its deletion timestamp, revision and origin-device provenance in receipt content while staying out of the active Jobs list. Fixture IDs include the role, so receiver replacement is distinguishable from a merge. The fixed role-specific device ID remains local. The ownership marker and receipts live outside the shop's support directory and survive a shop replacement.
 
 1. Launch both validation builds. Record their printed synthetic roots and initial receipts. In the normal application UI, set a synthetic catalog PIN on each device. Do not record PIN values or hashes. Close and relaunch both apps to obtain PIN-configured baseline receipts and clear the in-memory unlock grant.
 2. Confirm each screen shows its role-specific synthetic shop. Open More, then Nearby. Verify discovery on the house Wi-Fi using UDP 41000. Compare the six-digit Match code on both screens manually. Record only that the comparison passed, never the code or PIN.

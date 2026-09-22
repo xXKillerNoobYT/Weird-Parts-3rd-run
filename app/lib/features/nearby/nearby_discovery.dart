@@ -105,12 +105,32 @@ class LanNearbyDiscovery implements NearbyDiscovery {
       _running = true;
       _socket = socket;
       final listeningSocket = socket;
-      socket.listen((event) {
-        if (generation != _generation || event != RawSocketEvent.read) return;
-        final dg = listeningSocket.receive();
-        if (dg == null) return;
-        _onDatagram(dg);
-      });
+      socket.listen(
+        (event) {
+          if (generation != _generation) return;
+          if (event == RawSocketEvent.closed ||
+              event == RawSocketEvent.readClosed) {
+            _socketFailed(
+              generation,
+              const NearbyException('Discovery socket closed'),
+            );
+            return;
+          }
+          if (event != RawSocketEvent.read) return;
+          final dg = listeningSocket.receive();
+          if (dg == null) return;
+          _onDatagram(dg);
+        },
+        onError: (Object error, StackTrace stack) {
+          _socketFailed(generation, error, stack);
+        },
+        onDone: () {
+          _socketFailed(
+            generation,
+            const NearbyException('Discovery socket closed'),
+          );
+        },
+      );
     } catch (e) {
       socket?.close();
       if (generation != _generation) return;
@@ -130,6 +150,13 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     _sendBeacon();
     _sendWho();
     unawaited(_startMdnsBrowse(generation, network, iface));
+  }
+
+  void _socketFailed(int generation, Object error, [StackTrace? stack]) {
+    if (generation != _generation || !_running) return;
+    final stopping = stop();
+    _peerCtrl.addError(error, stack);
+    unawaited(stopping);
   }
 
   @override
@@ -286,7 +313,15 @@ class LanNearbyDiscovery implements NearbyDiscovery {
               },
         );
     try {
-      await client.start(interfacesFactory: (_) async => [iface]);
+      await client.start(
+        interfacesFactory: (_) async => [iface],
+        onError: (Object error) {
+          client.stop();
+          for (final socket in sockets) {
+            socket.close();
+          }
+        },
+      );
       if (generation != _generation) {
         client.stop();
         for (final socket in sockets) {

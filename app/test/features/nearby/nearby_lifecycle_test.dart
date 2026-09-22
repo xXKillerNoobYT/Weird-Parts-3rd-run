@@ -42,7 +42,7 @@ class _Discovery implements NearbyDiscovery {
 }
 
 NearbyController _controller(
-  _Discovery discovery, {
+  NearbyDiscovery discovery, {
   bool native = false,
   Future<List<String>> Function()? localIps,
   Future<NearbyWifiNetwork> Function()? readNetwork,
@@ -71,10 +71,13 @@ class _Network extends NearbyWifiNetwork {
     : super(name: 'test', index: 1, address: '192.168.1.2', prefixLength: 24);
   final Future<NetworkInterface>? interfaceReady;
   int listens = 0;
+  int? port;
   @override
-  Future<HttpServer> listen() {
+  Future<HttpServer> listen() async {
     listens++;
-    return HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    port = server.port;
+    return server;
   }
 
   @override
@@ -84,7 +87,9 @@ class _Network extends NearbyWifiNetwork {
 }
 
 class _Socket extends Stream<RawSocketEvent> implements RawDatagramSocket {
+  final events = StreamController<RawSocketEvent>();
   bool closed = false;
+  bool failFirstSend = false;
   int sends = 0;
   @override
   bool broadcastEnabled = false;
@@ -94,13 +99,21 @@ class _Socket extends Stream<RawSocketEvent> implements RawDatagramSocket {
   int multicastHops = 1;
   @override
   void close() {
+    if (closed) return;
     closed = true;
+    unawaited(events.close());
   }
 
   @override
   int send(List<int> buffer, InternetAddress address, int port) {
     if (closed) throw StateError('Closed');
     sends++;
+    if (failFirstSend && sends == 1) {
+      scheduleMicrotask(
+        () => events.addError(const SocketException('Synthetic send failure')),
+      );
+      return 0;
+    }
     return buffer.length;
   }
 
@@ -112,7 +125,7 @@ class _Socket extends Stream<RawSocketEvent> implements RawDatagramSocket {
     Function? onError,
     void Function()? onDone,
     bool? cancelOnError,
-  }) => const Stream<RawSocketEvent>.empty().listen(
+  }) => events.stream.listen(
     onData,
     onError: onError,
     onDone: onDone,
@@ -127,6 +140,7 @@ class _Mdns extends MDnsClient {
   final started = Completer<void>();
   int stops = 0;
   int lookups = 0;
+  Function? socketError;
   @override
   Future<void> start({
     InternetAddress? listenAddress,
@@ -135,6 +149,7 @@ class _Mdns extends MDnsClient {
     InternetAddress? mDnsAddress,
     Function? onError,
   }) {
+    socketError = onError;
     started.complete();
     return ready.future;
   }
@@ -167,6 +182,86 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  for (final failure in ['error', 'closed', 'done', 'startup']) {
+    test(
+      'UDP $failure failure closes controller resources and leaves failed state',
+      () async {
+        final socket = _Socket()..failFirstSend = failure == 'startup';
+        final network = _Network();
+        final mdns = _Mdns();
+        final discovery = LanNearbyDiscovery(
+          readNetwork: () async => network,
+          bindSocket: (_) async => socket,
+          createMdnsClient: () => mdns,
+        );
+        final nearby = _controller(
+          discovery,
+          native: true,
+          readNetwork: () async => network,
+        );
+        addTearDown(nearby.dispose);
+        final failedStates = <NearbyViewState>[];
+        final subscription = nearby.states.listen((state) {
+          if (state.phase == NearbyPhase.failed) failedStates.add(state);
+        });
+        addTearDown(subscription.cancel);
+        final failed = nearby.states.firstWhere(
+          (state) => state.phase == NearbyPhase.failed,
+        );
+        await nearby.start();
+        if (failure == 'error') {
+          socket.events.addError(
+            const SocketException('Synthetic send failure'),
+          );
+        }
+        if (failure == 'closed') socket.events.add(RawSocketEvent.closed);
+        if (failure == 'done') await socket.events.close();
+        await failed.timeout(const Duration(seconds: 2));
+        expect(nearby.state.phase, NearbyPhase.failed);
+        expect(nearby.state.error, contains('Nearby discovery stopped'));
+        expect(socket.closed, isTrue);
+        await expectLater(
+          Socket.connect('127.0.0.1', network.port!),
+          throwsA(isA<SocketException>()),
+        );
+        mdns.ready.complete();
+        await Future<void>.delayed(Duration.zero);
+        final sends = socket.sends;
+        await Future<void>.delayed(const Duration(milliseconds: 2100));
+        expect(socket.sends, sends);
+        expect(failedStates, hasLength(1));
+      },
+    );
+  }
+
+  test(
+    'normal discovery stop and optional mDNS failure do not report UDP failure',
+    () async {
+      final socket = _Socket();
+      final mdns = _Mdns();
+      final discovery = LanNearbyDiscovery(
+        readNetwork: () async => _Network(),
+        bindSocket: (_) async => socket,
+        createMdnsClient: () => mdns,
+      );
+      final errors = <Object>[];
+      final subscription = discovery.peers.listen((_) {}, onError: errors.add);
+      addTearDown(subscription.cancel);
+      addTearDown(discovery.stop);
+      await discover(discovery);
+      mdns.ready.completeError(
+        const SocketException('Synthetic optional mDNS failure'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(socket.closed, isFalse);
+      expect(errors, isEmpty);
+      await discovery.stop();
+      await Future<void>.delayed(Duration.zero);
+      expect(socket.closed, isTrue);
+      expect(errors, isEmpty);
+    },
+  );
 
   for (final dispose in [false, true]) {
     test(
@@ -211,6 +306,27 @@ void main() {
       },
     );
   }
+
+  test('optional mDNS socket error closes only mDNS', () async {
+    final socket = _Socket();
+    final mdns = _Mdns();
+    final discovery = LanNearbyDiscovery(
+      readNetwork: () async => _Network(),
+      bindSocket: (_) async => socket,
+      createMdnsClient: () => mdns,
+    );
+    addTearDown(discovery.stop);
+    final errors = <Object>[];
+    final subscription = discovery.peers.listen((_) {}, onError: errors.add);
+    addTearDown(subscription.cancel);
+    await discover(discovery);
+    mdns.ready.complete();
+    await Future<void>.delayed(Duration.zero);
+    mdns.socketError!(const SocketException('Synthetic mDNS send failure'));
+    expect(mdns.stops, 1);
+    expect(socket.closed, isFalse);
+    expect(errors, isEmpty);
+  });
 
   test('stop during address enumeration never starts discovery', () async {
     final addresses = Completer<List<String>>();
