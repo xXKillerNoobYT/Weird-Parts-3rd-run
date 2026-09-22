@@ -100,6 +100,7 @@ class NearbyController {
   _Session? _session;
   Completer<bool>? _hostMatch;
   Completer<bool>? _offerDecision;
+  _AcceptedOffer? _acceptedOffer;
   Timer? _pairTimer;
 
   Future<void> start() async {
@@ -136,7 +137,8 @@ class NearbyController {
       );
       _peerSub = discovery.peers.listen((peers) {
         final filtered = peers.where((p) => p.deviceId != deviceId).toList();
-        if (_state.phase == NearbyPhase.pairing ||
+        if (_state.phase == NearbyPhase.paired ||
+            _state.phase == NearbyPhase.pairing ||
             _state.phase == NearbyPhase.offering ||
             _state.phase == NearbyPhase.transferring) {
           _emit(_state.copyWith(peers: filtered));
@@ -151,7 +153,7 @@ class NearbyController {
             : 'Tap a device to pair. You will both see a 6-digit code.';
         _emit(
           _state.copyWith(
-            phase: filtered.isEmpty ? NearbyPhase.looking : NearbyPhase.looking,
+            phase: NearbyPhase.looking,
             peers: filtered,
             status: looking,
             error: null,
@@ -660,7 +662,20 @@ class NearbyController {
       await _writeJson(request, {'error': 'Pair again, then send'});
       return;
     }
+    final session = _session!;
     final body = await _readJson(request);
+    if (!identical(_session, session)) {
+      request.response.statusCode = HttpStatus.unauthorized;
+      await _writeJson(request, {'error': 'Pair again, then send'});
+      return;
+    }
+    if (_offerDecision != null || _state.phase == NearbyPhase.transferring) {
+      request.response.statusCode = HttpStatus.conflict;
+      await _writeJson(request, {
+        'error': 'Finish the current shop copy first',
+      });
+      return;
+    }
     final offer = NearbyOffer(
       sourceDeviceId: body['sourceDeviceId'] as String? ?? '',
       sourceName: body['sourceName'] as String? ?? 'Other device',
@@ -669,12 +684,15 @@ class NearbyController {
       photos: body['photos'] as int? ?? 0,
       bytes: body['bytes'] as int? ?? 0,
     );
-    if (offer.sourceDeviceId.isEmpty) {
+    if (offer.sourceDeviceId != session.peer.deviceId ||
+        offer.bytes <= 0 ||
+        offer.bytes > kMaxNearbyTransferBytes) {
       request.response.statusCode = HttpStatus.badRequest;
       await _writeJson(request, {'error': 'Damaged shop offer'});
       return;
     }
-    _offerDecision = Completer<bool>();
+    final decision = Completer<bool>();
+    _offerDecision = decision;
     _emit(
       NearbyViewState(
         phase: NearbyPhase.offering,
@@ -687,17 +705,23 @@ class NearbyController {
             '${offer.sourceName} wants to send their shop (${offer.summary}). Accept replaces catalog, jobs, and photos on this device.',
       ),
     );
-    final accepted = await _offerDecision!.future.timeout(
+    final accepted = await decision.future.timeout(
       const Duration(minutes: 2),
       onTimeout: () => false,
     );
-    if (!accepted) {
+    if (identical(_offerDecision, decision)) _offerDecision = null;
+    if (!accepted || !identical(_session, session)) {
       request.response.statusCode = HttpStatus.forbidden;
       await _writeJson(request, {
         'error': 'They declined, or accept timed out. Nothing was copied.',
       });
       return;
     }
+    _acceptedOffer = _AcceptedOffer(
+      offer: offer,
+      token: session.token,
+      expiresAt: DateTime.now().add(const Duration(minutes: 2)),
+    );
     await _writeJson(request, {'ok': true});
   }
 
@@ -707,7 +731,26 @@ class NearbyController {
       await _writeJson(request, {'error': 'Pair again, then send'});
       return;
     }
+    final accepted = _acceptedOffer;
+    if (accepted == null ||
+        accepted.claimed ||
+        accepted.token != _bearer(request) ||
+        !DateTime.now().isBefore(accepted.expiresAt)) {
+      request.response.statusCode = HttpStatus.forbidden;
+      await _writeJson(request, {
+        'error': 'Accept this shop before receiving it',
+      });
+      return;
+    }
+    accepted.claimed = true;
     final length = request.contentLength;
+    if (length != accepted.offer.bytes) {
+      request.response.statusCode = HttpStatus.badRequest;
+      await _writeJson(request, {
+        'error': 'Transfer does not match the accepted shop',
+      });
+      return;
+    }
     if (length > kMaxNearbyTransferBytes) {
       request.response.statusCode = HttpStatus.requestEntityTooLarge;
       await _writeJson(request, {'error': 'Shop is too large to send this way'});
@@ -743,6 +786,23 @@ class NearbyController {
     final token = _bearer(request) ?? _session?.token ?? '';
     try {
       final decrypted = await _codec.decrypt(Uint8List.fromList(bytes), token);
+      final offer = decrypted.offer;
+      if (offer.sourceDeviceId != accepted.offer.sourceDeviceId ||
+          offer.sourceName != accepted.offer.sourceName ||
+          offer.jobs != accepted.offer.jobs ||
+          offer.parts != accepted.offer.parts ||
+          offer.photos != accepted.offer.photos ||
+          got != accepted.offer.bytes) {
+        throw const NearbyException(
+          'Transfer does not match the accepted shop',
+        );
+      }
+      if (!identical(_acceptedOffer, accepted)) {
+        request.response.statusCode = HttpStatus.forbidden;
+        await _writeJson(request, {'error': 'Shop acceptance was cancelled'});
+        return;
+      }
+      _acceptedOffer = null;
       await applyPayload(decrypted.payload);
       _emit(
         NearbyViewState(
@@ -881,6 +941,7 @@ class NearbyController {
   }
 
   void _failPending({required bool cancel}) {
+    _acceptedOffer = null;
     _pairTimer?.cancel();
     _pairTimer = null;
     if (cancel) _pending?.rejected = true;
@@ -1007,4 +1068,17 @@ extension on NearbyViewState {
       pairedPeer: pairedPeer ?? this.pairedPeer,
     );
   }
+}
+
+class _AcceptedOffer {
+  _AcceptedOffer({
+    required this.offer,
+    required this.token,
+    required this.expiresAt,
+  });
+
+  final NearbyOffer offer;
+  final String token;
+  final DateTime expiresAt;
+  bool claimed = false;
 }
