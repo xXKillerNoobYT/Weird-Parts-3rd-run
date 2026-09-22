@@ -37,51 +37,60 @@ class ValidationWorkspace extends PathProviderPlatform {
     final root = Directory(
       p.join(temp.path, 'wired-parts-lan-$run-${role.name}'),
     );
-    final type = FileSystemEntity.typeSync(root.path, followLinks: false);
-    final marker = File(p.join(root.path, 'validation-owner.json'));
-    var initialized = false;
-    if (type != FileSystemEntityType.notFound) {
-      if (type != FileSystemEntityType.directory ||
-          FileSystemEntity.typeSync(marker.path, followLinks: false) !=
-              FileSystemEntityType.file) {
-        throw StateError('Refusing unowned validation directory');
-      }
-      final owner = jsonDecode(marker.readAsStringSync());
-      if (owner is! Map ||
-          owner['format'] != 1 ||
-          owner['run'] != run ||
-          owner['role'] != role.name ||
-          owner['root'] != root.path ||
-          owner['initialized'] != true) {
-        throw StateError(
-          'Validation ownership mismatch or interrupted initialization',
+    final claim = File('${root.path}.lock');
+    final claimType = FileSystemEntity.typeSync(claim.path, followLinks: false);
+    if (claimType != FileSystemEntityType.notFound &&
+        claimType != FileSystemEntityType.file) {
+      throw StateError('Refusing non-file validation lock');
+    }
+    final heldLock = claim.openSync(mode: FileMode.append);
+    try {
+      heldLock.lockSync(FileLock.exclusive);
+      final type = FileSystemEntity.typeSync(root.path, followLinks: false);
+      final marker = File(p.join(root.path, 'validation-owner.json'));
+      var initialized = false;
+      if (type != FileSystemEntityType.notFound) {
+        if (type != FileSystemEntityType.directory ||
+            FileSystemEntity.typeSync(marker.path, followLinks: false) !=
+                FileSystemEntityType.file) {
+          throw StateError('Refusing unowned validation directory');
+        }
+        final owner = jsonDecode(marker.readAsStringSync());
+        if (owner is! Map ||
+            owner['format'] != 1 ||
+            owner['run'] != run ||
+            owner['role'] != role.name ||
+            owner['root'] != root.path ||
+            owner['initialized'] != true) {
+          throw StateError(
+            'Validation ownership mismatch or interrupted initialization',
+          );
+        }
+        initialized = true;
+        for (final entity in root.listSync(
+          recursive: true,
+          followLinks: false,
+        )) {
+          if (FileSystemEntity.typeSync(entity.path, followLinks: false) ==
+              FileSystemEntityType.link) {
+            throw StateError('Refusing symlink in validation directory');
+          }
+        }
+      } else {
+        root.createSync();
+        marker.writeAsStringSync(
+          jsonEncode({
+            'format': 1,
+            'run': run,
+            'role': role.name,
+            'root': root.path,
+            'initialized': false,
+          }),
+          flush: true,
         );
       }
-      initialized = true;
-      for (final entity in root.listSync(recursive: true, followLinks: false)) {
-        if (FileSystemEntity.typeSync(entity.path, followLinks: false) ==
-            FileSystemEntityType.link) {
-          throw StateError('Refusing symlink in validation directory');
-        }
-      }
-    } else {
-      root.createSync();
-      marker.writeAsStringSync(
-        jsonEncode({
-          'format': 1,
-          'run': run,
-          'role': role.name,
-          'root': root.path,
-          'initialized': false,
-        }),
-        flush: true,
-      );
-    }
-    final workspace = ValidationWorkspace._(root, run, role, initialized);
-    workspace._heldLock = File(p.join(root.path, 'validation.lock'))
-        .openSync(mode: FileMode.append);
-    try {
-      workspace._heldLock!.lockSync(FileLock.exclusive);
+      final workspace = ValidationWorkspace._(root, run, role, initialized);
+      workspace._heldLock = heldLock;
       for (final name in [
         'support',
         'documents',
@@ -93,11 +102,11 @@ class ValidationWorkspace extends PathProviderPlatform {
       ]) {
         Directory(p.join(root.path, name)).createSync();
       }
+      return workspace;
     } catch (_) {
-      workspace.close();
+      heldLock.closeSync();
       rethrow;
     }
-    return workspace;
   }
 
   void markInitialized() {

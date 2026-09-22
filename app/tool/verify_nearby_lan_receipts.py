@@ -3,23 +3,33 @@ import json
 from pathlib import Path
 
 
+class ValidationError(ValueError):
+    pass
+
+
+def require(condition, message):
+    if not condition:
+        raise ValidationError(message)
+
+
 def verify(source_before, source_after, receiver_before, receiver_after):
     receipts = [source_before, source_after, receiver_before, receiver_after]
-    assert len({r['run'] for r in receipts}) == 1, 'Run identifiers differ'
-    assert source_before['localRole'] == source_after['localRole'] == 'sender'
-    assert receiver_before['localRole'] == receiver_after['localRole'] == 'receiver'
-    assert all(r['pinConfigured'] for r in receipts), 'Set synthetic PINs before collecting acceptance receipts'
+    require(all(r.get('format') == 2 for r in receipts), 'Unsupported receipt format')
+    require(len({r['run'] for r in receipts}) == 1, 'Run identifiers differ')
+    require(source_before['localRole'] == source_after['localRole'] == 'sender', 'Receipt metadata differs')
+    require(receiver_before['localRole'] == receiver_after['localRole'] == 'receiver', 'Receipt metadata differs')
+    require(all(r['pinConfigured'] for r in receipts), 'Set synthetic PINs before collecting acceptance receipts')
     for before, after in [(source_before, source_after), (receiver_before, receiver_after)]:
-        assert before['root'] == after['root'], 'Restart changed the storage root'
-        assert before['expectedLocalDeviceId'] == after['expectedLocalDeviceId']
-        assert before['deviceIds'] == after['deviceIds'] == [before['expectedLocalDeviceId']], 'Local identity changed'
-    fields = ['fixture', 'jobs', 'parts', 'categoryIds', 'typeIds', 'variantIds', 'photos']
+        require(before['root'] == after['root'], 'Restart changed the storage root')
+        require(before['expectedLocalDeviceId'] == after['expectedLocalDeviceId'], 'Receipt metadata differs')
+        require(before['deviceIds'] == after['deviceIds'] == [before['expectedLocalDeviceId']], 'Local identity changed')
+    fields = ['content', 'fixture', 'jobs', 'parts', 'categoryIds', 'typeIds', 'variantIds', 'photos']
     for field in fields:
-        assert source_before[field] == source_after[field], f'Sender changed: {field}'
-        assert source_before[field] == receiver_after[field], f'Receiver differs: {field}'
-    assert receiver_before['fixture'] != receiver_after['fixture'], 'Receiver sentinel was not replaced'
-    assert source_before['photos'], 'Photo evidence is missing'
-    assert source_before['jobs'] and source_before['parts'], 'Shop evidence is missing'
+        require(source_before[field] == source_after[field], f'Sender changed: {field}')
+        require(source_before[field] == receiver_after[field], f'Receiver differs: {field}')
+    require(receiver_before['fixture'] != receiver_after['fixture'], 'Receiver sentinel was not replaced')
+    require(source_before['photos'], 'Photo evidence is missing')
+    require(source_before['jobs'] and source_before['parts'], 'Shop evidence is missing')
     return {'result': 'PASS', 'run': source_before['run'],
             'verified': 'persisted shop replacement, unchanged sender content, photo hashes and receiver identity',
             'notVerified': 'house-LAN route, both-screen code comparison and PIN prompts require operator evidence'}

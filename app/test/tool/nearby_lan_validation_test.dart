@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -95,6 +96,66 @@ void main() {
   );
 
   test(
+    'competing process cannot initialize or rewrite a locked workspace',
+    () async {
+      for (final initialized in [false, true]) {
+        final run = initialized ? 'existing' : 'new';
+        final root = Directory(
+          p.join(temp.path, 'wired-parts-lan-$run-sender'),
+        );
+        final marker = File(p.join(root.path, 'validation-owner.json'));
+        if (initialized) {
+          workspace = ValidationWorkspace.open(
+            run: run,
+            role: ValidationRole.sender,
+            temporaryDirectory: temp,
+          );
+          workspace!.markInitialized();
+          workspace!.close();
+        }
+        final before = initialized ? marker.readAsStringSync() : null;
+        final child = await Process.start(
+          Platform.isWindows ? 'python' : 'python3',
+          [
+            '-u',
+            '-c',
+            "import os,sys; f=open(sys.argv[1], 'a+b'); "
+                "exec('import msvcrt; msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)' if os.name == 'nt' else 'import fcntl; fcntl.lockf(f, fcntl.LOCK_EX)'); "
+                "print('locked', flush=True); sys.stdin.read()",
+            '${root.path}.lock',
+          ],
+        );
+        try {
+          expect(
+            await child.stdout
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())
+                .first
+                .timeout(const Duration(seconds: 10)),
+            'locked',
+          );
+          expect(
+            () => ValidationWorkspace.open(
+              run: run,
+              role: ValidationRole.sender,
+              temporaryDirectory: temp,
+            ),
+            throwsA(isA<FileSystemException>()),
+          );
+          if (initialized) {
+            expect(marker.readAsStringSync(), before);
+          } else {
+            expect(root.existsSync(), isFalse);
+          }
+        } finally {
+          await child.stdin.close();
+          await child.exitCode.timeout(const Duration(seconds: 10));
+        }
+      }
+    },
+  );
+
+  test(
     'all production storage defaults use the isolated directories',
     () async {
       workspace = ValidationWorkspace.open(
@@ -162,6 +223,18 @@ void main() {
       expect(after['categoryIds'], ['persist-receiver-category']);
       expect(after['typeIds'], ['persist-receiver-type']);
       expect(after['variantIds'], ['persist-receiver-variant']);
+      final content = after['content'] as Map;
+      expect(
+        (content['jobs'] as List).firstWhere(
+          (row) => row['id'] == 'persist-receiver-job',
+        )['job_number'],
+        'LAN-42',
+      );
+      expect((content['job_lines'] as List).single['needed_qty'], 7.0);
+      expect((content['supplier_listings'] as List).single['last_price'], 12.5);
+      expect((content['order_splits'] as List).single['quantity'], 5.0);
+      expect(content.containsKey('app_settings'), isFalse);
+      expect(content.containsKey('device_profiles'), isFalse);
       await db.close();
     },
   );

@@ -83,6 +83,91 @@ Future<void> seedValidationShop(
       styleId: '$prefix-type',
       typeId: '$prefix-variant',
     );
+    await db.customStatement(
+      'UPDATE jobs SET job_number = ?, customer = ?, location = ?, notes = ? WHERE id = ?',
+      [
+        'LAN-42',
+        'Synthetic customer',
+        'Synthetic location',
+        'Synthetic job notes',
+        '$prefix-job',
+      ],
+    );
+    await db.customStatement(
+      'UPDATE parts SET description = ?, uom = ?, specs = ?, keywords = ? WHERE id = ?',
+      [
+        'Synthetic description',
+        'box',
+        'Synthetic specs',
+        'synthetic keywords',
+        '$prefix-part',
+      ],
+    );
+    await db.jobsDao.insertJobLine(
+      id: '$prefix-line',
+      jobId: '$prefix-job',
+      partId: '$prefix-part',
+      brandVersionId: null,
+      neededQty: 7,
+      shopPullQty: 2,
+      deviceId: device,
+      customName: 'Synthetic line',
+      customNotes: 'Synthetic custom notes',
+      uom: 'box',
+      notes: 'Synthetic line notes',
+    );
+    Future<void> related(
+      String table,
+      String suffix,
+      Map<String, Object?> values,
+    ) async {
+      final row = <String, Object?>{
+        'id': '$prefix-$suffix',
+        'origin_device_id': device,
+        'created_at': 1700000000,
+        'modified_at': 1700000000,
+        ...values,
+      };
+      await db.customStatement(
+        'INSERT INTO "$table" (${row.keys.join(', ')}) VALUES (${List.filled(row.length, '?').join(', ')})',
+        row.values.toList(),
+      );
+    }
+
+    await related('devices', 'device', {'name': 'Synthetic compatible device'});
+    await related('brands', 'brand', {'name': 'Synthetic brand'});
+    await related('suppliers', 'supplier', {'name': 'Synthetic supplier'});
+    await related('part_devices', 'part-device', {
+      'part_id': '$prefix-part',
+      'device_id': '$prefix-device',
+    });
+    await related('brand_versions', 'brand-version', {
+      'part_id': '$prefix-part',
+      'brand_id': '$prefix-brand',
+      'mpn': 'SYN-42',
+      'model': 'Synthetic model',
+      'description': 'Synthetic brand description',
+      'variance_name': 'Synthetic variance',
+      'is_main': 1,
+    });
+    await related('supplier_listings', 'listing', {
+      'brand_version_id': '$prefix-brand-version',
+      'supplier_id': '$prefix-supplier',
+      'sku': 'SYN-SKU',
+      'description': 'Synthetic listing',
+      'package_qty': 4.0,
+      'last_price': 12.5,
+      'notes': 'Synthetic supplier notes',
+    });
+    await db.customStatement(
+      'UPDATE job_lines SET brand_version_id = ? WHERE id = ?',
+      ['$prefix-brand-version', '$prefix-line'],
+    );
+    await related('order_splits', 'split', {
+      'job_line_id': '$prefix-line',
+      'supplier_id': '$prefix-supplier',
+      'quantity': 5.0,
+    });
     final photoName = '$prefix.png';
     final picture = image.Image(width: 8, height: 8);
     image.fill(
@@ -118,8 +203,18 @@ Future<Map<String, Object?>> validationReceipt(
     }
   }
   photos.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+  final content = <String, Object?>{};
+  for (final table in db.allTables) {
+    final name = table.actualTableName;
+    if (name == 'app_settings' || name == 'device_profiles') continue;
+    final rows = await db
+        .customSelect('SELECT * FROM "$name" ORDER BY id')
+        .get();
+    content[name] = rows.map((row) => row.data).toList();
+  }
   return {
-    'format': 1,
+    'format': 2,
+    'content': content,
     'observedAt': DateTime.now().toUtc().toIso8601String(),
     'run': workspace.run,
     'localRole': workspace.role.name,
