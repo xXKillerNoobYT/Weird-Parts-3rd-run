@@ -7,8 +7,8 @@ import 'package:cryptography/cryptography.dart';
 import '../backup/backup_codec.dart';
 import 'nearby_protocol.dart';
 
-/// On-wire nearby transfer. Magic `WPL1`. Header is AAD; body is AES-256-GCM
-/// of [packPayload] using a key from the pairing session token.
+/// On-wire nearby transfer. Magic `WPL2`. Header is AAD; body is AES-256-GCM
+/// of [packPayload] using a direction-specific session key.
 class NearbyCodec {
   NearbyCodec();
 
@@ -16,12 +16,18 @@ class NearbyCodec {
 
   Future<Uint8List> encrypt({
     required BackupPayload payload,
-    required String token,
+    required SecretKey key,
+    required String sessionId,
+    required String direction,
+    required String transferId,
     required NearbyOffer offer,
   }) async {
     final nonce = _randomBytes(12);
     final headerMap = <String, Object>{
       'v': kNearbyProtoVersion,
+      'session': sessionId,
+      'direction': direction,
+      'transferId': transferId,
       'nonce': base64Encode(nonce),
       'sourceDeviceId': offer.sourceDeviceId,
       'sourceName': offer.sourceName,
@@ -32,7 +38,6 @@ class NearbyCodec {
       'bytes': offer.bytes,
     };
     final headerBytes = Uint8List.fromList(utf8.encode(jsonEncode(headerMap)));
-    final key = SecretKey(sessionAesKey(token));
     final box = await _gcm.encrypt(
       packPayload(payload),
       secretKey: key,
@@ -52,11 +57,19 @@ class NearbyCodec {
 
   Future<({BackupPayload payload, NearbyOffer offer})> decrypt(
     Uint8List fileBytes,
-    String token,
-  ) async {
+    SecretKey key, {
+    required String sessionId,
+    required String direction,
+    required String transferId,
+  }) async {
     final parsed = _split(fileBytes);
     final header = _parseHeader(parsed.headerBytes);
-    final key = SecretKey(sessionAesKey(token));
+    final metadata = jsonDecode(utf8.decode(parsed.headerBytes));
+    if (metadata['session'] != sessionId ||
+        metadata['direction'] != direction ||
+        metadata['transferId'] != transferId) {
+      throw const NearbyException('Transfer does not match this session');
+    }
     final List<int> plain;
     try {
       plain = await _gcm.decrypt(

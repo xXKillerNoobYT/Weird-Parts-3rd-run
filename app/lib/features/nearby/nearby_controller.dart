@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import '../backup/backup_codec.dart';
 import 'nearby_codec.dart';
 import 'nearby_discovery.dart';
 import 'nearby_protocol.dart';
+import 'nearby_pairing.dart';
 
 enum NearbyPhase {
   idle,
@@ -26,8 +26,7 @@ class NearbyViewState {
     required this.phase,
     required this.deviceName,
     required this.deviceId,
-    this.status =
-        'Open Nearby on the other device. Stay on the same Wi‑Fi.',
+    this.status = 'Open Nearby on the other device. Stay on the same Wi‑Fi.',
     this.error,
     this.verifyCode,
     this.peerName,
@@ -51,8 +50,7 @@ class NearbyViewState {
   final String? successMessage;
   final NearbyPeer? pairedPeer;
 
-  bool get running =>
-      phase != NearbyPhase.idle && phase != NearbyPhase.failed;
+  bool get running => phase != NearbyPhase.idle && phase != NearbyPhase.failed;
 }
 
 typedef NearbyApplyPayload = Future<void> Function(BackupPayload payload);
@@ -67,8 +65,8 @@ class NearbyController {
     this.bindAddress,
     this.localIps,
     this.codec,
-    Random? random,
-  }) : _random = random ?? Random.secure();
+    this.peerAllowed,
+  });
 
   final String deviceId;
   String deviceName;
@@ -79,7 +77,7 @@ class NearbyController {
   final InternetAddress? bindAddress;
   final Future<List<String>> Function()? localIps;
   final NearbyCodec? codec;
-  final Random _random;
+  final bool Function(String host)? peerAllowed;
 
   NearbyCodec get _codec => codec ?? NearbyCodec();
 
@@ -96,7 +94,10 @@ class NearbyController {
 
   HttpServer? _server;
   StreamSubscription<List<NearbyPeer>>? _peerSub;
-  _PendingPair? _pending;
+  _PairAttempt? _pending;
+  int _pairGeneration = 0;
+  final _pairStarts = <DateTime>[];
+  final _authenticated = Expando<_AuthenticatedRequest>();
   _Session? _session;
   Completer<bool>? _hostMatch;
   Completer<bool>? _offerDecision;
@@ -122,13 +123,14 @@ class NearbyController {
         0,
       );
       _server = server;
-      server.listen(_handleHttp, onError: (Object e) {
-        _fail('Nearby connection failed: $e');
-      });
+      server.listen(
+        _handleHttp,
+        onError: (Object e) {
+          _fail('Nearby connection failed: $e');
+        },
+      );
       final ips = await (localIps ?? localIpv4Addresses)();
-      final advertiseIps = ips.isNotEmpty
-          ? ips
-          : [server.address.address];
+      final advertiseIps = ips.isNotEmpty ? ips : [server.address.address];
       await discovery.start(
         deviceId: deviceId,
         name: deviceName,
@@ -221,7 +223,8 @@ class NearbyController {
       _fail('Nearby is not listening. Open this page again.');
       return;
     }
-    final guestNonce = _nonce();
+    _failPending(cancel: true);
+    final generation = _pairGeneration;
     _emit(
       NearbyViewState(
         phase: NearbyPhase.pairing,
@@ -233,109 +236,116 @@ class NearbyController {
       ),
     );
     try {
-      final start = await _jsonPost(
+      final context = NearbyPairContext(
+        id: nearbyRandomId(),
+        guestId: deviceId,
+        hostId: peer.deviceId,
+        guestName: deviceName,
+        hostName: peer.name,
+        guestPort: _server!.port,
+        hostPort: peer.port,
+      );
+      final agreement = await NearbyPendingPair.create(context, guest: true);
+      if (generation != _pairGeneration) return;
+      final attempt = _PairAttempt(peer, agreement);
+      _pending = attempt;
+      _armPairExpiry(attempt);
+      final start = await _jsonPost(peer, '/v2/pair/start', {
+        ...context.toJson(),
+        'commitment': agreement.commitment,
+      });
+      if (!identical(_pending, attempt)) return;
+      agreement.receiveCommitment(start['commitment']);
+      final revealed = await _jsonPost(
         peer,
-        '/v1/pair/start',
-        {
-          'guestDeviceId': deviceId,
-          'guestName': deviceName,
-          'guestNonce': base64Encode(guestNonce),
-        },
+        '/v2/pair/reveal',
+        agreement.reveal(),
       );
-      final hostNonce = base64Decode(start['hostNonce'] as String);
-      final code = start['verifyCode'];
-      if (code is! int) {
-        throw const NearbyException('The other device sent a damaged pair reply');
-      }
-      _session = _Session(
-        peer: peer,
-        token: '',
-        guestNonce: guestNonce,
-        hostNonce: hostNonce,
-        guest: true,
-        verifyCode: code,
-      );
-      _emit(
-        _state.copyWith(
-          phase: NearbyPhase.pairing,
-          verifyCode: code.toString(),
-          peerName: peer.label,
-          status:
-              'Check that ${peer.label} shows this same code, then tap Match.',
-        ),
-      );
+      final match = await agreement.receiveReveal(revealed);
+      if (!identical(_pending, attempt)) return;
+      attempt.match = match;
+      _showMatch(attempt);
     } catch (e) {
-      _fail(_crewError(e, 'Could not reach ${peer.label}'));
+      if (generation == _pairGeneration) {
+        _fail(_crewError(e, 'Could not reach ${peer.label}'));
+      }
     }
   }
 
-  Future<void> confirmCode() async {
-    final session = _session;
-    if (_pending != null && _hostMatch != null && !(_hostMatch!.isCompleted)) {
-      _hostMatch!.complete(true);
-      _emit(
-        _state.copyWith(
-          status: 'Waiting for the other device to tap Match…',
-        ),
-      );
-      return;
-    }
-    if (session == null || !session.guest) {
-      return;
-    }
+  void _armPairExpiry(_PairAttempt attempt) {
+    _pairTimer?.cancel();
+    _pairTimer = Timer(const Duration(minutes: 2), () {
+      if (identical(_pending, attempt)) _fail('Pair expired. Try again.');
+    });
+  }
+
+  void _showMatch(_PairAttempt attempt) {
     _emit(
-      _state.copyWith(status: 'Waiting for ${session.peer.label} to tap Match…'),
+      NearbyViewState(
+        phase: NearbyPhase.pairing,
+        deviceName: deviceName,
+        deviceId: deviceId,
+        peers: _state.peers,
+        peerName: attempt.peer.label,
+        verifyCode: attempt.match!.code,
+        status:
+            'Check that ${attempt.peer.label} shows this same code, then tap Match.',
+      ),
     );
+  }
+
+  void _paired(_PairAttempt attempt, NearbySessionKeys keys) {
+    _pairTimer?.cancel();
+    _pairTimer = null;
+    _pending = null;
+    _hostMatch = null;
+    _session = _Session(attempt.peer, keys);
+    _emit(
+      NearbyViewState(
+        phase: NearbyPhase.paired,
+        deviceName: deviceName,
+        deviceId: deviceId,
+        peers: _state.peers,
+        peerName: attempt.peer.label,
+        pairedPeer: attempt.peer,
+        status:
+            'Paired with ${attempt.peer.label}. Send this shop to replace the shop on that device.',
+      ),
+    );
+  }
+
+  Future<void> confirmCode() async {
+    final attempt = _pending;
+    final match = attempt?.match;
+    if (attempt == null || match == null || attempt.localConfirmed) return;
+    attempt.localConfirmed = true;
+    final proof = match.confirmLocal();
+    _emit(
+      _state.copyWith(
+        status: 'Waiting for ${attempt.peer.label} to tap Match…',
+      ),
+    );
+    if (!attempt.agreement.guest) {
+      _hostMatch?.complete(true);
+      return;
+    }
     try {
-      final reply = await _jsonPost(
-        session.peer,
-        '/v1/pair/confirm',
-        {
-          'guestDeviceId': deviceId,
-          'verifyCode': session.verifyCode,
-        },
-        timeout: const Duration(minutes: 2),
-      );
-      final token = reply['token'] as String?;
-      if (token == null || token.isEmpty) {
-        throw const NearbyException('Pair did not finish');
-      }
-      _session = session.copyWith(token: token);
-      _emit(
-        NearbyViewState(
-          phase: NearbyPhase.paired,
-          deviceName: deviceName,
-          deviceId: deviceId,
-          peerName: session.peer.label,
-          peers: _state.peers,
-          pairedPeer: session.peer,
-          status:
-              'Paired with ${session.peer.label}. Send this shop to copy jobs, catalog, and photos onto that device. That replaces the shop over there.',
-        ),
-      );
+      final reply = await _jsonPost(attempt.peer, '/v2/pair/confirm', {
+        'id': match.transactionId,
+        'proof': proof,
+      }, timeout: const Duration(minutes: 2));
+      if (!identical(_pending, attempt)) return;
+      match.confirmRemote(reply['proof']);
+      _paired(attempt, match.finish());
     } catch (e) {
-      _fail(_crewError(e, 'Pair failed'));
+      if (identical(_pending, attempt)) _fail(_crewError(e, 'Pair failed'));
     }
   }
 
   Future<void> rejectCode() async {
-    final pending = _pending;
-    if (pending != null) {
-      pending.rejected = true;
-      if (_hostMatch != null && !_hostMatch!.isCompleted) {
-        _hostMatch!.complete(false);
-      }
-    }
+    final attempt = _pending;
     final session = _session;
-    if (session != null && session.guest) {
-      try {
-        await _jsonPost(session.peer, '/v1/pair/cancel', {
-          'guestDeviceId': deviceId,
-        });
-      } catch (_) {}
-    }
-    _pending = null;
-    _session = null;
+    _failPending(cancel: true);
     _emit(
       NearbyViewState(
         phase: NearbyPhase.looking,
@@ -343,10 +353,18 @@ class NearbyController {
         deviceId: deviceId,
         peers: _state.peers,
         error: 'Pair cancelled. Codes must match on both screens.',
-        status:
-            'Tap a device to pair. You will both see a 6-digit code.',
+        status: 'Tap a device to pair. You will both see a 6-digit code.',
       ),
     );
+    try {
+      if (session != null) {
+        await _jsonPost(session.peer, '/v2/pair/cancel', {}, session: session);
+      } else if (attempt != null) {
+        await _jsonPost(attempt.peer, '/v2/pair/cancel', {
+          'id': attempt.agreement.context.id,
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> acceptOffer() async {
@@ -372,7 +390,8 @@ class NearbyController {
         deviceName: deviceName,
         deviceId: deviceId,
         peers: _state.peers,
-        error: 'You declined the incoming shop. Nothing on this device changed.',
+        error:
+            'You declined the incoming shop. Nothing on this device changed.',
         status: 'Looking for Wired Parts on this Wi‑Fi.',
       ),
     );
@@ -380,7 +399,7 @@ class NearbyController {
 
   Future<void> sendTo(NearbyPeer peer) async {
     final session = _session;
-    if (session == null || session.token.isEmpty) {
+    if (session == null || peer != session.peer) {
       _fail('Pair first, then send.');
       return;
     }
@@ -395,11 +414,17 @@ class NearbyController {
     );
     try {
       final packed = await collectPayload();
+      if (!identical(_session, session)) return;
+      final transferId = nearbyRandomId();
       final bytes = await _codec.encrypt(
         payload: packed.payload,
-        token: session.token,
+        key: session.keys.sendKey,
+        sessionId: session.keys.id,
+        direction: session.keys.sendDirection,
+        transferId: transferId,
         offer: packed.offer,
       );
+      if (!identical(_session, session)) return;
       _emit(
         _state.copyWith(
           status: 'Waiting for ${peer.label} to accept…',
@@ -408,7 +433,7 @@ class NearbyController {
       );
       await _jsonPost(
         peer,
-        '/v1/offer',
+        '/v2/offer',
         {
           'sourceDeviceId': packed.offer.sourceDeviceId,
           'sourceName': packed.offer.sourceName,
@@ -416,22 +441,23 @@ class NearbyController {
           'parts': packed.offer.parts,
           'photos': packed.offer.photos,
           'bytes': bytes.length,
+          'transferId': transferId,
+          'digest': nearbyDigest(bytes),
         },
-        token: session.token,
+        session: session,
         timeout: const Duration(minutes: 2),
       );
+      if (!identical(_session, session)) return;
       _emit(
-        _state.copyWith(
-          status: 'Sending shop to ${peer.label}…',
-          progress: 0,
-        ),
+        _state.copyWith(status: 'Sending shop to ${peer.label}…', progress: 0),
       );
       await _putBytes(
         peer,
-        '/v1/transfer',
+        '/v2/transfer',
         bytes,
-        token: session.token,
+        session: session,
         onProgress: (p) {
+          if (!identical(_session, session)) return;
           _emit(
             _state.copyWith(
               progress: p,
@@ -440,6 +466,7 @@ class NearbyController {
           );
         },
       );
+      if (!identical(_session, session)) return;
       _emit(
         NearbyViewState(
           phase: NearbyPhase.success,
@@ -455,14 +482,22 @@ class NearbyController {
         ),
       );
     } catch (e) {
-      _fail(_crewError(e, 'Send failed. The other shop was not replaced.'));
+      if (identical(_session, session)) {
+        _fail(_crewError(e, 'Send did not finish. Check the other device.'));
+      }
     }
   }
 
   Future<void> _handleHttp(HttpRequest request) async {
     try {
+      if (peerAllowed != null &&
+          !peerAllowed!(request.connectionInfo?.remoteAddress.address ?? '')) {
+        request.response.statusCode = HttpStatus.forbidden;
+        await _writeJson(request, {'error': 'Use the same Wi-Fi network'});
+        return;
+      }
       final path = request.uri.path;
-      if (request.method == 'GET' && path == '/v1/hello') {
+      if (request.method == 'GET' && path == '/v2/hello') {
         await _writeJson(request, {
           'proto': kNearbyProto,
           'v': kNearbyProtoVersion,
@@ -471,23 +506,27 @@ class NearbyController {
         });
         return;
       }
-      if (request.method == 'POST' && path == '/v1/pair/start') {
+      if (request.method == 'POST' && path == '/v2/pair/start') {
         await _onPairStart(request);
         return;
       }
-      if (request.method == 'POST' && path == '/v1/pair/confirm') {
+      if (request.method == 'POST' && path == '/v2/pair/reveal') {
+        await _onPairReveal(request);
+        return;
+      }
+      if (request.method == 'POST' && path == '/v2/pair/confirm') {
         await _onPairConfirm(request);
         return;
       }
-      if (request.method == 'POST' && path == '/v1/pair/cancel') {
+      if (request.method == 'POST' && path == '/v2/pair/cancel') {
         await _onPairCancel(request);
         return;
       }
-      if (request.method == 'POST' && path == '/v1/offer') {
+      if (request.method == 'POST' && path == '/v2/offer') {
         await _onOffer(request);
         return;
       }
-      if (request.method == 'PUT' && path == '/v1/transfer') {
+      if (request.method == 'PUT' && path == '/v2/transfer') {
         await _onTransfer(request);
         return;
       }
@@ -503,145 +542,113 @@ class NearbyController {
 
   Future<void> _onPairStart(HttpRequest request) async {
     final body = await _readJson(request);
-    final guestId = body['guestDeviceId'] as String?;
-    final guestName = body['guestName'] as String? ?? 'Other device';
-    final nonceB64 = body['guestNonce'] as String?;
-    if (guestId == null || nonceB64 == null) {
-      request.response.statusCode = HttpStatus.badRequest;
-      await _writeJson(request, {'error': 'Damaged pair request'});
-      return;
+    final context = NearbyPairContext.parse(body);
+    if (context.hostId != deviceId ||
+        context.guestId == deviceId ||
+        context.hostPort != _server?.port ||
+        context.hostName != deviceName) {
+      throw const NearbyException('Pair does not match this device');
     }
-    if (guestId == deviceId) {
-      request.response.statusCode = HttpStatus.badRequest;
-      await _writeJson(request, {'error': 'Cannot pair with this same device'});
-      return;
-    }
-    final guestNonce = base64Decode(nonceB64);
-    final hostSecret = _nonce();
-    final hostNonce = _nonce();
-    final code = pairingVerifyCode(
-      hostSecret: hostSecret,
-      guestDeviceId: guestId,
-      guestNonce: guestNonce,
-      hostNonce: hostNonce,
+    final now = DateTime.now();
+    _pairStarts.removeWhere(
+      (time) => now.difference(time) > const Duration(minutes: 1),
     );
+    if (_pairStarts.length >= 5) {
+      request.response.statusCode = HttpStatus.tooManyRequests;
+      await _writeJson(request, {
+        'error': 'Too many pair attempts. Wait a minute.',
+      });
+      return;
+    }
+    _pairStarts.add(now);
     _failPending(cancel: true);
-    _hostMatch = Completer<bool>();
-    _pending = _PendingPair(
-      guestDeviceId: guestId,
-      guestName: guestName,
-      guestNonce: guestNonce,
-      hostNonce: hostNonce,
-      hostSecret: hostSecret,
-      verifyCode: code,
-    );
-    _pairTimer?.cancel();
-    _pairTimer = Timer(const Duration(minutes: 2), () {
-      if (_hostMatch != null && !_hostMatch!.isCompleted) {
-        _hostMatch!.complete(false);
-      }
-    });
-    _session = _Session(
-      peer: NearbyPeer(
-        deviceId: guestId,
-        name: guestName,
+    final generation = _pairGeneration;
+    final agreement = await NearbyPendingPair.create(context, guest: false);
+    if (generation != _pairGeneration) {
+      throw const NearbyException('Pair cancelled');
+    }
+    agreement.receiveCommitment(body['commitment']);
+    final attempt = _PairAttempt(
+      NearbyPeer(
+        deviceId: context.guestId,
+        name: context.guestName,
         host: request.connectionInfo?.remoteAddress.address ?? '',
-        port: 0,
+        port: context.guestPort,
       ),
-      token: '',
-      guestNonce: guestNonce,
-      hostNonce: hostNonce,
-      guest: false,
-      verifyCode: code,
+      agreement,
     );
+    _pending = attempt;
+    _hostMatch = Completer<bool>();
+    _armPairExpiry(attempt);
     _emit(
       NearbyViewState(
         phase: NearbyPhase.pairing,
         deviceName: deviceName,
         deviceId: deviceId,
-        verifyCode: code.toString(),
-        peerName: guestName,
         peers: _state.peers,
-        status:
-            'Check that $guestName shows this same code, then tap Match.',
+        peerName: attempt.peer.label,
+        status: 'Connecting to ${attempt.peer.label}…',
       ),
     );
-    await _writeJson(request, {
-      'hostDeviceId': deviceId,
-      'hostName': deviceName,
-      'hostNonce': base64Encode(hostNonce),
-      'verifyCode': code,
-    });
+    await _writeJson(request, {'commitment': agreement.commitment});
+  }
+
+  _PairAttempt _hostAttempt(Map<String, Object?> body) {
+    final attempt = _pending;
+    if (attempt == null ||
+        attempt.agreement.guest ||
+        attempt.agreement.context.id != body['id']) {
+      throw const NearbyException('Pair expired or was cancelled');
+    }
+    return attempt;
+  }
+
+  Future<void> _onPairReveal(HttpRequest request) async {
+    final body = await _readJson(request);
+    final attempt = _hostAttempt(body);
+    final reveal = attempt.agreement.reveal();
+    final match = await attempt.agreement.receiveReveal(body);
+    if (!identical(_pending, attempt)) {
+      throw const NearbyException('Pair cancelled');
+    }
+    attempt.match = match;
+    _showMatch(attempt);
+    await _writeJson(request, reveal);
   }
 
   Future<void> _onPairConfirm(HttpRequest request) async {
     final body = await _readJson(request);
-    final pending = _pending;
-    final guestId = body['guestDeviceId'] as String?;
-    final code = body['verifyCode'];
-    if (pending == null ||
-        guestId != pending.guestDeviceId ||
-        code != pending.verifyCode) {
-      request.response.statusCode = HttpStatus.forbidden;
-      await _writeJson(request, {
-        'error': 'Codes do not match or the pair expired',
-      });
-      return;
+    final attempt = _hostAttempt(body);
+    final match = attempt.match;
+    if (match == null) throw const NearbyException('Pair reveal required');
+    match.confirmRemote(body['proof']);
+    final accepted = await _hostMatch!.future;
+    if (!accepted || !identical(_pending, attempt)) {
+      throw const NearbyException('Pair cancelled');
     }
-    if (pending.rejected) {
-      request.response.statusCode = HttpStatus.forbidden;
-      await _writeJson(request, {'error': 'Pair cancelled'});
-      return;
-    }
-    final match = _hostMatch;
-    final ok = await (match?.future ?? Future<bool>.value(false));
-    if (!ok || pending.rejected) {
-      request.response.statusCode = HttpStatus.forbidden;
-      await _writeJson(request, {
-        'error': 'Pair cancelled or the codes did not match',
-      });
-      _pending = null;
-      return;
-    }
-    final token = pairingSessionToken(
-      hostSecret: pending.hostSecret,
-      guestDeviceId: pending.guestDeviceId,
-      guestNonce: pending.guestNonce,
-      hostNonce: pending.hostNonce,
-    );
-    pending.token = token;
-    _session = (_session ??
-            _Session(
-              peer: NearbyPeer(
-                deviceId: pending.guestDeviceId,
-                name: pending.guestName,
-                host: '',
-                port: 0,
-              ),
-              token: token,
-              guestNonce: pending.guestNonce,
-              hostNonce: pending.hostNonce,
-              guest: false,
-              verifyCode: pending.verifyCode,
-            ))
-        .copyWith(token: token);
-    _emit(
-      NearbyViewState(
-        phase: NearbyPhase.paired,
-        deviceName: deviceName,
-        deviceId: deviceId,
-        peerName: pending.guestName,
-        peers: _state.peers,
-        pairedPeer: _session?.peer,
-        status:
-            'Paired with ${pending.guestName}. Wait for them to send their shop, or send this shop if they are waiting.',
-      ),
-    );
-    await _writeJson(request, {'token': token});
+    final proof = match.confirmLocal();
+    _paired(attempt, match.finish());
+    await _writeJson(request, {'proof': proof});
   }
 
   Future<void> _onPairCancel(HttpRequest request) async {
-    await _readJson(request);
+    final session = _session;
+    if (session != null) {
+      if (!_authed(request)) {
+        request.response.statusCode = HttpStatus.unauthorized;
+        await _writeJson(request, {'error': 'Pair again'});
+        return;
+      }
+      await _readJson(request);
+      if (!identical(_session, session)) {
+        throw const NearbyException('Pair expired');
+      }
+    } else {
+      final body = await _readJson(request);
+      if (_pending == null || body['id'] != _pending!.agreement.context.id) {
+        throw const NearbyException('Pair expired');
+      }
+    }
     _failPending(cancel: true);
     _emit(
       NearbyViewState(
@@ -650,7 +657,7 @@ class NearbyController {
         deviceId: deviceId,
         peers: _state.peers,
         error: 'The other device cancelled pair.',
-        status: 'Looking for Wired Parts on this Wi‑Fi.',
+        status: 'Looking for Wired Parts on this Wi-Fi.',
       ),
     );
     await _writeJson(request, {'ok': true});
@@ -675,6 +682,15 @@ class NearbyController {
         'error': 'Finish the current shop copy first',
       });
       return;
+    }
+    final transferId = body['transferId'];
+    final digest = body['digest'];
+    if (transferId is! String ||
+        transferId.length > 128 ||
+        transferId.isEmpty ||
+        digest is! String ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+      throw const NearbyException('Invalid transfer identity');
     }
     final offer = NearbyOffer(
       sourceDeviceId: body['sourceDeviceId'] as String? ?? '',
@@ -719,7 +735,9 @@ class NearbyController {
     }
     _acceptedOffer = _AcceptedOffer(
       offer: offer,
-      token: session.token,
+      session: session,
+      transferId: transferId,
+      digest: digest,
       expiresAt: DateTime.now().add(const Duration(minutes: 2)),
     );
     await _writeJson(request, {'ok': true});
@@ -734,7 +752,7 @@ class NearbyController {
     final accepted = _acceptedOffer;
     if (accepted == null ||
         accepted.claimed ||
-        accepted.token != _bearer(request) ||
+        !identical(accepted.session, _session) ||
         !DateTime.now().isBefore(accepted.expiresAt)) {
       request.response.statusCode = HttpStatus.forbidden;
       await _writeJson(request, {
@@ -753,7 +771,9 @@ class NearbyController {
     }
     if (length > kMaxNearbyTransferBytes) {
       request.response.statusCode = HttpStatus.requestEntityTooLarge;
-      await _writeJson(request, {'error': 'Shop is too large to send this way'});
+      await _writeJson(request, {
+        'error': 'Shop is too large to send this way',
+      });
       return;
     }
     _emit(
@@ -766,10 +786,18 @@ class NearbyController {
     final builder = BytesBuilder(copy: false);
     var got = 0;
     await for (final chunk in request) {
+      if (!identical(_acceptedOffer, accepted) ||
+          !identical(_session, accepted.session)) {
+        request.response.statusCode = HttpStatus.forbidden;
+        await _writeJson(request, {'error': 'Shop acceptance was cancelled'});
+        return;
+      }
       got += chunk.length;
       if (got > kMaxNearbyTransferBytes) {
         request.response.statusCode = HttpStatus.requestEntityTooLarge;
-        await _writeJson(request, {'error': 'Shop is too large to send this way'});
+        await _writeJson(request, {
+          'error': 'Shop is too large to send this way',
+        });
         return;
       }
       builder.add(chunk);
@@ -783,9 +811,21 @@ class NearbyController {
       );
     }
     final bytes = builder.takeBytes();
-    final token = _bearer(request) ?? _session?.token ?? '';
+    final authentication = _authenticated[request]!;
     try {
-      final decrypted = await _codec.decrypt(Uint8List.fromList(bytes), token);
+      authentication.session.keys.verifyBody(authentication.proof, bytes);
+      if (nearbyDigest(bytes) != accepted.digest) {
+        throw const NearbyException(
+          'Transfer does not match the accepted shop',
+        );
+      }
+      final decrypted = await _codec.decrypt(
+        Uint8List.fromList(bytes),
+        accepted.session.keys.receiveKey,
+        sessionId: accepted.session.keys.id,
+        direction: accepted.session.keys.receiveDirection,
+        transferId: accepted.transferId,
+      );
       final offer = decrypted.offer;
       if (offer.sourceDeviceId != accepted.offer.sourceDeviceId ||
           offer.sourceName != accepted.offer.sourceName ||
@@ -797,7 +837,9 @@ class NearbyController {
           'Transfer does not match the accepted shop',
         );
       }
-      if (!identical(_acceptedOffer, accepted)) {
+      if (!identical(_acceptedOffer, accepted) ||
+          !identical(_session, accepted.session) ||
+          !DateTime.now().isBefore(accepted.expiresAt)) {
         request.response.statusCode = HttpStatus.forbidden;
         await _writeJson(request, {'error': 'Shop acceptance was cancelled'});
         return;
@@ -819,124 +861,192 @@ class NearbyController {
       );
       await _writeJson(request, {'ok': true});
     } catch (e) {
-      _fail(_crewError(e, 'Receive failed. This shop was not replaced.'));
+      if (identical(_session, accepted.session)) {
+        _fail(_crewError(e, 'Receive failed. This shop was not replaced.'));
+      }
       request.response.statusCode = HttpStatus.badRequest;
       await _writeJson(request, {'error': '$e'});
     }
   }
 
   bool _authed(HttpRequest request) {
-    final token = _bearer(request);
     final session = _session;
-    return token != null &&
-        session != null &&
-        session.token.isNotEmpty &&
-        token == session.token;
+    if (session == null ||
+        request.headers.value('x-nearby-session') != session.keys.id) {
+      return false;
+    }
+    try {
+      final sequence = int.tryParse(
+        request.headers.value('x-nearby-sequence') ?? '',
+      );
+      final digest = request.headers.value('x-nearby-digest');
+      final mac = request.headers.value('x-nearby-mac');
+      if (sequence == null || digest == null || mac == null) return false;
+      final proof = NearbyRequestProof(sequence, digest, mac);
+      session.keys.acceptRequest(request.method, request.uri.path, proof);
+      _authenticated[request] = _AuthenticatedRequest(session, proof);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
-  String? _bearer(HttpRequest request) {
-    final raw = request.headers.value(HttpHeaders.authorizationHeader);
-    if (raw == null || !raw.startsWith('Bearer ')) return null;
-    return raw.substring(7);
+  void _setProof(
+    HttpClientRequest request,
+    _Session session,
+    NearbyRequestProof proof,
+  ) {
+    request.headers.set('x-nearby-session', session.keys.id);
+    request.headers.set('x-nearby-sequence', proof.sequence);
+    request.headers.set('x-nearby-digest', proof.digest);
+    request.headers.set('x-nearby-mac', proof.mac);
   }
 
   Future<Map<String, Object?>> _jsonPost(
     NearbyPeer peer,
     String path,
     Map<String, Object?> body, {
-    String? token,
+    _Session? session,
     Duration timeout = const Duration(seconds: 20),
-  }) async {
-    final client = HttpClient();
-    try {
-      final req = await client
-          .post(peer.host, peer.port, path)
-          .timeout(timeout);
-      req.headers.contentType = ContentType.json;
-      if (token != null) {
-        req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      }
-      req.add(utf8.encode(jsonEncode(body)));
-      final res = await req.close().timeout(timeout);
-      final text = await utf8.decoder.bind(res).join();
-      final Object? decoded = text.isEmpty ? <String, Object?>{} : jsonDecode(text);
-      if (decoded is! Map) {
-        throw const NearbyException('Damaged reply from the other device');
-      }
-      final map = Map<String, Object?>.from(decoded);
-      if (res.statusCode >= 400) {
-        throw NearbyException(map['error'] as String? ?? 'Nearby request failed');
-      }
-      return map;
-    } on TimeoutException {
-      throw const NearbyException(
-        'The other device did not answer. Keep Nearby open on both, same Wi‑Fi.',
-      );
-    } on SocketException {
-      throw const NearbyException(
-        'Could not reach the other device. Same Wi‑Fi? Firewall allowing Wired Parts?',
-      );
-    } finally {
-      client.close(force: true);
-    }
-  }
+  }) => _request(
+    peer,
+    'POST',
+    path,
+    Uint8List.fromList(utf8.encode(jsonEncode(body))),
+    session: session,
+    timeout: timeout,
+  );
 
   Future<void> _putBytes(
     NearbyPeer peer,
     String path,
     Uint8List bytes, {
-    required String token,
+    required _Session session,
     required void Function(double progress) onProgress,
   }) async {
-    final client = HttpClient();
+    await _request(
+      peer,
+      'PUT',
+      path,
+      bytes,
+      session: session,
+      timeout: const Duration(minutes: 10),
+      onProgress: onProgress,
+    );
+  }
+
+  Future<Map<String, Object?>> _request(
+    NearbyPeer peer,
+    String method,
+    String path,
+    Uint8List bytes, {
+    _Session? session,
+    Duration timeout = const Duration(seconds: 20),
+    void Function(double progress)? onProgress,
+  }) async {
+    if (peerAllowed != null && !peerAllowed!(peer.host)) {
+      throw const NearbyException('Use the same Wi-Fi network');
+    }
+    final client = HttpClient()..findProxy = (_) => 'DIRECT';
     try {
-      final req = await client.put(peer.host, peer.port, path);
-      req.headers.contentType = ContentType.binary;
+      final req = await client
+          .open(method, peer.host, peer.port, path)
+          .timeout(timeout);
+      req.followRedirects = false;
       req.headers.contentLength = bytes.length;
-      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      req.headers.contentType = method == 'PUT'
+          ? ContentType.binary
+          : ContentType.json;
+      final proof = session?.keys.signRequest(method, path, bytes);
+      if (session != null && proof != null) _setProof(req, session, proof);
       const chunk = 64 * 1024;
       for (var i = 0; i < bytes.length; i += chunk) {
         final end = i + chunk > bytes.length ? bytes.length : i + chunk;
         req.add(bytes.sublist(i, end));
-        onProgress(end / bytes.length);
+        onProgress?.call(end / bytes.length);
       }
-      final res = await req.close().timeout(const Duration(minutes: 10));
-      final text = await utf8.decoder.bind(res).join();
-      if (res.statusCode >= 400) {
-        String message = 'Send failed';
-        try {
-          final Object? decoded = jsonDecode(text);
-          if (decoded is Map && decoded['error'] is String) {
-            message = decoded['error'] as String;
-          }
-        } catch (_) {}
-        throw NearbyException(message);
+      final response = await req.close().timeout(timeout);
+      final responseBytes = await _readBounded(
+        response,
+        64 * 1024,
+      ).timeout(timeout);
+      if (session != null && proof != null) {
+        session.keys.verifyResponse(
+          proof,
+          method,
+          path,
+          response.statusCode,
+          responseBytes,
+          response.headers.value('x-nearby-mac'),
+        );
       }
+      final map = _decodeJson(responseBytes);
+      if (response.statusCode != HttpStatus.ok) {
+        throw NearbyException(
+          map['error'] is String
+              ? map['error']! as String
+              : 'Nearby request failed',
+        );
+      }
+      return map;
     } on TimeoutException {
       throw const NearbyException(
-        'Send stalled. Keep Nearby open. This shop on the other device was not replaced.',
+        'The other device did not answer. Keep Nearby open on both, same Wi-Fi.',
       );
     } finally {
       client.close(force: true);
     }
   }
 
-  Future<Map<String, Object?>> _readJson(HttpRequest request) async {
-    final text = await utf8.decoder.bind(request).join();
-    if (text.isEmpty) return {};
-    final Object? decoded = jsonDecode(text);
-    if (decoded is! Map) {
-      throw const NearbyException('Damaged nearby request');
+  Future<Uint8List> _readBounded(Stream<List<int>> stream, int limit) async {
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in stream) {
+      if (builder.length + chunk.length > limit) {
+        throw const NearbyException('Nearby message is too large');
+      }
+      builder.add(chunk);
+    }
+    return builder.takeBytes();
+  }
+
+  Map<String, Object?> _decodeJson(List<int> bytes) {
+    final Object? decoded = jsonDecode(utf8.decode(bytes));
+    if (decoded is! Map<String, dynamic>) {
+      throw const NearbyException('Damaged nearby message');
     }
     return Map<String, Object?>.from(decoded);
+  }
+
+  Future<Map<String, Object?>> _readJson(HttpRequest request) async {
+    final bytes = await _readBounded(
+      request,
+      64 * 1024,
+    ).timeout(const Duration(seconds: 20));
+    final authentication = _authenticated[request];
+    authentication?.session.keys.verifyBody(authentication.proof, bytes);
+    return _decodeJson(bytes);
   }
 
   Future<void> _writeJson(
     HttpRequest request,
     Map<String, Object?> body,
   ) async {
+    final bytes = utf8.encode(jsonEncode(body));
     request.response.headers.contentType = ContentType.json;
-    request.response.write(jsonEncode(body));
+    final authentication = _authenticated[request];
+    if (authentication != null) {
+      request.response.headers.set(
+        'x-nearby-mac',
+        authentication.session.keys.signResponse(
+          authentication.proof,
+          request.method,
+          request.uri.path,
+          request.response.statusCode,
+          bytes,
+        ),
+      );
+    }
+    request.response.add(bytes);
     await request.response.close();
   }
 
@@ -944,7 +1054,9 @@ class NearbyController {
     _acceptedOffer = null;
     _pairTimer?.cancel();
     _pairTimer = null;
-    if (cancel) _pending?.rejected = true;
+    _pairGeneration++;
+    _pending = null;
+    _session = null;
     if (_hostMatch != null && !_hostMatch!.isCompleted) {
       _hostMatch!.complete(false);
     }
@@ -976,10 +1088,6 @@ class NearbyController {
     return '$fallback: $s';
   }
 
-  Uint8List _nonce() {
-    return Uint8List.fromList(List<int>.generate(16, (_) => _random.nextInt(256)));
-  }
-
   void _emit(NearbyViewState next) {
     _state = next;
     if (!_stateCtrl.isClosed) _stateCtrl.add(next);
@@ -991,51 +1099,24 @@ class NearbyController {
   }
 }
 
-class _PendingPair {
-  _PendingPair({
-    required this.guestDeviceId,
-    required this.guestName,
-    required this.guestNonce,
-    required this.hostNonce,
-    required this.hostSecret,
-    required this.verifyCode,
-  });
-
-  final String guestDeviceId;
-  final String guestName;
-  final List<int> guestNonce;
-  final List<int> hostNonce;
-  final List<int> hostSecret;
-  final int verifyCode;
-  var rejected = false;
-  String token = '';
+class _PairAttempt {
+  _PairAttempt(this.peer, this.agreement);
+  final NearbyPeer peer;
+  final NearbyPendingPair agreement;
+  NearbyAwaitingMatch? match;
+  bool localConfirmed = false;
 }
 
 class _Session {
-  const _Session({
-    required this.peer,
-    required this.token,
-    required this.guestNonce,
-    required this.hostNonce,
-    required this.guest,
-    required this.verifyCode,
-  });
-
+  _Session(this.peer, this.keys);
   final NearbyPeer peer;
-  final String token;
-  final List<int> guestNonce;
-  final List<int> hostNonce;
-  final bool guest;
-  final int verifyCode;
+  final NearbySessionKeys keys;
+}
 
-  _Session copyWith({String? token, NearbyPeer? peer}) => _Session(
-    peer: peer ?? this.peer,
-    token: token ?? this.token,
-    guestNonce: guestNonce,
-    hostNonce: hostNonce,
-    guest: guest,
-    verifyCode: verifyCode,
-  );
+class _AuthenticatedRequest {
+  _AuthenticatedRequest(this.session, this.proof);
+  final _Session session;
+  final NearbyRequestProof proof;
 }
 
 extension on NearbyViewState {
@@ -1073,12 +1154,16 @@ extension on NearbyViewState {
 class _AcceptedOffer {
   _AcceptedOffer({
     required this.offer,
-    required this.token,
+    required this.session,
+    required this.transferId,
+    required this.digest,
     required this.expiresAt,
   });
 
   final NearbyOffer offer;
-  final String token;
+  final _Session session;
+  final String transferId;
+  final String digest;
   final DateTime expiresAt;
   bool claimed = false;
 }

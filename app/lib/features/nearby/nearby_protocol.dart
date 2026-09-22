@@ -1,16 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
-
-import 'package:crypto/crypto.dart';
 
 const kNearbyServiceType = '_wiredpart._tcp';
+
 /// Shared Mac/Windows UDP beacon port. Not 45454: Windows (Hyper-V/WinNAT-style)
 /// reserves ~44700–48799 on Impure even when `netsh excludedportrange` is empty.
 const kNearbyUdpPort = 41000;
 const kNearbyMulticastGroup = '239.55.12.42';
 const kNearbyProto = 'wiredpart-link';
-const kNearbyProtoVersion = 1;
-const kNearbyTransferMagic = [0x57, 0x50, 0x4c, 0x31]; // WPL1
+const kNearbyProtoVersion = 2;
+const kNearbyTransferMagic = [0x57, 0x50, 0x4c, 0x32]; // WPL2
 const kMaxNearbyTransferBytes = 512 * 1024 * 1024;
 const kLastNearbyAtKey = 'last_nearby_at';
 const kLastNearbyPeerKey = 'last_nearby_peer';
@@ -35,7 +33,8 @@ class NearbyPeer {
   final String host;
   final int port;
 
-  String get label => name.trim().isEmpty ? 'WiredPart ${shortId(deviceId)}' : name;
+  String get label =>
+      name.trim().isEmpty ? 'WiredPart ${shortId(deviceId)}' : name;
 
   NearbyPeer copyWith({String? host, int? port, String? name}) => NearbyPeer(
     deviceId: deviceId,
@@ -88,40 +87,6 @@ String shortId(String deviceId) {
 
 String defaultNearbyName(String deviceId) => 'WiredPart ${shortId(deviceId)}';
 
-int pairingVerifyCode({
-  required List<int> hostSecret,
-  required String guestDeviceId,
-  required List<int> guestNonce,
-  required List<int> hostNonce,
-}) {
-  final digest = Hmac(sha256, hostSecret)
-      .convert([...utf8.encode(guestDeviceId), ...guestNonce, ...hostNonce])
-      .bytes;
-  final n =
-      ((digest[0] << 24) | (digest[1] << 16) | (digest[2] << 8) | digest[3]) &
-      0x7fffffff;
-  return 100000 + n % 900000;
-}
-
-String pairingSessionToken({
-  required List<int> hostSecret,
-  required String guestDeviceId,
-  required List<int> guestNonce,
-  required List<int> hostNonce,
-}) {
-  return Hmac(sha256, hostSecret)
-      .convert(
-        utf8.encode(
-          'token|$guestDeviceId|${base64Encode(guestNonce)}|${base64Encode(hostNonce)}',
-        ),
-      )
-      .toString();
-}
-
-Uint8List sessionAesKey(String token) {
-  return Uint8List.fromList(sha256.convert(utf8.encode('wpl1|$token')).bytes);
-}
-
 Map<String, Object?> decodeBeacon(List<int> bytes) {
   final Object? decoded = jsonDecode(utf8.decode(bytes));
   if (decoded is! Map) {
@@ -151,17 +116,11 @@ List<int> encodeBeacon({
 
 List<int> encodeWhoQuery() {
   return utf8.encode(
-    jsonEncode({
-      'v': kNearbyProtoVersion,
-      'kind': 'wiredpart-who',
-    }),
+    jsonEncode({'v': kNearbyProtoVersion, 'kind': 'wiredpart-who'}),
   );
 }
 
-NearbyPeer? peerFromBeacon(
-  Map<String, Object?> map, {
-  String? fromHost,
-}) {
+NearbyPeer? peerFromBeacon(Map<String, Object?> map, {String? fromHost}) {
   if (map['kind'] != 'wiredpart') return null;
   if (map['proto'] != kNearbyProto) return null;
   if (map['v'] != kNearbyProtoVersion) return null;
