@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:multicast_dns/multicast_dns.dart';
 
 import 'nearby_protocol.dart';
+import 'nearby_wifi.dart';
 
 abstract class NearbyDiscovery {
   Stream<List<NearbyPeer>> get peers;
@@ -28,10 +29,16 @@ class LanNearbyDiscovery implements NearbyDiscovery {
   LanNearbyDiscovery({
     this.udpPort = kNearbyUdpPort,
     this.now,
+    this.readNetwork = readNearbyWifiNetwork,
+    this.bindSocket,
+    this.createMdnsClient,
   });
 
   final int udpPort;
   final DateTime Function()? now;
+  final Future<NearbyWifiNetwork> Function() readNetwork;
+  final Future<RawDatagramSocket> Function(int port)? bindSocket;
+  final MDnsClient Function()? createMdnsClient;
 
   final _peerCtrl = StreamController<List<NearbyPeer>>.broadcast();
   final _peers = <String, _SeenPeer>{};
@@ -45,6 +52,9 @@ class LanNearbyDiscovery implements NearbyDiscovery {
   int _httpPort = 0;
   List<String> _ips = const [];
   var _running = false;
+  int _generation = 0;
+  Set<RawDatagramSocket> _mdnsSockets = {};
+  NearbyWifiNetwork? _network;
 
   @override
   Stream<List<NearbyPeer>> get peers => _peerCtrl.stream;
@@ -56,52 +66,70 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     required int port,
     required List<String> ips,
   }) async {
-    await stop();
-    _deviceId = deviceId;
-    _name = name;
-    _httpPort = port;
-    _ips = ips;
-    _running = true;
+    final stopping = stop();
+    final generation = _generation;
+    await stopping;
+    if (generation != _generation) return;
+    final network = await readNetwork();
+    if (generation != _generation) return;
+    if (ips.length != 1 || ips.single != network.address) {
+      throw const NearbyException('Wi-Fi changed. Open Nearby again.');
+    }
+    final iface = await network.interface();
+    if (generation != _generation) return;
+    RawDatagramSocket? socket;
     try {
-      final socket = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        udpPort,
-        reuseAddress: true,
-        reusePort: Platform.isMacOS || Platform.isIOS || Platform.isLinux,
-      );
+      socket =
+          await (bindSocket?.call(udpPort) ??
+              RawDatagramSocket.bind(
+                InternetAddress.anyIPv4,
+                udpPort,
+                reuseAddress: true,
+                reusePort:
+                    Platform.isMacOS || Platform.isIOS || Platform.isLinux,
+              ));
+      if (generation != _generation) {
+        socket.close();
+        return;
+      }
       socket.broadcastEnabled = true;
       socket.multicastLoopback = true;
-      try {
-        socket.joinMulticast(InternetAddress(kNearbyMulticastGroup));
-      } catch (_) {
-        // Some NICs need an interface; still broadcast / send multicast.
-      }
-      for (final iface in await _ipv4Ifaces()) {
-        try {
-          socket.joinMulticast(InternetAddress(kNearbyMulticastGroup), iface);
-        } catch (_) {}
-      }
+      socket.multicastHops = 1;
+      network.bindDatagram(socket);
+      socket.joinMulticast(InternetAddress(kNearbyMulticastGroup), iface);
+      _deviceId = deviceId;
+      _name = name;
+      _httpPort = port;
+      _network = network;
+      _ips = [network.address];
+      _running = true;
       _socket = socket;
+      final listeningSocket = socket;
       socket.listen((event) {
-        if (event != RawSocketEvent.read) return;
-        final dg = socket.receive();
+        if (generation != _generation || event != RawSocketEvent.read) return;
+        final dg = listeningSocket.receive();
         if (dg == null) return;
         _onDatagram(dg);
       });
     } catch (e) {
+      socket?.close();
+      if (generation != _generation) return;
       throw NearbyException(
-        'Could not listen on this Wi‑Fi. Allow Wired Parts through the '
+        'Could not listen on this Wi-Fi. Allow Wired Parts through the '
         'firewall and keep Nearby open. ($e)',
       );
     }
     _announce = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (generation != _generation) return;
       _sendBeacon();
       _sendWho();
     });
-    _expire = Timer.periodic(const Duration(seconds: 2), (_) => _dropStale());
+    _expire = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (generation == _generation) _dropStale();
+    });
     _sendBeacon();
     _sendWho();
-    _startMdnsBrowse();
+    unawaited(_startMdnsBrowse(generation, network, iface));
   }
 
   @override
@@ -110,46 +138,65 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     required int port,
     required List<String> ips,
   }) async {
+    final generation = _generation;
+    if (!_running) return;
+    final network = await readNetwork();
+    if (generation != _generation) return;
+    if (network.index != _network?.index ||
+        network.address != _network?.address ||
+        network.prefixLength != _network?.prefixLength) {
+      throw const NearbyException('Wi-Fi changed. Open Nearby again.');
+    }
     _name = name;
     _httpPort = port;
-    _ips = ips;
+    _ips = [network.address];
     _sendBeacon();
   }
 
   @override
   Future<void> stop() async {
+    ++_generation;
     _running = false;
     _announce?.cancel();
     _announce = null;
     _expire?.cancel();
     _expire = null;
-    await _mdnsSub?.cancel();
+    final mdnsSub = _mdnsSub;
+    final mdns = _mdns;
+    final sockets = _mdnsSockets;
+    _mdnsSockets = {};
     _mdnsSub = null;
-    _mdns?.stop();
     _mdns = null;
     _socket?.close();
     _socket = null;
+    _network = null;
+    mdns?.stop();
+    for (final socket in sockets) {
+      socket.close();
+    }
     _peers.clear();
     if (!_peerCtrl.isClosed) _peerCtrl.add(const []);
+    await mdnsSub?.cancel();
   }
 
   void _onDatagram(Datagram dg) {
-    Map<String, Object?> map;
+    if (!(_network?.allowsPeer(dg.address.address) ?? false)) return;
     try {
-      map = decodeBeacon(dg.data);
+      final map = decodeBeacon(dg.data);
+      if (isWhoQuery(map)) {
+        _sendBeacon();
+        return;
+      }
+      final peer = peerFromBeacon(map, fromHost: dg.address.address);
+      if (peer == null || peer.deviceId == _deviceId) return;
+      _remember(peer.copyWith(host: dg.address.address));
     } catch (_) {
       return;
     }
-    if (isWhoQuery(map)) {
-      _sendBeacon();
-      return;
-    }
-    final peer = peerFromBeacon(map, fromHost: dg.address.address);
-    if (peer == null || peer.deviceId == _deviceId) return;
-    _remember(peer);
   }
 
   void _remember(NearbyPeer peer) {
+    if (!(_network?.allowsPeer(peer.host) ?? false)) return;
     _peers[peer.deviceId] = _SeenPeer(
       peer: peer,
       seenAt: now?.call() ?? DateTime.now(),
@@ -182,14 +229,11 @@ class LanNearbyDiscovery implements NearbyDiscovery {
       ips: _ips,
     );
     try {
-      socket.send(
-        bytes,
-        InternetAddress(kNearbyMulticastGroup),
-        udpPort,
-      );
+      socket.send(bytes, InternetAddress(kNearbyMulticastGroup), udpPort);
     } catch (_) {}
     try {
-      socket.send(bytes, InternetAddress('255.255.255.255'), udpPort);
+      final broadcast = _network?.broadcastAddress;
+      if (broadcast != null) socket.send(bytes, broadcast, udpPort);
     } catch (_) {}
     _sendMdnsAnnounce();
   }
@@ -199,20 +243,55 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     if (socket == null) return;
     final bytes = encodeWhoQuery();
     try {
-      socket.send(
-        bytes,
-        InternetAddress(kNearbyMulticastGroup),
-        udpPort,
-      );
+      socket.send(bytes, InternetAddress(kNearbyMulticastGroup), udpPort);
     } catch (_) {}
   }
 
-  Future<void> _startMdnsBrowse() async {
+  Future<void> _startMdnsBrowse(
+    int generation,
+    NearbyWifiNetwork network,
+    NetworkInterface iface,
+  ) async {
+    final sockets = <RawDatagramSocket>{};
+    _mdnsSockets = sockets;
+    final client =
+        createMdnsClient?.call() ??
+        MDnsClient(
+          rawDatagramSocketFactory:
+              (
+                dynamic host,
+                int port, {
+                bool reuseAddress = true,
+                bool reusePort = true,
+                int ttl = 255,
+              }) async {
+                final socket = await RawDatagramSocket.bind(
+                  host,
+                  port,
+                  reuseAddress: reuseAddress,
+                  reusePort: reusePort,
+                  ttl: ttl,
+                );
+                try {
+                  if (generation != _generation) {
+                    throw const NearbyException('Nearby stopped');
+                  }
+                  network.bindDatagram(socket);
+                  sockets.add(socket);
+                  return socket;
+                } catch (_) {
+                  socket.close();
+                  rethrow;
+                }
+              },
+        );
     try {
-      final client = MDnsClient();
-      await client.start();
-      if (!_running) {
+      await client.start(interfacesFactory: (_) async => [iface]);
+      if (generation != _generation) {
         client.stop();
+        for (final socket in sockets) {
+          socket.close();
+        }
         return;
       }
       _mdns = client;
@@ -220,13 +299,23 @@ class LanNearbyDiscovery implements NearbyDiscovery {
           .lookup<PtrResourceRecord>(
             ResourceRecordQuery.serverPointer('$kNearbyServiceType.local'),
           )
-          .listen((ptr) => _resolveMdns(client, ptr.domainName), onError: (_) {});
+          .listen(
+            (ptr) => _resolveMdns(client, ptr.domainName, generation),
+            onError: (_) {},
+          );
     } catch (_) {
-      // UDP beacon still runs. mDNS is best-effort on Windows without Bonjour.
+      client.stop();
+      for (final socket in sockets) {
+        socket.close();
+      }
     }
   }
 
-  Future<void> _resolveMdns(MDnsClient client, String domain) async {
+  Future<void> _resolveMdns(
+    MDnsClient client,
+    String domain,
+    int generation,
+  ) async {
     try {
       String? host;
       var port = 0;
@@ -239,6 +328,7 @@ class LanNearbyDiscovery implements NearbyDiscovery {
         port = srv.port;
         break;
       }
+      if (generation != _generation) return;
       await for (final txt in client.lookup<TxtResourceRecord>(
         ResourceRecordQuery.text(domain),
       )) {
@@ -252,6 +342,7 @@ class LanNearbyDiscovery implements NearbyDiscovery {
         }
         break;
       }
+      if (generation != _generation) return;
       if (host != null && host.endsWith('.local')) {
         await for (final a in client.lookup<IPAddressResourceRecord>(
           ResourceRecordQuery.addressIPv4(host),
@@ -260,6 +351,7 @@ class LanNearbyDiscovery implements NearbyDiscovery {
           break;
         }
       }
+      if (generation != _generation) return;
       if (id == null || id == _deviceId || host == null || port == 0) return;
       _remember(NearbyPeer(deviceId: id, name: name, host: host, port: port));
     } catch (_) {}
@@ -376,6 +468,7 @@ Uint8List buildMdnsAnnouncement({
     txt.addByte(b.length);
     txt.add(b);
   }
+
   txtItem('id=$deviceId');
   txtItem('name=$name');
   txtItem('proto=$kNearbyProto');
@@ -416,9 +509,5 @@ List<int> _encodeName(String name) {
 
 void _putU16(BytesBuilder out, int n) => out.add([(n >> 8) & 0xff, n & 0xff]);
 
-void _putU32(BytesBuilder out, int n) => out.add([
-  (n >> 24) & 0xff,
-  (n >> 16) & 0xff,
-  (n >> 8) & 0xff,
-  n & 0xff,
-]);
+void _putU32(BytesBuilder out, int n) =>
+    out.add([(n >> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]);

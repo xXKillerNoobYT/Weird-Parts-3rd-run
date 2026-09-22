@@ -8,6 +8,7 @@ import 'nearby_codec.dart';
 import 'nearby_discovery.dart';
 import 'nearby_protocol.dart';
 import 'nearby_pairing.dart';
+import 'nearby_wifi.dart';
 
 enum NearbyPhase {
   idle,
@@ -66,6 +67,7 @@ class NearbyController {
     this.localIps,
     this.codec,
     this.peerAllowed,
+    this.readNetwork = readNearbyWifiNetwork,
   });
 
   final String deviceId;
@@ -78,6 +80,7 @@ class NearbyController {
   final Future<List<String>> Function()? localIps;
   final NearbyCodec? codec;
   final bool Function(String host)? peerAllowed;
+  final Future<NearbyWifiNetwork> Function() readNetwork;
 
   NearbyCodec get _codec => codec ?? NearbyCodec();
 
@@ -93,6 +96,11 @@ class NearbyController {
   NearbyViewState get state => _state;
 
   HttpServer? _server;
+  int _lifecycle = 0;
+  int? _discoveryOwner;
+  bool _disposed = false;
+  Future<void>? _disposal;
+  NearbyWifiNetwork? _wifi;
   StreamSubscription<List<NearbyPeer>>? _peerSub;
   _PairAttempt? _pending;
   int _pairGeneration = 0;
@@ -105,10 +113,14 @@ class NearbyController {
   Timer? _pairTimer;
 
   Future<void> start() async {
+    if (_disposed) return;
     if (_state.phase != NearbyPhase.idle &&
         _state.phase != NearbyPhase.failed) {
       return;
     }
+    final generation = ++_lifecycle;
+    HttpServer? server;
+    NearbyWifiNetwork? wifi;
     _emit(
       NearbyViewState(
         phase: NearbyPhase.starting,
@@ -118,26 +130,47 @@ class NearbyController {
       ),
     );
     try {
-      final server = await HttpServer.bind(
-        bindAddress ?? InternetAddress.anyIPv4,
-        0,
-      );
+      wifi = bindAddress == null ? await readNetwork() : null;
+      if (generation != _lifecycle) return;
+      server = wifi != null
+          ? await wifi.listen()
+          : await HttpServer.bind(bindAddress!, 0);
+      if (generation != _lifecycle) {
+        await _closeServer(server, wifi);
+        return;
+      }
       _server = server;
+      _wifi = wifi;
       server.listen(
         _handleHttp,
         onError: (Object e) {
-          _fail('Nearby connection failed: $e');
+          if (generation == _lifecycle) {
+            _fail('Nearby connection failed: $e');
+          }
         },
       );
-      final ips = await (localIps ?? localIpv4Addresses)();
+      final ips = wifi != null
+          ? [wifi.address]
+          : await (localIps ?? localIpv4Addresses)();
+      if (generation != _lifecycle) {
+        await _closeServer(server, wifi);
+        return;
+      }
       final advertiseIps = ips.isNotEmpty ? ips : [server.address.address];
+      _discoveryOwner = generation;
       await discovery.start(
         deviceId: deviceId,
         name: deviceName,
         port: server.port,
         ips: advertiseIps,
       );
+      if (generation != _lifecycle) {
+        if (_discoveryOwner == generation) await discovery.stop();
+        await _closeServer(server, wifi);
+        return;
+      }
       _peerSub = discovery.peers.listen((peers) {
+        if (generation != _lifecycle) return;
         final filtered = peers.where((p) => p.deviceId != deviceId).toList();
         if (_state.phase == NearbyPhase.paired ||
             _state.phase == NearbyPhase.pairing ||
@@ -173,24 +206,38 @@ class NearbyController {
         ),
       );
     } catch (e) {
+      if (generation != _lifecycle) {
+        await _closeServer(server, wifi);
+        return;
+      }
       await stop();
-      _fail(
-        'Could not listen on this Wi‑Fi. Allow Wired Parts through the firewall and try again. $e',
-      );
+      if (!_disposed && _lifecycle == generation + 1) {
+        _fail(
+          'Could not listen on this Wi-Fi. Allow Wired Parts through the firewall and try again. $e',
+        );
+      }
+    }
+  }
+
+  Future<void> _closeServer(HttpServer? server, NearbyWifiNetwork? wifi) async {
+    try {
+      await server?.close(force: true);
+    } finally {
+      await wifi?.close();
     }
   }
 
   Future<void> stop() async {
-    _pairTimer?.cancel();
-    _pairTimer = null;
+    ++_lifecycle;
     _failPending(cancel: true);
-    await _peerSub?.cancel();
+    final peerSub = _peerSub;
+    final server = _server;
+    final wifi = _wifi;
     _peerSub = null;
-    await discovery.stop();
-    await _server?.close(force: true);
     _server = null;
-    _session = null;
-    _pending = null;
+    _wifi = null;
+    final stopDiscovery = discovery.stop();
+    final closeServer = _closeServer(server, wifi);
     if (!_stateCtrl.isClosed) {
       _emit(
         NearbyViewState(
@@ -201,21 +248,32 @@ class NearbyController {
         ),
       );
     }
+    await Future.wait<void>([
+      if (peerSub != null) peerSub.cancel(),
+      stopDiscovery,
+      closeServer,
+    ]);
   }
 
   Future<void> rename(String name) async {
     final trimmed = name.trim();
     deviceName = trimmed.isEmpty ? defaultNearbyName(deviceId) : trimmed;
+    final generation = _lifecycle;
     final port = _server?.port;
     if (port != null) {
-      final ips = await (localIps ?? localIpv4Addresses)();
+      final ips = _wifi != null
+          ? [_wifi!.address]
+          : await (localIps ?? localIpv4Addresses)();
+      if (generation != _lifecycle) return;
       await discovery.updateAdvertisement(
         name: deviceName,
         port: port,
         ips: ips.isNotEmpty ? ips : [InternetAddress.loopbackIPv4.address],
       );
     }
-    _emit(_state.copyWith(deviceName: deviceName));
+    if (generation == _lifecycle && !_disposed) {
+      _emit(_state.copyWith(deviceName: deviceName));
+    }
   }
 
   Future<void> pair(NearbyPeer peer) async {
@@ -490,8 +548,7 @@ class NearbyController {
 
   Future<void> _handleHttp(HttpRequest request) async {
     try {
-      if (peerAllowed != null &&
-          !peerAllowed!(request.connectionInfo?.remoteAddress.address ?? '')) {
+      if (!_allowsPeer(request.connectionInfo?.remoteAddress.address ?? '')) {
         request.response.statusCode = HttpStatus.forbidden;
         await _writeJson(request, {'error': 'Use the same Wi-Fi network'});
         return;
@@ -944,10 +1001,15 @@ class NearbyController {
     Duration timeout = const Duration(seconds: 20),
     void Function(double progress)? onProgress,
   }) async {
-    if (peerAllowed != null && !peerAllowed!(peer.host)) {
+    if (!_allowsPeer(peer.host)) {
       throw const NearbyException('Use the same Wi-Fi network');
     }
     final client = HttpClient()..findProxy = (_) => 'DIRECT';
+    final wifi = _wifi;
+    if (wifi != null) {
+      client.connectionFactory = (uri, proxyHost, proxyPort) =>
+          wifi.connect(uri);
+    }
     try {
       final req = await client
           .open(method, peer.host, peer.port, path)
@@ -997,6 +1059,9 @@ class NearbyController {
       client.close(force: true);
     }
   }
+
+  bool _allowsPeer(String host) =>
+      (peerAllowed?.call(host) ?? true) && (_wifi?.allowsPeer(host) ?? true);
 
   Future<Uint8List> _readBounded(Stream<List<int>> stream, int limit) async {
     final builder = BytesBuilder(copy: false);
@@ -1093,7 +1158,12 @@ class NearbyController {
     if (!_stateCtrl.isClosed) _stateCtrl.add(next);
   }
 
-  Future<void> dispose() async {
+  Future<void> dispose() {
+    _disposed = true;
+    return _disposal ??= _dispose();
+  }
+
+  Future<void> _dispose() async {
     await stop();
     await _stateCtrl.close();
   }
