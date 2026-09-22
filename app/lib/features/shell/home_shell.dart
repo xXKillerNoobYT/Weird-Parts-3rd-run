@@ -130,54 +130,11 @@ class _MoreTabState extends State<_MoreTab> {
       if (!ok || !mounted) return;
     }
 
-    final controller = TextEditingController();
-    final confirmController = TextEditingController();
-    final saved = await showDialog<bool>(
+    final value = await showDialog<String>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(isSet ? 'Change PIN' : 'Set PIN'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'New PIN'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: confirmController,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Confirm PIN'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final a = controller.text.trim();
-                final b = confirmController.text.trim();
-                if (a.isEmpty || a != b) return;
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      builder: (_) => _SetPinDialog(isSet: isSet),
     );
-    final value = controller.text.trim();
-    controller.dispose();
-    confirmController.dispose();
-    if (saved != true || value.isEmpty) return;
+    if (value == null || value.isEmpty) return;
 
     await pin.setPin(value);
     if (!mounted) return;
@@ -321,4 +278,67 @@ String _formatBackupStamp(String iso) {
   final h = dt.hour.toString().padLeft(2, '0');
   final min = dt.minute.toString().padLeft(2, '0');
   return '$y-$m-$d $h:$min';
+}
+
+class _SetPinDialog extends StatefulWidget {
+  const _SetPinDialog({required this.isSet});
+
+  final bool isSet;
+
+  @override
+  State<_SetPinDialog> createState() => _SetPinDialogState();
+}
+
+class _SetPinDialogState extends State<_SetPinDialog> {
+  final _controller = TextEditingController();
+  final _confirmController = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.isSet ? 'Change PIN' : 'Set PIN'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'New PIN'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirmController,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Confirm PIN'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final value = _controller.text.trim();
+            if (value.isEmpty || value != _confirmController.text.trim()) {
+              return;
+            }
+            Navigator.pop(context, value);
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
