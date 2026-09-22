@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
@@ -9,6 +12,92 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  test(
+    'outgoing socket uses peer address while binding selected Wi-Fi',
+    () async {
+      final network = _Network();
+      final socket = _Socket('192.168.10.40', '192.168.10.40');
+      await _outgoing(socket, () async {
+        final task = await network.connect(
+          Uri.parse('http://192.168.10.40:6809'),
+        );
+        expect(await task.socket, same(socket));
+        expect(socket.destroyed, isFalse);
+        expect(socket.options.single.option, Platform.isWindows ? 31 : 25);
+        expect(network.interfaceChecks, 1);
+      });
+    },
+  );
+
+  for (final endpoint in [
+    ('192.168.10.41', '192.168.10.40'),
+    ('192.168.10.40', '192.168.10.41'),
+    ('192.168.10.40', '192.168.11.40'),
+  ]) {
+    test('outgoing rejects unexpected endpoint $endpoint', () async {
+      final network = _Network();
+      final socket = _Socket(endpoint.$1, endpoint.$2);
+      await _outgoing(socket, () async {
+        final task = await network.connect(
+          Uri.parse('http://192.168.10.40:6809'),
+        );
+        await expectLater(task.socket, throwsA(isA<NearbyException>()));
+        expect(socket.destroyed, isTrue);
+        expect(socket.options, isEmpty);
+      });
+    });
+  }
+
+  test('outgoing option failure destroys socket before release', () async {
+    final network = _Network();
+    final socket = _Socket('192.168.10.40', '192.168.10.40')..failOption = true;
+    await _outgoing(socket, () async {
+      final task = await network.connect(
+        Uri.parse('http://192.168.10.40:6809'),
+      );
+      await expectLater(task.socket, throwsA(isA<SocketException>()));
+      expect(socket.destroyed, isTrue);
+    });
+  });
+
+  for (final endpoint in [
+    ('192.168.10.20', '192.168.10.40', false),
+    ('192.168.10.21', '192.168.10.40', true),
+    ('192.168.10.20', '192.168.11.40', true),
+  ]) {
+    test('accepted socket validates listener and peer $endpoint', () async {
+      final network = _Network();
+      final listener = _Listener();
+      final socket = _Socket(endpoint.$1, endpoint.$2);
+      await IOOverrides.runZoned(
+        () async {
+          final server = await network.listen();
+          final errors = <Object>[];
+          final subscription = server.listen((_) {}, onError: errors.add);
+          listener.events.add(socket);
+          await Future<void>.delayed(Duration.zero);
+          expect(socket.destroyed, endpoint.$3);
+          expect(errors.length, endpoint.$3 ? 1 : 0);
+          expect(socket.options.length, endpoint.$3 ? 0 : 1);
+          await server.close(force: true);
+          await subscription.cancel();
+          await network.close();
+        },
+        serverSocketBind:
+            (
+              address,
+              port, {
+              backlog = 0,
+              v6Only = false,
+              shared = false,
+            }) async {
+              expect((address as InternetAddress).address, '192.168.10.20');
+              return listener;
+            },
+      );
+    });
+  }
 
   test(
     'only other private IPv4 peers on the selected Wi-Fi subnet are allowed',
@@ -134,5 +223,111 @@ void main() {
         throwsA(isA<NearbyException>()),
       );
     },
+  );
+}
+
+class _Network extends NearbyWifiNetwork {
+  _Network()
+    : super(
+        name: 'Wi-Fi',
+        index: 7,
+        address: '192.168.10.20',
+        prefixLength: 24,
+      );
+  int interfaceChecks = 0;
+  @override
+  Future<NetworkInterface> interface() async {
+    interfaceChecks++;
+    return _Interface();
+  }
+}
+
+class _Interface implements NetworkInterface {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+Future<void> _outgoing(_Socket socket, Future<void> Function() body) =>
+    IOOverrides.runZoned(
+      body,
+      socketStartConnect: (host, port, {sourceAddress, sourcePort = 0}) async {
+        expect((host as InternetAddress).address, '192.168.10.40');
+        expect(port, 6809);
+        expect((sourceAddress as InternetAddress).address, '192.168.10.20');
+        return ConnectionTask.fromSocket(Future.value(socket), socket.destroy);
+      },
+    );
+
+class _Socket extends Stream<Uint8List> implements Socket {
+  _Socket(String address, String remote)
+    : address = InternetAddress(address),
+      remoteAddress = InternetAddress(remote);
+  @override
+  final InternetAddress address;
+  @override
+  final InternetAddress remoteAddress;
+  final events = StreamController<Uint8List>();
+  final options = <RawSocketOption>[];
+  bool destroyed = false;
+  bool failOption = false;
+  @override
+  int get port => 6809;
+  @override
+  int get remotePort => 6810;
+  @override
+  Future<void> get done => Future<void>.value();
+  @override
+  void destroy() {
+    destroyed = true;
+    unawaited(events.close());
+  }
+
+  @override
+  void setRawOption(RawSocketOption option) {
+    if (failOption) throw const SocketException('Synthetic option failure');
+    options.add(option);
+  }
+
+  @override
+  bool setOption(SocketOption option, bool enabled) => true;
+  @override
+  StreamSubscription<Uint8List> listen(
+    void Function(Uint8List)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => events.stream.listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Listener extends Stream<Socket> implements ServerSocket {
+  final events = StreamController<Socket>();
+  @override
+  InternetAddress get address => InternetAddress('192.168.10.20');
+  @override
+  int get port => 6809;
+  @override
+  Future<ServerSocket> close() async {
+    unawaited(events.close());
+    return this;
+  }
+
+  @override
+  StreamSubscription<Socket> listen(
+    void Function(Socket)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => events.stream.listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
   );
 }
