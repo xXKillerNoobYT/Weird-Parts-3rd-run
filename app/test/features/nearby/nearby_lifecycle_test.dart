@@ -12,9 +12,10 @@ import 'package:wired_parts/features/nearby/nearby_wifi.dart';
 class _Discovery implements NearbyDiscovery {
   final starts = <({int port, Completer<void> ready})>[];
   final started = StreamController<void>.broadcast();
+  final peerUpdates = StreamController<List<NearbyPeer>>.broadcast();
   int stops = 0;
   @override
-  Stream<List<NearbyPeer>> get peers => const Stream.empty();
+  Stream<List<NearbyPeer>> get peers => peerUpdates.stream;
   @override
   Future<void> start({
     required String deviceId,
@@ -43,12 +44,14 @@ class _Discovery implements NearbyDiscovery {
 
 NearbyController _controller(
   NearbyDiscovery discovery, {
+  String deviceId = 'test',
+  String deviceName = 'Test',
   bool native = false,
   Future<List<String>> Function()? localIps,
   Future<NearbyWifiNetwork> Function()? readNetwork,
 }) => NearbyController(
-  deviceId: 'test',
-  deviceName: 'Test',
+  deviceId: deviceId,
+  deviceName: deviceName,
   discovery: discovery,
   bindAddress: native ? null : InternetAddress.loopbackIPv4,
   localIps: localIps ?? () async => ['127.0.0.1'],
@@ -176,12 +179,97 @@ Future<void> discover(LanNearbyDiscovery discovery) => discovery.start(
   ips: ['192.168.1.2'],
 );
 
+class _LoopbackHttpOverrides extends HttpOverrides {}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  test(
+    'failed pairing refreshes peers and retries the replacement listener',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final expiredListener = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => expiredListener.close(force: true));
+      expiredListener.listen((request) async {
+        await request.drain<void>();
+        request.response.statusCode = HttpStatus.conflict;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"error":"Pair expired. Try again."}');
+        await request.response.close();
+      });
+
+      final discovery = _Discovery();
+      final nearby = _controller(discovery);
+      addTearDown(nearby.dispose);
+      addTearDown(discovery.peerUpdates.close);
+      var entered = discovery.started.stream.first;
+      final starting = nearby.start();
+      await entered;
+      discovery.starts.single.ready.complete();
+      await starting;
+
+      final oldPeer = NearbyPeer(
+        deviceId: 'peer-device',
+        name: 'Peer',
+        host: '127.0.0.1',
+        port: expiredListener.port,
+      );
+      discovery.peerUpdates.add([oldPeer]);
+      await pumpEventQueue();
+      expect(nearby.state.peers, [oldPeer]);
+      await nearby.pair(nearby.state.peers.single);
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.status, 'Pair expired. Try again.');
+      expect(nearby.state.error, 'Pair expired. Try again.');
+
+      final replacementDiscovery = _Discovery();
+      final replacement = _controller(
+        replacementDiscovery,
+        deviceId: 'peer-device',
+        deviceName: 'Peer',
+      );
+      addTearDown(replacement.dispose);
+      addTearDown(replacementDiscovery.peerUpdates.close);
+      entered = replacementDiscovery.started.stream.first;
+      final replacementStarting = replacement.start();
+      await entered;
+      replacementDiscovery.starts.single.ready.complete();
+      await replacementStarting;
+      final replacementPeer = oldPeer.copyWith(
+        port: replacementDiscovery.starts.single.port,
+      );
+
+      discovery.peerUpdates.add([replacementPeer]);
+      await pumpEventQueue();
+      expect(nearby.state.peers.single.port, replacementPeer.port);
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.status, 'Pair expired. Try again.');
+      expect(nearby.state.error, 'Pair expired. Try again.');
+
+      discovery.peerUpdates.add([]);
+      await pumpEventQueue();
+      expect(nearby.state.peers, isEmpty);
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.status, 'Pair expired. Try again.');
+      expect(nearby.state.error, 'Pair expired. Try again.');
+
+      discovery.peerUpdates.add([replacementPeer]);
+      await pumpEventQueue();
+      await nearby.pair(nearby.state.peers.single);
+      expect(nearby.state.phase, NearbyPhase.pairing);
+      expect(nearby.state.peerName, 'Peer');
+      expect(nearby.state.verifyCode, isNotNull);
+      expect(replacement.state.phase, NearbyPhase.pairing);
+      expect(replacement.state.peerName, 'Test');
+      expect(replacement.state.verifyCode, isNotNull);
+    }, _LoopbackHttpOverrides()),
+  );
 
   for (final failure in ['error', 'closed', 'done', 'startup']) {
     test(
