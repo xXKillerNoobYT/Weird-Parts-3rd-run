@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -38,22 +39,21 @@ class LanNearbyDiscovery implements NearbyDiscovery {
   final DateTime Function()? now;
   final Future<NearbyWifiNetwork> Function() readNetwork;
   final Future<RawDatagramSocket> Function(int port)? bindSocket;
-  final MDnsClient Function()? createMdnsClient;
+  final MDnsClient Function(RawDatagramSocketFactory factory)? createMdnsClient;
 
   final _peerCtrl = StreamController<List<NearbyPeer>>.broadcast();
   final _peers = <String, _SeenPeer>{};
-  RawDatagramSocket? _socket;
+  _UdpResource? _requiredUdp;
+  _UdpResource? _multicastTx;
   Timer? _announce;
   Timer? _expire;
-  MDnsClient? _mdns;
-  StreamSubscription<ResourceRecord>? _mdnsSub;
+  _MdnsRun? _mdns;
   String _deviceId = '';
   String _name = '';
   int _httpPort = 0;
   List<String> _ips = const [];
   var _running = false;
   int _generation = 0;
-  Set<RawDatagramSocket> _mdnsSockets = {};
   NearbyWifiNetwork? _network;
 
   @override
@@ -93,40 +93,43 @@ class LanNearbyDiscovery implements NearbyDiscovery {
         return;
       }
       socket.broadcastEnabled = true;
-      socket.multicastLoopback = true;
-      socket.multicastHops = 1;
       network.bindDatagram(socket);
-      socket.joinMulticast(InternetAddress(kNearbyMulticastGroup), iface);
+      try {
+        socket.joinMulticast(InternetAddress(kNearbyMulticastGroup), iface);
+      } on SocketException catch (error, stack) {
+        _logOptionalFailure('multicast membership', error, stack);
+      } on OSError catch (error, stack) {
+        _logOptionalFailure('multicast membership', error, stack);
+      }
       _deviceId = deviceId;
       _name = name;
       _httpPort = port;
       _network = network;
       _ips = [network.address];
       _running = true;
-      _socket = socket;
-      final listeningSocket = socket;
-      socket.listen(
+      final owner = _UdpResource(generation, socket);
+      _requiredUdp = owner;
+      owner.events = socket.listen(
         (event) {
-          if (generation != _generation) return;
+          if (!_isCurrentRequired(owner)) return;
           if (event == RawSocketEvent.closed ||
               event == RawSocketEvent.readClosed) {
-            _socketFailed(
-              generation,
+            _requiredFailed(
+              owner,
               const NearbyException('Discovery socket closed'),
             );
             return;
           }
           if (event != RawSocketEvent.read) return;
-          final dg = listeningSocket.receive();
-          if (dg == null) return;
-          _onDatagram(dg);
+          final dg = owner.socket.receive();
+          if (dg != null) _onDatagram(dg);
         },
         onError: (Object error, StackTrace stack) {
-          _socketFailed(generation, error, stack);
+          _requiredFailed(owner, error, stack);
         },
         onDone: () {
-          _socketFailed(
-            generation,
+          _requiredFailed(
+            owner,
             const NearbyException('Discovery socket closed'),
           );
         },
@@ -148,12 +151,29 @@ class LanNearbyDiscovery implements NearbyDiscovery {
       if (generation == _generation) _dropStale();
     });
     _sendBeacon();
-    _sendWho();
+    if (generation != _generation || !_running) return;
+    unawaited(_startMulticastTx(generation, network));
     unawaited(_startMdnsBrowse(generation, network, iface));
   }
 
-  void _socketFailed(int generation, Object error, [StackTrace? stack]) {
-    if (generation != _generation || !_running) return;
+  bool _isCurrentRequired(_UdpResource owner) =>
+      owner.generation == _generation &&
+      _running &&
+      identical(_requiredUdp, owner);
+
+  bool _isCurrentMulticast(_UdpResource owner) =>
+      owner.generation == _generation &&
+      _running &&
+      identical(_multicastTx, owner);
+
+  bool _isCurrentMdns(_MdnsRun owner) =>
+      owner.generation == _generation &&
+      _running &&
+      identical(_mdns, owner) &&
+      owner.phase != _MdnsPhase.closed;
+
+  void _requiredFailed(_UdpResource owner, Object error, [StackTrace? stack]) {
+    if (!_isCurrentRequired(owner)) return;
     final stopping = stop();
     _peerCtrl.addError(error, stack);
     unawaited(stopping);
@@ -188,22 +208,23 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     _announce = null;
     _expire?.cancel();
     _expire = null;
-    final mdnsSub = _mdnsSub;
+    final required = _requiredUdp;
+    final multicast = _multicastTx;
     final mdns = _mdns;
-    final sockets = _mdnsSockets;
-    _mdnsSockets = {};
-    _mdnsSub = null;
+    _requiredUdp = null;
+    _multicastTx = null;
     _mdns = null;
-    _socket?.close();
-    _socket = null;
     _network = null;
-    mdns?.stop();
-    for (final socket in sockets) {
-      socket.close();
+    final cancellations = <Future<void>>[];
+    for (final owner in [required, multicast]) {
+      if (owner == null) continue;
+      owner.socket.close();
+      cancellations.add(owner.events.cancel());
     }
+    if (mdns != null) cancellations.add(_closeMdns(mdns));
     _peers.clear();
     if (!_peerCtrl.isClosed) _peerCtrl.add(const []);
-    await mdnsSub?.cancel();
+    await Future.wait(cancellations);
   }
 
   void _onDatagram(Datagram dg) {
@@ -247,8 +268,8 @@ class LanNearbyDiscovery implements NearbyDiscovery {
   }
 
   void _sendBeacon() {
-    final socket = _socket;
-    if (socket == null || !_running || _httpPort == 0) return;
+    final owner = _requiredUdp;
+    if (owner == null || !_isCurrentRequired(owner) || _httpPort == 0) return;
     final bytes = encodeBeacon(
       deviceId: _deviceId,
       name: _name,
@@ -256,22 +277,95 @@ class LanNearbyDiscovery implements NearbyDiscovery {
       ips: _ips,
     );
     try {
-      socket.send(bytes, InternetAddress(kNearbyMulticastGroup), udpPort);
-    } catch (_) {}
-    try {
-      final broadcast = _network?.broadcastAddress;
-      if (broadcast != null) socket.send(bytes, broadcast, udpPort);
-    } catch (_) {}
-    _sendMdnsAnnounce();
+      owner.socket.send(bytes, _network!.broadcastAddress, udpPort);
+    } catch (error, stack) {
+      _requiredFailed(owner, error, stack);
+      return;
+    }
+    if (!_isCurrentRequired(owner)) return;
+    final multicast = _multicastTx;
+    if (multicast != null) _sendMulticast(multicast, bytes);
+    final mdns = _mdns;
+    if (mdns != null) _sendMdnsAnnounce(mdns);
   }
 
   void _sendWho() {
-    final socket = _socket;
-    if (socket == null) return;
-    final bytes = encodeWhoQuery();
+    final owner = _multicastTx;
+    if (owner != null) _sendMulticast(owner, encodeWhoQuery());
+  }
+
+  void _sendMulticast(_UdpResource owner, List<int> bytes) {
+    if (!_isCurrentMulticast(owner)) return;
     try {
-      socket.send(bytes, InternetAddress(kNearbyMulticastGroup), udpPort);
-    } catch (_) {}
+      owner.socket.send(bytes, InternetAddress(kNearbyMulticastGroup), udpPort);
+    } catch (error, stack) {
+      _multicastFailed(owner, error, stack);
+    }
+  }
+
+  Future<void> _startMulticastTx(
+    int generation,
+    NearbyWifiNetwork network,
+  ) async {
+    RawDatagramSocket? socket;
+    try {
+      socket =
+          await (bindSocket?.call(0) ??
+              RawDatagramSocket.bind(network.bindAddress, 0));
+      if (generation != _generation || !_running) {
+        socket.close();
+        return;
+      }
+      network.bindDatagram(socket);
+      socket.multicastLoopback = true;
+      socket.multicastHops = 1;
+      socket.readEventsEnabled = false;
+      final owner = _UdpResource(generation, socket);
+      _multicastTx = owner;
+      owner.events = socket.listen(
+        (event) {
+          if (event == RawSocketEvent.closed ||
+              event == RawSocketEvent.readClosed) {
+            _multicastFailed(
+              owner,
+              const NearbyException('Multicast transmitter closed'),
+            );
+          }
+        },
+        onError: (Object error, StackTrace stack) {
+          _multicastFailed(owner, error, stack);
+        },
+        onDone: () {
+          _multicastFailed(
+            owner,
+            const NearbyException('Multicast transmitter closed'),
+          );
+        },
+      );
+      _sendMulticast(
+        owner,
+        encodeBeacon(
+          deviceId: _deviceId,
+          name: _name,
+          port: _httpPort,
+          ips: _ips,
+        ),
+      );
+      _sendWho();
+    } catch (error, stack) {
+      socket?.close();
+      if (generation == _generation && _running) {
+        _logOptionalFailure('multicast transmitter', error, stack);
+      }
+    }
+  }
+
+  void _multicastFailed(_UdpResource owner, Object error, [StackTrace? stack]) {
+    if (!_isCurrentMulticast(owner)) return;
+    _multicastTx = null;
+    owner.socket.close();
+    unawaited(owner.events.cancel());
+    _logOptionalFailure('multicast transmitter', error, stack);
   }
 
   Future<void> _startMdnsBrowse(
@@ -279,78 +373,112 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     NearbyWifiNetwork network,
     NetworkInterface iface,
   ) async {
-    final sockets = <RawDatagramSocket>{};
-    _mdnsSockets = sockets;
-    final client =
-        createMdnsClient?.call() ??
-        MDnsClient(
-          rawDatagramSocketFactory:
-              (
-                dynamic host,
-                int port, {
-                bool reuseAddress = true,
-                bool reusePort = true,
-                int ttl = 255,
-              }) async {
-                final socket = await RawDatagramSocket.bind(
-                  host,
-                  port,
-                  reuseAddress: reuseAddress,
-                  reusePort: reusePort,
-                  ttl: ttl,
-                );
-                try {
-                  if (generation != _generation) {
-                    throw const NearbyException('Nearby stopped');
-                  }
-                  network.bindDatagram(socket);
-                  sockets.add(socket);
-                  return socket;
-                } catch (_) {
-                  socket.close();
-                  rethrow;
-                }
-              },
-        );
+    final owner = _MdnsRun(generation);
+    Future<RawDatagramSocket> socketFactory(
+      dynamic host,
+      int port, {
+      bool reuseAddress = true,
+      bool reusePort = true,
+      int ttl = 255,
+    }) async {
+      final socket =
+          await (bindSocket?.call(port) ??
+              RawDatagramSocket.bind(
+                host,
+                port,
+                reuseAddress: reuseAddress,
+                reusePort: reusePort,
+                ttl: ttl,
+              ));
+      try {
+        if (generation != _generation ||
+            !_running ||
+            owner.phase == _MdnsPhase.closed) {
+          throw const NearbyException('Nearby stopped');
+        }
+        network.bindDatagram(socket);
+        owner.sockets.add(socket);
+        return socket;
+      } catch (_) {
+        socket.close();
+        rethrow;
+      }
+    }
+
     try {
-      await client.start(
+      owner.client =
+          createMdnsClient?.call(socketFactory) ??
+          MDnsClient(rawDatagramSocketFactory: socketFactory);
+    } catch (error, stack) {
+      _logOptionalFailure('mDNS client', error, stack);
+      return;
+    }
+    _mdns = owner;
+    try {
+      await owner.client.start(
         interfacesFactory: (_) async => [iface],
-        onError: (Object error) {
-          client.stop();
-          for (final socket in sockets) {
-            socket.close();
-          }
+        onError: (Object error, [StackTrace? stack]) {
+          _mdnsFailed(owner, error, stack);
         },
       );
-      if (generation != _generation) {
-        client.stop();
-        for (final socket in sockets) {
-          socket.close();
-        }
+      if (!_isCurrentMdns(owner) || owner.phase != _MdnsPhase.starting) {
+        await _closeMdns(owner);
         return;
       }
-      _mdns = client;
-      _mdnsSub = client
+      owner.phase = _MdnsPhase.active;
+      _sendMdnsAnnounce(owner);
+      if (!_isCurrentMdns(owner)) return;
+      owner.browse = owner.client
           .lookup<PtrResourceRecord>(
             ResourceRecordQuery.serverPointer('$kNearbyServiceType.local'),
           )
           .listen(
-            (ptr) => _resolveMdns(client, ptr.domainName, generation),
-            onError: (_) {},
+            (ptr) => _resolveMdns(owner, ptr.domainName),
+            onError: (Object error, StackTrace stack) {
+              _mdnsFailed(owner, error, stack);
+            },
           );
-    } catch (_) {
-      client.stop();
-      for (final socket in sockets) {
-        socket.close();
-      }
+    } catch (error, stack) {
+      _mdnsFailed(owner, error, stack);
+      await _closeMdns(owner);
     }
   }
 
-  Future<void> _resolveMdns(
-    MDnsClient client,
-    String domain,
-    int generation,
-  ) async {
+  void _mdnsFailed(_MdnsRun owner, Object error, [StackTrace? stack]) {
+    if (!_isCurrentMdns(owner)) return;
+    unawaited(_closeMdns(owner));
+    _logOptionalFailure('mDNS', error, stack);
+  }
+
+  Future<void> _closeMdns(_MdnsRun owner) async {
+    owner.phase = _MdnsPhase.closed;
+    if (identical(_mdns, owner)) _mdns = null;
+    final browse = owner.browse;
+    owner.browse = null;
+    owner.client.stop();
+    for (final socket in owner.sockets) {
+      socket.close();
+    }
+    owner.sockets.clear();
+    await browse?.cancel();
+  }
+
+  void _logOptionalFailure(
+    String operation,
+    Object error, [
+    StackTrace? stack,
+  ]) {
+    developer.log(
+      'Nearby $operation unavailable',
+      name: 'wired_parts.nearby',
+      error: error,
+      stackTrace: stack,
+    );
+  }
+
+  Future<void> _resolveMdns(_MdnsRun owner, String domain) async {
+    if (!_isCurrentMdns(owner) || owner.phase != _MdnsPhase.active) return;
+    final client = owner.client;
     try {
       String? host;
       var port = 0;
@@ -363,7 +491,7 @@ class LanNearbyDiscovery implements NearbyDiscovery {
         port = srv.port;
         break;
       }
-      if (generation != _generation) return;
+      if (!_isCurrentMdns(owner)) return;
       await for (final txt in client.lookup<TxtResourceRecord>(
         ResourceRecordQuery.text(domain),
       )) {
@@ -377,7 +505,7 @@ class LanNearbyDiscovery implements NearbyDiscovery {
         }
         break;
       }
-      if (generation != _generation) return;
+      if (!_isCurrentMdns(owner)) return;
       if (host != null && host.endsWith('.local')) {
         await for (final a in client.lookup<IPAddressResourceRecord>(
           ResourceRecordQuery.addressIPv4(host),
@@ -386,10 +514,12 @@ class LanNearbyDiscovery implements NearbyDiscovery {
           break;
         }
       }
-      if (generation != _generation) return;
+      if (!_isCurrentMdns(owner)) return;
       if (id == null || id == _deviceId || host == null || port == 0) return;
       _remember(NearbyPeer(deviceId: id, name: name, host: host, port: port));
-    } catch (_) {}
+    } catch (error, stack) {
+      _mdnsFailed(owner, error, stack);
+    }
   }
 
   static Iterable<String> _txtEntries(String text) {
@@ -407,20 +537,46 @@ class LanNearbyDiscovery implements NearbyDiscovery {
     return out;
   }
 
-  void _sendMdnsAnnounce() {
-    final socket = _socket;
-    if (socket == null || _ips.isEmpty || _httpPort == 0) return;
-    try {
-      final packet = buildMdnsAnnouncement(
-        instanceName: _safeInstance(_name, _deviceId),
-        port: _httpPort,
-        ipv4: _ips.first,
-        deviceId: _deviceId,
-        name: _name,
-      );
-      socket.send(packet, InternetAddress('224.0.0.251'), 5353);
-    } catch (_) {}
+  void _sendMdnsAnnounce(_MdnsRun owner) {
+    if (!_isCurrentMdns(owner) || owner.phase != _MdnsPhase.active) return;
+    for (final socket in owner.sockets) {
+      if (socket.address.type != InternetAddressType.IPv4 ||
+          socket.port != 5353) {
+        continue;
+      }
+      try {
+        final packet = buildMdnsAnnouncement(
+          instanceName: _safeInstance(_name, _deviceId),
+          port: _httpPort,
+          ipv4: _ips.single,
+          deviceId: _deviceId,
+          name: _name,
+        );
+        socket.send(packet, InternetAddress('224.0.0.251'), 5353);
+      } catch (error, stack) {
+        _mdnsFailed(owner, error, stack);
+      }
+      return;
+    }
   }
+}
+
+class _UdpResource {
+  _UdpResource(this.generation, this.socket);
+  final int generation;
+  final RawDatagramSocket socket;
+  late final StreamSubscription<RawSocketEvent> events;
+}
+
+enum _MdnsPhase { starting, active, closed }
+
+class _MdnsRun {
+  _MdnsRun(this.generation);
+  final int generation;
+  late final MDnsClient client;
+  final sockets = <RawDatagramSocket>{};
+  _MdnsPhase phase = _MdnsPhase.starting;
+  StreamSubscription<ResourceRecord>? browse;
 }
 
 class _SeenPeer {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -90,7 +91,35 @@ class _Network extends NearbyWifiNetwork {
 }
 
 class _Socket extends Stream<RawSocketEvent> implements RawDatagramSocket {
+  _Socket({this.port = 41000});
+  @override
+  final int port;
+  @override
+  InternetAddress get address => InternetAddress.anyIPv4;
+  @override
+  bool readEventsEnabled = true;
   final events = StreamController<RawSocketEvent>();
+  final incoming = Queue<Datagram>();
+  @override
+  Datagram? receive() => incoming.isEmpty ? null : incoming.removeFirst();
+  void addPeer() {
+    incoming.add(
+      Datagram(
+        Uint8List.fromList(
+          encodeBeacon(
+            deviceId: 'peer-shop',
+            name: 'Peer shop',
+            port: 6900,
+            ips: ['192.168.1.3'],
+          ),
+        ),
+        InternetAddress('192.168.1.3'),
+        49991,
+      ),
+    );
+    events.add(RawSocketEvent.read);
+  }
+
   bool closed = false;
   bool failFirstSend = false;
   int sends = 0;
@@ -280,8 +309,9 @@ void main() {
         final mdns = _Mdns();
         final discovery = LanNearbyDiscovery(
           readNetwork: () async => network,
-          bindSocket: (_) async => socket,
-          createMdnsClient: () => mdns,
+          bindSocket: (port) async =>
+              port == 41000 ? socket : _Socket(port: port),
+          createMdnsClient: (_) => mdns,
         );
         final nearby = _controller(
           discovery,
@@ -323,6 +353,56 @@ void main() {
     );
   }
 
+  for (final optional in ['custom multicast', 'mDNS']) {
+    test('optional $optional error preserves HTTP and visible peers', () async {
+      final required = _Socket();
+      final transmitter = _Socket(port: 0)
+        ..failFirstSend = optional == 'custom multicast';
+      final network = _Network();
+      final mdns = _Mdns();
+      final discovery = LanNearbyDiscovery(
+        readNetwork: () async => network,
+        bindSocket: (port) async => port == 41000 ? required : transmitter,
+        createMdnsClient: (_) => mdns,
+      );
+      final nearby = _controller(
+        discovery,
+        native: true,
+        readNetwork: () async => network,
+      );
+      addTearDown(nearby.dispose);
+      await nearby.start();
+      await mdns.started.future;
+      if (optional == 'mDNS') {
+        mdns.socketError!(const SocketException('Synthetic mDNS failure'));
+      }
+      await pumpEventQueue();
+      required.addPeer();
+      await pumpEventQueue();
+      expect(nearby.state.phase, NearbyPhase.looking);
+      expect(nearby.state.error, isNull);
+      expect(
+        nearby.state.peers
+            .map((peer) => (peer.deviceId, peer.name, peer.host, peer.port))
+            .toList(),
+        [('peer-shop', 'Peer shop', '192.168.1.3', 6900)],
+      );
+      final connection = await Socket.connect('127.0.0.1', network.port!);
+      expect(connection.remotePort, network.port);
+      connection.destroy();
+      expect(required.closed, isFalse);
+      if (optional == 'custom multicast') expect(transmitter.closed, isTrue);
+      mdns.ready.complete();
+      await pumpEventQueue();
+      await nearby.stop();
+      expect(required.closed, isTrue);
+      await expectLater(
+        Socket.connect('127.0.0.1', network.port!),
+        throwsA(isA<SocketException>()),
+      );
+    });
+  }
+
   test(
     'normal discovery stop and optional mDNS failure do not report UDP failure',
     () async {
@@ -330,8 +410,9 @@ void main() {
       final mdns = _Mdns();
       final discovery = LanNearbyDiscovery(
         readNetwork: () async => _Network(),
-        bindSocket: (_) async => socket,
-        createMdnsClient: () => mdns,
+        bindSocket: (port) async =>
+            port == 41000 ? socket : _Socket(port: port),
+        createMdnsClient: (_) => mdns,
       );
       final errors = <Object>[];
       final subscription = discovery.peers.listen((_) {}, onError: errors.add);
@@ -400,8 +481,8 @@ void main() {
     final mdns = _Mdns();
     final discovery = LanNearbyDiscovery(
       readNetwork: () async => _Network(),
-      bindSocket: (_) async => socket,
-      createMdnsClient: () => mdns,
+      bindSocket: (port) async => port == 41000 ? socket : _Socket(port: port),
+      createMdnsClient: (_) => mdns,
     );
     addTearDown(discovery.stop);
     final errors = <Object>[];
@@ -549,12 +630,12 @@ void main() {
       final sockets = <_Socket>[];
       final discovery = LanNearbyDiscovery(
         readNetwork: () async => _Network(),
-        bindSocket: (_) async {
-          final socket = _Socket();
+        bindSocket: (port) async {
+          final socket = _Socket(port: port);
           sockets.add(socket);
           return socket;
         },
-        createMdnsClient: () => created++ == 0 ? first : second,
+        createMdnsClient: (_) => created++ == 0 ? first : second,
       );
       addTearDown(discovery.stop);
       await discover(discovery);
@@ -567,14 +648,20 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       first.ready.complete();
       await Future<void>.delayed(Duration.zero);
-      expect(first.stops, 1);
+      expect(first.stops, 2);
       expect(first.lookups, 0);
       expect(second.stops, 0);
       expect(second.lookups, 1);
-      expect(sockets[1].closed, isFalse);
+      expect(
+        sockets.lastWhere((socket) => socket.port == 41000).closed,
+        isFalse,
+      );
       await discovery.stop();
       expect(second.stops, 1);
-      expect(sockets[1].closed, isTrue);
+      expect(
+        sockets.lastWhere((socket) => socket.port == 41000).closed,
+        isTrue,
+      );
     },
   );
 }
