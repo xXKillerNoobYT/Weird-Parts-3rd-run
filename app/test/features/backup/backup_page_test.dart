@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +15,7 @@ import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
-import 'backup_test_support.dart';
+import '../../../tool/backup_recovery_scenario.dart';
 
 Widget _page({
   required AppDatabase db,
@@ -250,65 +249,178 @@ void main() {
     await wipe;
   });
 
-  testWidgets('restore succeeds if keepLocalDeviceId fails after the swap', (
-    tester,
-  ) async {
-    final dest = Directory.systemTemp.createTempSync('wp-app-keep-id-');
-    addTearDown(() => dest.deleteSync(recursive: true));
-    late Uint8List bytes;
-    const destId = 'dest-device-keep';
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(db.close);
-    var keepAttempts = 0;
-
-    await tester.runAsync(() async {
-      File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
-        await sqliteBytesWithSetting(key: 'marker', value: 'local-shop'),
-      );
-      final sqlite = await sqliteBytesWithSetting(
-        key: 'marker',
-        value: 'from-backup',
-      );
-      bytes = await BackupCodec(iterations: 1000).encrypt(
-        BackupPayload(
-          createdAt: DateTime.utc(2026, 9, 13, 18),
-          sourceDeviceId: 'source-device',
-          sqliteBytes: sqlite,
-          photos: const {},
-        ),
-        'pw',
-      );
-      await db.settingsDao.keepLocalDeviceId(destId);
-    });
-
-    await tester.pumpWidget(
-      WiredPartsApp(
-        db: db,
-        pin: PinService(db.settingsDao),
-        deviceId: destId,
-        reset: LocalDataReset(supportDir: dest, documentsDir: dest),
-        reopenDatabase: () => AppDatabase.forTesting(
-          NativeDatabase(File(p.join(dest.path, kSqliteFileName))),
-        ),
-        keepLocalDeviceId: (next, id) async {
-          keepAttempts++;
-          throw StateError('keep id');
-        },
-      ),
+  for (final invalidProfile in ['missing', 'mismatched', 'multiple']) {
+    testWidgets(
+      'restore rejects a $invalidProfile local profile before closing the database',
+      (tester) async {
+        final temp = Directory.systemTemp.createTempSync(
+          'wp-app-invalid-profile-',
+        );
+        final scenario = RecoveryScenario.open(
+          run: invalidProfile,
+          action: RecoveryAction.exercise,
+          temporaryDirectory: temp,
+          codec: BackupCodec(iterations: 1000),
+        );
+        addTearDown(() {
+          scenario.close();
+          temp.deleteSync(recursive: true);
+        });
+        await tester.runAsync(() async {
+          await scenario.seed();
+          await scenario.export();
+        });
+        final db = scenario.openDatabase(scenario.receiver);
+        addTearDown(db.close);
+        await tester.runAsync(
+          () => db.customStatement(switch (invalidProfile) {
+            'missing' => 'DELETE FROM device_profiles',
+            'mismatched' =>
+              "UPDATE device_profiles SET id = 'different-local-installation'",
+            _ => "INSERT INTO device_profiles (id, display_name, created_at) VALUES ('second-local-installation', 'Second local profile', 1700000999)",
+          }),
+        );
+        final before = await tester.runAsync(
+          () => scenario.receipt(db, scenario.receiver),
+        );
+        var reopens = 0;
+        await tester.pumpWidget(
+          WiredPartsApp(
+            db: db,
+            pin: PinService(db.settingsDao),
+            deviceId: scenario.receiver.deviceId,
+            reset: LocalDataReset(
+              supportDir: scenario.receiver.support,
+              documentsDir: scenario.receiver.documents,
+              photosDir: scenario.receiver.photos,
+            ),
+            reopenDatabase: () {
+              reopens++;
+              return scenario.openDatabase(scenario.receiver);
+            },
+          ),
+        );
+        await tester.pump();
+        final scope = tester.widget<AppScope>(find.byType(AppScope));
+        await tester.runAsync(
+          () => expectLater(
+            scope.restoreFromBackup(
+              scenario.archive.readAsBytesSync(),
+              'synthetic recovery archive only',
+            ),
+            invalidProfile == 'multiple'
+                ? throwsA(isA<StateError>())
+                : throwsA(
+                    isA<StateError>().having(
+                      (e) => e.message,
+                      'message',
+                      'Local device profile does not match this installation',
+                    ),
+                  ),
+          ),
+        );
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(reopens, 0);
+        final after = await tester.runAsync(
+          () => scenario.receipt(db, scenario.receiver),
+        );
+        expect(after, before);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
     );
-    await tester.pump();
-    final scope = tester.widget<AppScope>(find.byType(AppScope));
-    await tester.runAsync(() => scope.restoreFromBackup(bytes, 'pw'));
-    await tester.pump();
+  }
 
-    expect(keepAttempts, 2);
-    final live = tester.widget<AppScope>(find.byType(AppScope));
-    expect(live.deviceId, destId);
-    await tester.runAsync(() async {
-      expect(await live.db.settingsDao.getSetting('marker'), 'from-backup');
-    });
-    addTearDown(live.db.close);
-  });
+  testWidgets(
+    'staged device profile write failure preserves receiver shop and restart identity',
+    (tester) async {
+      final temp = Directory.systemTemp.createTempSync(
+        'wp-app-staged-identity-',
+      );
+      final scenario = RecoveryScenario.open(
+        run: 'profile-failure',
+        action: RecoveryAction.exercise,
+        temporaryDirectory: temp,
+        codec: BackupCodec(iterations: 1000),
+      );
+      addTearDown(() {
+        scenario.close();
+        temp.deleteSync(recursive: true);
+      });
+      await tester.runAsync(() async {
+        await scenario.seed();
+        await scenario.export();
+      });
+      var live = scenario.openDatabase(scenario.receiver);
+      addTearDown(() => live.close());
+      await tester.runAsync(
+        () => live.customStatement(
+          'UPDATE device_profiles SET display_name = ?, created_at = ?',
+          ['  Exact local profile  ', 1700000123],
+        ),
+      );
+      final before = await tester.runAsync(
+        () => scenario.receipt(live, scenario.receiver),
+      );
+      var reopens = 0;
+      await tester.pumpWidget(
+        WiredPartsApp(
+          db: live,
+          pin: PinService(live.settingsDao),
+          deviceId: scenario.receiver.deviceId,
+          reset: LocalDataReset(
+            supportDir: scenario.receiver.support,
+            documentsDir: scenario.receiver.documents,
+            photosDir: scenario.receiver.photos,
+          ),
+          reopenDatabase: () {
+            reopens++;
+            live = scenario.openDatabase(scenario.receiver);
+            return live;
+          },
+          failDeviceProfileWrite: true,
+        ),
+      );
+      await tester.pump();
+      final scope = tester.widget<AppScope>(find.byType(AppScope));
+      await tester.runAsync(
+        () => expectLater(
+          scope.restoreFromBackup(
+            scenario.archive.readAsBytesSync(),
+            'synthetic recovery archive only',
+          ),
+          throwsA(
+            isA<BackupFormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('device profile write failure'),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(reopens, 1);
+      final after = await tester.runAsync(
+        () => scenario.receipt(live, scenario.receiver),
+      );
+      expect(after, before);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(live.close);
+      live = scenario.openDatabase(scenario.receiver);
+      final restarted = await tester.runAsync(
+        () => scenario.receipt(live, scenario.receiver),
+      );
+      expect(restarted, before);
+      expect(restarted!['deviceProfiles'], [
+        {
+          'id': scenario.receiver.deviceId,
+          'display_name': '  Exact local profile  ',
+          'created_at': 1700000123,
+        },
+      ]);
+    },
+  );
 
   testWidgets('wipe during restore throws instead of silent success', (
     tester,

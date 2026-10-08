@@ -30,6 +30,12 @@
 	<string>Take a photo of a catalog part.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Attach a photo to a catalog part.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_wiredpart._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Find other Wired Parts devices on this Wi‑Fi to copy the shop. Not internet and not Bluetooth.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

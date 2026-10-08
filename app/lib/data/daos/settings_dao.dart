@@ -17,10 +17,7 @@ class SettingsDao extends DatabaseAccessor<AppDatabase>
     if (existing != null) return existing.id;
     final id = newId();
     await into(deviceProfiles).insert(
-      DeviceProfilesCompanion.insert(
-        id: id,
-        createdAt: DateTime.now().toUtc(),
-      ),
+      DeviceProfilesCompanion.insert(id: id, createdAt: DateTime.now().toUtc()),
     );
     return id;
   }
@@ -32,21 +29,54 @@ class SettingsDao extends DatabaseAccessor<AppDatabase>
   }
 
   Future<String?> getSetting(String key) async {
-    final row = await (select(appSettings)..where((t) => t.key.equals(key)))
-        .getSingleOrNull();
+    final row = await (select(
+      appSettings,
+    )..where((t) => t.key.equals(key))).getSingleOrNull();
     return row?.value;
   }
 
-  /// Keep this install's device id after a restore (backup carries the source).
-  Future<void> keepLocalDeviceId(String id) async {
+  /// Set a local device id and create its profile.
+  Future<void> keepLocalDeviceId(String id, {String? displayName}) async {
+    final name = (displayName == null || displayName.trim().isEmpty)
+        ? 'This device'
+        : displayName.trim();
     await transaction(() async {
       await delete(deviceProfiles).go();
       await into(deviceProfiles).insert(
         DeviceProfilesCompanion.insert(
           id: id,
+          displayName: Value(name),
           createdAt: DateTime.now().toUtc(),
         ),
       );
     });
+  }
+
+  Future<String> deviceDisplayName() async {
+    final row = await select(deviceProfiles).getSingleOrNull();
+    if (row == null) return 'This device';
+    return row.displayName;
+  }
+
+  Future<void> restoreLocalDeviceProfile(
+    DeviceProfile profile, {
+    bool failDeviceProfileWrite = false,
+  }) async {
+    await transaction(() async {
+      await delete(deviceProfiles).go();
+      if (failDeviceProfileWrite) {
+        throw StateError('Synthetic device profile write failure');
+      }
+      await into(deviceProfiles).insert(profile);
+    });
+  }
+
+  Future<void> setDeviceDisplayName(String name) async {
+    final id = await ensureDeviceId();
+    final trimmed = name.trim();
+    final value = trimmed.isEmpty ? 'This device' : trimmed;
+    await (update(deviceProfiles)..where((t) => t.id.equals(id))).write(
+      DeviceProfilesCompanion(displayName: Value(value)),
+    );
   }
 }

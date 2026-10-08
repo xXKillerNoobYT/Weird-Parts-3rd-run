@@ -35,6 +35,22 @@ const _sqliteMagic = [
   0x00,
 ];
 
+int backupSqliteSchemaVersion(Uint8List bytes) {
+  if (bytes.length < 100) {
+    throw const BackupFormatException('Backup database is damaged');
+  }
+  for (var i = 0; i < _sqliteMagic.length; i++) {
+    if (bytes[i] != _sqliteMagic[i]) {
+      throw const BackupFormatException('Backup database is damaged');
+    }
+  }
+  final version = ByteData.sublistView(bytes).getUint32(60, Endian.big);
+  if (version < 1 || version > kAppSchemaVersion) {
+    throw BackupFormatException('Unsupported backup database schema: $version');
+  }
+  return version;
+}
+
 /// App-level export/restore lock. Page `_busy` dies with [BackupPage]; this
 /// does not, so a second Backup route cannot race the same write.
 class BackupIo {
@@ -283,6 +299,7 @@ class BackupStore {
     this.beforeReplaceLivePhotos,
     this.failSidecarDelete = false,
     this.failStagingDelete = false,
+    this.failDeviceProfileWrite = false,
   });
 
   final Directory? supportDir;
@@ -302,6 +319,7 @@ class BackupStore {
 
   /// Test hook: pretend staging-dir delete failed after the swap.
   final bool failStagingDelete;
+  final bool failDeviceProfileWrite;
 
   Future<Directory> _support() async =>
       supportDir ?? await getApplicationSupportDirectory();
@@ -363,14 +381,18 @@ class BackupStore {
 
   /// Write the backup to a staging folder, then swap into place so a failed
   /// write cannot leave the live shop wiped.
+  /// Without [localDeviceProfile], this low-level operation keeps the archive's
+  /// profile. Production restore supplies the receiver's exact profile.
   ///
   /// After the live swap commits, leftover Documents sqlite, `.restore-bak`
   /// copies, and the staging directory are best-effort. Those failures must
   /// not roll the restored shop back or report Restore failed.
   Future<void> replaceWithPayload({
     required BackupPayload payload,
+    DeviceProfile? localDeviceProfile,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
+    backupSqliteSchemaVersion(payload.sqliteBytes);
     final live = await _support();
     await live.create(recursive: true);
     recoverInterruptedRestore(
@@ -412,7 +434,10 @@ class BackupStore {
         supportDir: staging,
         photosDir: Directory(p.join(staging.path, 'part_photos')),
       ).writePayload(payload);
-      await _validateStagedSqlite(File(p.join(staging.path, kSqliteFileName)));
+      await _validateStagedSqlite(
+        File(p.join(staging.path, kSqliteFileName)),
+        localDeviceProfile: localDeviceProfile,
+      );
       await _swapStagingIntoLive(live: live, staging: staging);
     } finally {
       try {
@@ -434,7 +459,10 @@ class BackupStore {
     }
   }
 
-  Future<void> _validateStagedSqlite(File sqlite) async {
+  Future<void> _validateStagedSqlite(
+    File sqlite, {
+    DeviceProfile? localDeviceProfile,
+  }) async {
     if (!await sqlite.exists()) {
       throw const BackupFormatException('Backup database is missing');
     }
@@ -488,6 +516,19 @@ class BackupStore {
             'Backup database is missing shop tables',
           );
         }
+      }
+      if (localDeviceProfile != null) {
+        await db.settingsDao.restoreLocalDeviceProfile(
+          localDeviceProfile,
+          failDeviceProfileWrite: failDeviceProfileWrite,
+        );
+        final restored = await db.select(db.deviceProfiles).getSingle();
+        if (restored != localDeviceProfile) {
+          throw const BackupFormatException(
+            'Staged local device profile differs',
+          );
+        }
+        await checkpointWalForExport(db);
       }
     } on BackupFormatException {
       rethrow;

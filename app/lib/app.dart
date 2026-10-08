@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'data/app_database.dart';
 import 'features/backup/backup_codec.dart';
 import 'features/backup/backup_store.dart';
+import 'features/nearby/nearby_protocol.dart';
 import 'features/pin/pin_service.dart';
 import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
@@ -16,6 +17,7 @@ class AppScope extends InheritedWidget {
     required this.deviceId,
     required this.wipeLocalData,
     required this.restoreFromBackup,
+    this.restoreFromPayload,
     required super.child,
     super.key,
   });
@@ -26,6 +28,7 @@ class AppScope extends InheritedWidget {
   final Future<void> Function() wipeLocalData;
   final Future<void> Function(List<int> fileBytes, String password)
   restoreFromBackup;
+  final Future<void> Function(BackupPayload payload)? restoreFromPayload;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;
@@ -48,7 +51,7 @@ class WiredPartsApp extends StatefulWidget {
     required this.deviceId,
     this.reopenDatabase,
     this.reset = const LocalDataReset(),
-    this.keepLocalDeviceId,
+    this.failDeviceProfileWrite = false,
     this.beforeRestore,
     super.key,
   });
@@ -59,10 +62,7 @@ class WiredPartsApp extends StatefulWidget {
   final AppDatabase Function()? reopenDatabase;
   final LocalDataReset reset;
 
-  /// Test hook: identity write after a committed swap. Production uses
-  /// [SettingsDao.keepLocalDeviceId]. Failures are retried then ignored.
-  final Future<void> Function(AppDatabase db, String deviceId)?
-  keepLocalDeviceId;
+  final bool failDeviceProfileWrite;
 
   /// Test hook: after `_wiping` is set, before decrypt. Production is a no-op.
   final Future<void> Function()? beforeRestore;
@@ -105,6 +105,43 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
   }
 
   Future<void> _restoreFromBackup(List<int> fileBytes, String password) async {
+    await _applyShopPayload(
+      load: () =>
+          BackupCodec().decrypt(Uint8List.fromList(fileBytes), password),
+      afterOpen: (next, payload) async {
+        await next.settingsDao.setSetting(
+          kLastBackupAtKey,
+          payload.createdAt.toUtc().toIso8601String(),
+        );
+        await next.settingsDao.setSetting(
+          kLastBackupSourceKey,
+          payload.sourceDeviceId,
+        );
+      },
+    );
+  }
+
+  Future<void> _restoreFromPayload(BackupPayload payload) async {
+    await _applyShopPayload(
+      load: () async => payload,
+      afterOpen: (next, loaded) async {
+        await next.settingsDao.setSetting(
+          kLastNearbyAtKey,
+          loaded.createdAt.toUtc().toIso8601String(),
+        );
+        await next.settingsDao.setSetting(
+          kLastNearbyPeerKey,
+          loaded.sourceDeviceId,
+        );
+      },
+    );
+  }
+
+  Future<void> _applyShopPayload({
+    required Future<BackupPayload> Function() load,
+    required Future<void> Function(AppDatabase next, BackupPayload payload)
+    afterOpen,
+  }) async {
     if (_wiping) {
       throw const RestoreBusyException();
     }
@@ -114,37 +151,37 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     AppDatabase? next;
     try {
       await widget.beforeRestore?.call();
-      final payload = await BackupCodec().decrypt(
-        Uint8List.fromList(fileBytes),
-        password,
-      );
+      final payload = await load();
+      backupSqliteSchemaVersion(payload.sqliteBytes);
+      final localDeviceProfile = await _db
+          .select(_db.deviceProfiles)
+          .getSingleOrNull();
+      if (localDeviceProfile == null || localDeviceProfile.id != keepDeviceId) {
+        throw StateError(
+          'Local device profile does not match this installation',
+        );
+      }
       await _db.close();
       closed = true;
       await BackupStore(
         supportDir: widget.reset.supportDir,
         photosDir: widget.reset.photosDir,
-      ).replaceWithPayload(payload: payload, reset: widget.reset);
+        failDeviceProfileWrite: widget.failDeviceProfileWrite,
+      ).replaceWithPayload(
+        payload: payload,
+        localDeviceProfile: localDeviceProfile,
+        reset: widget.reset,
+      );
       next = widget.reopenDatabase?.call() ?? AppDatabase();
-      // Swap already committed; rollback copies are gone. Identity and
-      // stamps must not report Restore failed.
-      await _keepLocalDeviceIdBestEffort(next, keepDeviceId);
       try {
         await next.partsDao.relativizeAbsolutePhotoPaths();
-        await next.settingsDao.setSetting(
-          kLastBackupAtKey,
-          payload.createdAt.toUtc().toIso8601String(),
-        );
-        await next.settingsDao.setSetting(
-          kLastBackupSourceKey,
-          payload.sourceDeviceId,
-        );
+        await afterOpen(next, payload);
       } catch (_) {}
       if (!mounted) return;
       setState(() => _bindLive(next!, keepDeviceId));
     } catch (e) {
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
-        await _keepLocalDeviceIdBestEffort(next, keepDeviceId);
         if (mounted) {
           setState(() => _bindLive(next!, keepDeviceId));
         }
@@ -152,22 +189,6 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       rethrow;
     } finally {
       _wiping = false;
-    }
-  }
-
-  Future<void> _keepLocalDeviceIdBestEffort(AppDatabase next, String id) async {
-    Future<void> once() {
-      final hook = widget.keepLocalDeviceId;
-      if (hook != null) return hook(next, id);
-      return next.settingsDao.keepLocalDeviceId(id);
-    }
-
-    try {
-      await once();
-    } catch (_) {
-      try {
-        await once();
-      } catch (_) {}
     }
   }
 
@@ -193,6 +214,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       deviceId: _deviceId,
       wipeLocalData: _wipeLocalData,
       restoreFromBackup: _restoreFromBackup,
+      restoreFromPayload: _restoreFromPayload,
       child: MaterialApp(
         title: 'Wired Parts',
         theme: ThemeData(
