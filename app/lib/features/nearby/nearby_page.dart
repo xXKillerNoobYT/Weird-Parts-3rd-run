@@ -16,6 +16,9 @@ typedef NearbyControllerFactory = NearbyController Function({
   required String deviceId,
   required String deviceName,
   required AppDatabase db,
+  required Future<({BackupPayload payload, NearbyOffer offer})> Function()
+  collectPayload,
+  required NearbyApplyPayload applyPayload,
 });
 
 class NearbyPage extends StatefulWidget {
@@ -67,37 +70,44 @@ class _NearbyPageState extends State<NearbyPage> {
     if (name == 'This device' || name.trim().isEmpty) {
       name = defaultNearbyName(scope.deviceId);
     }
-    final controller = widget.createController?.call(
+    Future<({BackupPayload payload, NearbyOffer offer})> collectPayload() =>
+        collectNearbyShop(
+          db: scope.db,
+          deviceId: scope.deviceId,
+          deviceName: name,
+          flushWal: widget.flushWal,
+        );
+    Future<void> applyPayload(BackupPayload payload) async {
+      final restore = scope.restoreFromPayload;
+      if (restore == null) {
+        throw const NearbyException(
+          'This build cannot receive a shop. Update Wired Parts.',
+        );
+      }
+      if (!BackupIo.tryStart()) {
+        throw const RestoreBusyException();
+      }
+      try {
+        await restore(payload);
+      } finally {
+        BackupIo.end();
+      }
+    }
+
+    final controller =
+        widget.createController?.call(
           deviceId: scope.deviceId,
           deviceName: name,
           db: scope.db,
+          collectPayload: collectPayload,
+          applyPayload: applyPayload,
         ) ??
         NearbyController(
           deviceId: scope.deviceId,
           deviceName: name,
           discovery: LanNearbyDiscovery(),
-          collectPayload: () => collectNearbyShop(
-            db: scope.db,
-            deviceId: scope.deviceId,
-            deviceName: name,
-            flushWal: widget.flushWal,
-          ),
-          applyPayload: (payload) async {
-            final restore = scope.restoreFromPayload;
-            if (restore == null) {
-              throw const NearbyException(
-                'This build cannot receive a shop. Update Wired Parts.',
-              );
-            }
-            if (!BackupIo.tryStart()) {
-              throw const RestoreBusyException();
-            }
-            try {
-              await restore(payload);
-            } finally {
-              BackupIo.end();
-            }
-          },
+          collectPayload: collectPayload,
+          applyPayload: applyPayload,
         );
     _owned = controller;
     _active = controller;
