@@ -144,9 +144,17 @@ class NearbyController {
       server.listen(
         _handleHttp,
         onError: (Object e) {
-          if (generation == _lifecycle) {
-            _fail('Nearby connection failed: $e');
-          }
+          unawaited(
+            _transportFailed(generation, 'Nearby connection failed: $e'),
+          );
+        },
+        onDone: () {
+          unawaited(
+            _transportFailed(
+              generation,
+              'Nearby connection stopped. Open Nearby again.',
+            ),
+          );
         },
       );
       final ips = wifi != null
@@ -189,7 +197,12 @@ class NearbyController {
           );
         },
         onError: (Object error) {
-          unawaited(_discoveryFailed(generation, error));
+          unawaited(
+            _transportFailed(
+              generation,
+              'Nearby discovery stopped. Check local network access and reopen Nearby. $error',
+            ),
+          );
         },
       );
       _discoveryOwner = generation;
@@ -228,13 +241,11 @@ class NearbyController {
     }
   }
 
-  Future<void> _discoveryFailed(int generation, Object error) async {
+  Future<void> _transportFailed(int generation, String message) async {
     if (generation != _lifecycle || _disposed) return;
     await stop();
     if (!_disposed && _lifecycle == generation + 1) {
-      _fail(
-        'Nearby discovery stopped. Check local network access and reopen Nearby. $error',
-      );
+      _fail(message);
     }
   }
 
