@@ -8,6 +8,8 @@ import '../catalog/catalog_page.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../jobs/jobs_page.dart';
 import '../maintenance/maintenance_page.dart';
+import '../nearby/nearby_page.dart';
+import '../nearby/nearby_protocol.dart';
 import '../pin/pin_gate.dart';
 
 class HomeShell extends StatefulWidget {
@@ -83,6 +85,8 @@ class _MoreTabState extends State<_MoreTab> {
   var _didInitPin = false;
   String? _lastBackupAt;
   String? _lastBackupSource;
+  String? _lastNearbyAt;
+  String? _lastNearbyPeer;
 
   @override
   void didChangeDependencies() {
@@ -100,12 +104,16 @@ class _MoreTabState extends State<_MoreTab> {
       final set = await pin.isPinSet();
       final at = await db.settingsDao.getSetting(kLastBackupAtKey);
       final source = await db.settingsDao.getSetting(kLastBackupSourceKey);
+      final nearbyAt = await db.settingsDao.getSetting(kLastNearbyAtKey);
+      final nearbyPeer = await db.settingsDao.getSetting(kLastNearbyPeerKey);
       if (!mounted) return;
       setState(() {
         _pinSet = set;
         _unlocked = pin.isUnlocked;
         _lastBackupAt = at;
         _lastBackupSource = source;
+        _lastNearbyAt = nearbyAt;
+        _lastNearbyPeer = nearbyPeer;
       });
     } catch (_) {
       // Restore may have closed the live connection; AppScope rebuild reloads.
@@ -122,54 +130,11 @@ class _MoreTabState extends State<_MoreTab> {
       if (!ok || !mounted) return;
     }
 
-    final controller = TextEditingController();
-    final confirmController = TextEditingController();
-    final saved = await showDialog<bool>(
+    final value = await showDialog<String>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(isSet ? 'Change PIN' : 'Set PIN'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'New PIN'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: confirmController,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Confirm PIN'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final a = controller.text.trim();
-                final b = confirmController.text.trim();
-                if (a.isEmpty || a != b) return;
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      builder: (_) => _SetPinDialog(isSet: isSet),
     );
-    final value = controller.text.trim();
-    controller.dispose();
-    confirmController.dispose();
-    if (saved != true || value.isEmpty) return;
+    if (value == null || value.isEmpty) return;
 
     await pin.setPin(value);
     if (!mounted) return;
@@ -194,6 +159,14 @@ class _MoreTabState extends State<_MoreTab> {
       const SnackBar(content: Text('Catalog locked')),
     );
     await _refreshPinState();
+  }
+
+  void _openNearby() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const NearbyPage()))
+        .then((_) {
+      if (mounted) _refreshPinState();
+    });
   }
 
   void _openBackup() {
@@ -246,6 +219,9 @@ class _MoreTabState extends State<_MoreTab> {
     final backupSubtitle = _lastBackupAt == null
         ? 'No backup on this device yet'
         : '${_formatBackupStamp(_lastBackupAt!)} · ${_lastBackupSource ?? 'unknown'}';
+    final nearbySubtitle = _lastNearbyAt == null
+        ? 'Find, pair, send shop on this Wi‑Fi'
+        : 'Last copy ${_formatBackupStamp(_lastNearbyAt!)} · ${shortId(_lastNearbyPeer ?? 'peer')}';
 
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
@@ -256,6 +232,12 @@ class _MoreTabState extends State<_MoreTab> {
             title: const Text('Maintenance'),
             subtitle: const Text('Types tree, brands, suppliers'),
             onTap: _openMaintenance,
+          ),
+          ListTile(
+            leading: const Icon(Icons.wifi_tethering),
+            title: const Text('Nearby'),
+            subtitle: Text(nearbySubtitle),
+            onTap: _openNearby,
           ),
           ListTile(
             leading: const Icon(Icons.cloud_download_outlined),
@@ -296,4 +278,67 @@ String _formatBackupStamp(String iso) {
   final h = dt.hour.toString().padLeft(2, '0');
   final min = dt.minute.toString().padLeft(2, '0');
   return '$y-$m-$d $h:$min';
+}
+
+class _SetPinDialog extends StatefulWidget {
+  const _SetPinDialog({required this.isSet});
+
+  final bool isSet;
+
+  @override
+  State<_SetPinDialog> createState() => _SetPinDialogState();
+}
+
+class _SetPinDialogState extends State<_SetPinDialog> {
+  final _controller = TextEditingController();
+  final _confirmController = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.isSet ? 'Change PIN' : 'Set PIN'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'New PIN'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirmController,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Confirm PIN'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final value = _controller.text.trim();
+            if (value.isEmpty || value != _confirmController.text.trim()) {
+              return;
+            }
+            Navigator.pop(context, value);
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }

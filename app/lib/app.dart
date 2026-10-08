@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'data/app_database.dart';
 import 'features/backup/backup_codec.dart';
 import 'features/backup/backup_store.dart';
+import 'features/nearby/nearby_protocol.dart';
 import 'features/pin/pin_service.dart';
 import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
@@ -16,6 +17,7 @@ class AppScope extends InheritedWidget {
     required this.deviceId,
     required this.wipeLocalData,
     required this.restoreFromBackup,
+    this.restoreFromPayload,
     required super.child,
     super.key,
   });
@@ -26,6 +28,7 @@ class AppScope extends InheritedWidget {
   final Future<void> Function() wipeLocalData;
   final Future<void> Function(List<int> fileBytes, String password)
   restoreFromBackup;
+  final Future<void> Function(BackupPayload payload)? restoreFromPayload;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;
@@ -105,31 +108,12 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
   }
 
   Future<void> _restoreFromBackup(List<int> fileBytes, String password) async {
-    if (_wiping) {
-      throw const RestoreBusyException();
-    }
-    _wiping = true;
-    final keepDeviceId = _deviceId;
-    var closed = false;
-    AppDatabase? next;
-    try {
-      await widget.beforeRestore?.call();
-      final payload = await BackupCodec().decrypt(
+    await _applyShopPayload(
+      load: () => BackupCodec().decrypt(
         Uint8List.fromList(fileBytes),
         password,
-      );
-      await _db.close();
-      closed = true;
-      await BackupStore(
-        supportDir: widget.reset.supportDir,
-        photosDir: widget.reset.photosDir,
-      ).replaceWithPayload(payload: payload, reset: widget.reset);
-      next = widget.reopenDatabase?.call() ?? AppDatabase();
-      // Swap already committed; rollback copies are gone. Identity and
-      // stamps must not report Restore failed.
-      await _keepLocalDeviceIdBestEffort(next, keepDeviceId);
-      try {
-        await next.partsDao.relativizeAbsolutePhotoPaths();
+      ),
+      afterOpen: (next, payload) async {
         await next.settingsDao.setSetting(
           kLastBackupAtKey,
           payload.createdAt.toUtc().toIso8601String(),
@@ -138,13 +122,71 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
           kLastBackupSourceKey,
           payload.sourceDeviceId,
         );
+      },
+    );
+  }
+
+  Future<void> _restoreFromPayload(BackupPayload payload) async {
+    await _applyShopPayload(
+      load: () async => payload,
+      afterOpen: (next, loaded) async {
+        await next.settingsDao.setSetting(
+          kLastNearbyAtKey,
+          loaded.createdAt.toUtc().toIso8601String(),
+        );
+        await next.settingsDao.setSetting(
+          kLastNearbyPeerKey,
+          loaded.sourceDeviceId,
+        );
+      },
+    );
+  }
+
+  Future<void> _applyShopPayload({
+    required Future<BackupPayload> Function() load,
+    required Future<void> Function(AppDatabase next, BackupPayload payload)
+    afterOpen,
+  }) async {
+    if (_wiping) {
+      throw const RestoreBusyException();
+    }
+    _wiping = true;
+    final keepDeviceId = _deviceId;
+    var keepName = 'This device';
+    try {
+      keepName = await _db.settingsDao.deviceDisplayName();
+    } catch (_) {}
+    var closed = false;
+    AppDatabase? next;
+    try {
+      await widget.beforeRestore?.call();
+      final payload = await load();
+      await _db.close();
+      closed = true;
+      await BackupStore(
+        supportDir: widget.reset.supportDir,
+        photosDir: widget.reset.photosDir,
+      ).replaceWithPayload(payload: payload, reset: widget.reset);
+      next = widget.reopenDatabase?.call() ?? AppDatabase();
+      await _keepLocalDeviceIdBestEffort(
+        next,
+        keepDeviceId,
+        displayName: keepName,
+      );
+      try {
+        await next.partsDao.relativizeAbsolutePhotoPaths();
+        await afterOpen(next, payload);
       } catch (_) {}
       if (!mounted) return;
       setState(() => _bindLive(next!, keepDeviceId));
     } catch (e) {
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
-        await _keepLocalDeviceIdBestEffort(next, keepDeviceId);
+        await _keepLocalDeviceIdBestEffort(
+          next,
+          keepDeviceId,
+          displayName: keepName,
+        );
         if (mounted) {
           setState(() => _bindLive(next!, keepDeviceId));
         }
@@ -155,11 +197,15 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     }
   }
 
-  Future<void> _keepLocalDeviceIdBestEffort(AppDatabase next, String id) async {
+  Future<void> _keepLocalDeviceIdBestEffort(
+    AppDatabase next,
+    String id, {
+    String? displayName,
+  }) async {
     Future<void> once() {
       final hook = widget.keepLocalDeviceId;
       if (hook != null) return hook(next, id);
-      return next.settingsDao.keepLocalDeviceId(id);
+      return next.settingsDao.keepLocalDeviceId(id, displayName: displayName);
     }
 
     try {
@@ -193,6 +239,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       deviceId: _deviceId,
       wipeLocalData: _wipeLocalData,
       restoreFromBackup: _restoreFromBackup,
+      restoreFromPayload: _restoreFromPayload,
       child: MaterialApp(
         title: 'Wired Parts',
         theme: ThemeData(

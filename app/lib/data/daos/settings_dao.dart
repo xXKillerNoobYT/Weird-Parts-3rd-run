@@ -38,15 +38,34 @@ class SettingsDao extends DatabaseAccessor<AppDatabase>
   }
 
   /// Keep this install's device id after a restore (backup carries the source).
-  Future<void> keepLocalDeviceId(String id) async {
+  Future<void> keepLocalDeviceId(String id, {String? displayName}) async {
+    final name = (displayName == null || displayName.trim().isEmpty)
+        ? 'This device'
+        : displayName.trim();
     await transaction(() async {
       await delete(deviceProfiles).go();
       await into(deviceProfiles).insert(
         DeviceProfilesCompanion.insert(
           id: id,
+          displayName: Value(name),
           createdAt: DateTime.now().toUtc(),
         ),
       );
     });
+  }
+
+  Future<String> deviceDisplayName() async {
+    final row = await select(deviceProfiles).getSingleOrNull();
+    if (row == null) return 'This device';
+    return row.displayName;
+  }
+
+  Future<void> setDeviceDisplayName(String name) async {
+    final id = await ensureDeviceId();
+    final trimmed = name.trim();
+    final value = trimmed.isEmpty ? 'This device' : trimmed;
+    await (update(deviceProfiles)..where((t) => t.id.equals(id))).write(
+      DeviceProfilesCompanion(displayName: Value(value)),
+    );
   }
 }
