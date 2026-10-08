@@ -161,6 +161,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     try {
       await widget.beforeRestore?.call();
       final payload = await load();
+      backupSqliteSchemaVersion(payload.sqliteBytes);
       await _db.close();
       closed = true;
       await BackupStore(

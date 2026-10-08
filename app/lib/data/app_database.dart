@@ -17,6 +17,8 @@ import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
+const kAppSchemaVersion = 2;
+
 @DriftDatabase(
   tables: [
     DeviceProfiles,
@@ -43,7 +45,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => kAppSchemaVersion;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(

@@ -35,6 +35,22 @@ const _sqliteMagic = [
   0x00,
 ];
 
+int backupSqliteSchemaVersion(Uint8List bytes) {
+  if (bytes.length < 100) {
+    throw const BackupFormatException('Backup database is damaged');
+  }
+  for (var i = 0; i < _sqliteMagic.length; i++) {
+    if (bytes[i] != _sqliteMagic[i]) {
+      throw const BackupFormatException('Backup database is damaged');
+    }
+  }
+  final version = ByteData.sublistView(bytes).getUint32(60, Endian.big);
+  if (version < 1 || version > kAppSchemaVersion) {
+    throw BackupFormatException('Unsupported backup database schema: $version');
+  }
+  return version;
+}
+
 /// App-level export/restore lock. Page `_busy` dies with [BackupPage]; this
 /// does not, so a second Backup route cannot race the same write.
 class BackupIo {
@@ -371,6 +387,7 @@ class BackupStore {
     required BackupPayload payload,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
+    backupSqliteSchemaVersion(payload.sqliteBytes);
     final live = await _support();
     await live.create(recursive: true);
     recoverInterruptedRestore(
