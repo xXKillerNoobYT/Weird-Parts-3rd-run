@@ -159,7 +159,8 @@ class NearbyController {
       final advertiseIps = ips.isNotEmpty ? ips : [server.address.address];
       _peerSub = discovery.peers.listen(
         (peers) {
-          if (generation != _lifecycle || _state.phase == NearbyPhase.starting) {
+          if (generation != _lifecycle ||
+              _state.phase == NearbyPhase.starting) {
             return;
           }
           final filtered = peers.where((p) => p.deviceId != deviceId).toList();
@@ -172,6 +173,7 @@ class NearbyController {
           }
           if (_state.phase == NearbyPhase.success ||
               _state.phase == NearbyPhase.failed) {
+            _emit(_state.copyWith(peers: filtered, error: _state.error));
             return;
           }
           final looking = filtered.isEmpty

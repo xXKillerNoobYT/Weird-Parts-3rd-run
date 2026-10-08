@@ -110,7 +110,7 @@ class NearbyWifiNetwork {
           (outgoingPeer != null &&
               socket.remoteAddress.address != outgoingPeer) ||
           !allowsPeer(socket.remoteAddress.address)) {
-        throw const NearbyException('Wi-Fi changed. Open Nearby again.');
+        throw const _WifiConnectionRejected();
       }
       if (Platform.isMacOS || Platform.isIOS) {
         socket.setRawOption(
@@ -164,9 +164,31 @@ class NearbyWifiNetwork {
   }
 }
 
+class _WifiConnectionRejected extends NearbyException {
+  const _WifiConnectionRejected() : super('Wi-Fi changed. Open Nearby again.');
+}
+
 class _WifiServerSocket extends StreamView<Socket> implements ServerSocket {
   _WifiServerSocket(this.listener, Socket Function(Socket) bind)
-    : super(listener.map(bind));
+    : super(
+        listener.transform(
+          StreamTransformer<Socket, Socket>.fromHandlers(
+            handleData: (socket, sink) {
+              final Socket accepted;
+              try {
+                accepted = bind(socket);
+              } on _WifiConnectionRejected {
+                return;
+              } on SocketException {
+                return;
+              } on OSError {
+                return;
+              }
+              sink.add(accepted);
+            },
+          ),
+        ),
+      );
 
   final ServerSocket listener;
 
