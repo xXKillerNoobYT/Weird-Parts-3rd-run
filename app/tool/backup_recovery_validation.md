@@ -1,6 +1,6 @@
 # Synthetic native encrypted backup recovery
 
-Issue #33 requires evidence from installed native builds. Unit tests and SQLite snapshots do not satisfy this gate. This target mounts the production WiredPartsApp and calls its existing AppScope.restoreFromBackup callback. Production app.dart checks the SQLite schema before closing the live database. No test seam is added.
+Issue #33 requires evidence from installed native builds. Unit tests and SQLite snapshots do not satisfy this gate. This target mounts the production WiredPartsApp and calls its existing AppScope.restoreFromBackup callback. Production app.dart checks the SQLite schema before closing the live database. Validation uses the production restore path.
 
 Build from app in the isolated recovery branch. Use a fresh run identifier on each host.
 
@@ -22,16 +22,18 @@ The first launch performs the following scenario automatically while displaying 
 
 1. Seed both synthetic shops once. Checkpoint WAL, collect with BackupStore, encrypt with the default production BackupCodec and atomically save shop.wpbackup outside replaceable shop storage.
 2. Call the production restore callback with a wrong password, a damaged authenticated archive and an encrypted unsupported-schema database. Each rejection must preserve the complete domain registry, safe settings, synthetic PIN, photos and every device-profile field including creation time. All rejected cases must retain the exact checkpointed SQLite digest.
-3. Restore the original encrypted archive. Require all source domain records and photo hashes, replacement of the receiver sentinel, preserved receiver identity, configured synthetic PIN and backup history metadata.
+3. Restore the original encrypted archive. Require all source domain records and photo hashes, replacement of the receiver sentinel, the exact original receiver device-profile row including display-name whitespace and creation time, configured synthetic PIN and backup history metadata.
 4. Write a completed recovery-scenario.json manifest only after every comparison passes. Each step writes a before/after JSON receipt with archive digest, schema version, expected/actual callback outcome and separate validation result. A callback return alone cannot create a passing validation receipt.
 
-Close the app completely, then launch the same installed executable again. It detects the completed manifest and performs restart readback only. It must write a passing restart receipt. Missing evidence, archive digest mismatch or changed records must fail. It never reseeds an initialized workspace. RECOVERY_ACTION=restart can be set when building an explicitly readback-only artifact; it refuses missing workspaces/evidence.
+Close the app completely, then launch the same installed executable again. It detects the completed manifest and performs restart readback only. It must write a passing restart receipt. Missing evidence, archive digest mismatch or changed records must fail. The manifest must include the original receiver device-profile baseline. Earlier manifests lacking that baseline cannot satisfy this strengthened gate. It never reseeds an initialized workspace. RECOVERY_ACTION=restart can be set when building an explicitly readback-only artifact; it refuses missing workspaces/evidence.
 
-Preserve the archive, manifest and all five selected passing receipts. Record the production UI state and the actual process restart separately. Receipts contain the native platform and executable path, but cannot alone prove installation identity or operator actions. The printed RECOVERY exercise PASS and RECOVERY restart PASS must both occur on each host before closing its native recovery gate.
+Preserve the archive, manifest and all five selected passing receipts. Both exercise and restart validation receipts must pass, with separate evidence of the installed production UI and actual process quit/relaunch on each host. Receipts contain the native platform and executable path, but cannot alone prove installation identity or operator actions. Console RECOVERY exercise PASS and RECOVERY restart PASS lines support the evidence when captured; otherwise record stdout as NOT_CAPTURED without claiming those lines were observed.
 
 Backup header version 1 identifies the encrypted container. SQLite user_version identifies its database schema. They are separate. The production callback checks the SQLite header before closing or reopening the live database. BackupStore checks it again at its direct-call boundary before touching the live directory or interrupted-restore state. Versions 1 and 2 are supported. The real schema 1 test removes the version 2 columns, restores through staging and verifies every fixture ID, relation and photo after the existing migration. Unknown or zero versions reject. There is no schema bump or new migration.
 
 Keep the native installation and restart evidence separate from automated test results. This target does not authorize a merge or unlock Phase 5.
+
+The production callback captures exactly one matching local DeviceProfile after decrypt/schema validation and before closing the database. BackupStore writes that exact typed row into the validated staging database, reads it back and checkpoints WAL before the atomic file swap. Missing, mismatched or multiple local profiles reject before close. A staged profile-write/readback/checkpoint failure aborts before swapping the receiver database. Identity is never repaired through an ignored post-swap write. Direct low-level BackupStore callers may omit the local profile and retain archive profile data; every production restore caller supplies it.
 
 Automated checks run from app.
 
@@ -40,4 +42,4 @@ flutter test --no-pub test/features/backup/backup_schema_test.dart test/tool/bac
 flutter analyze --no-pub
 ```
 
-The affected Windows suite passed 88 tests across backup, nearby_wifi_test.dart and backup_recovery_validation_test.dart. Its command excluded the existing test named `failed recover rename keeps staging and marker`, which invokes POSIX chmod and failed on Windows before this change. This exclusion is a remaining platform-specific test limitation, not a passing interruption test. Run it on a supported POSIX host and retain its result separately.
+The affected Windows suite passed 91 tests across backup, nearby_wifi_test.dart and backup_recovery_validation_test.dart, including exact receiver-profile restoration/restart, staged identity-write rollback and missing/mismatched/multiple-profile pre-close rejection. Its command excluded the existing test named `failed recover rename keeps staging and marker`, which invokes POSIX chmod and failed on Windows before this change. This exclusion is a remaining platform-specific test limitation, not a passing interruption test. Run it on a supported POSIX host and retain its result separately.

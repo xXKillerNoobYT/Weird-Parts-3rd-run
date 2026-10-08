@@ -51,7 +51,7 @@ class WiredPartsApp extends StatefulWidget {
     required this.deviceId,
     this.reopenDatabase,
     this.reset = const LocalDataReset(),
-    this.keepLocalDeviceId,
+    this.failDeviceProfileWrite = false,
     this.beforeRestore,
     super.key,
   });
@@ -62,10 +62,7 @@ class WiredPartsApp extends StatefulWidget {
   final AppDatabase Function()? reopenDatabase;
   final LocalDataReset reset;
 
-  /// Test hook: identity write after a committed swap. Production uses
-  /// [SettingsDao.keepLocalDeviceId]. Failures are retried then ignored.
-  final Future<void> Function(AppDatabase db, String deviceId)?
-  keepLocalDeviceId;
+  final bool failDeviceProfileWrite;
 
   /// Test hook: after `_wiping` is set, before decrypt. Production is a no-op.
   final Future<void> Function()? beforeRestore;
@@ -109,10 +106,8 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
 
   Future<void> _restoreFromBackup(List<int> fileBytes, String password) async {
     await _applyShopPayload(
-      load: () => BackupCodec().decrypt(
-        Uint8List.fromList(fileBytes),
-        password,
-      ),
+      load: () =>
+          BackupCodec().decrypt(Uint8List.fromList(fileBytes), password),
       afterOpen: (next, payload) async {
         await next.settingsDao.setSetting(
           kLastBackupAtKey,
@@ -152,28 +147,32 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     }
     _wiping = true;
     final keepDeviceId = _deviceId;
-    var keepName = 'This device';
-    try {
-      keepName = await _db.settingsDao.deviceDisplayName();
-    } catch (_) {}
     var closed = false;
     AppDatabase? next;
     try {
       await widget.beforeRestore?.call();
       final payload = await load();
       backupSqliteSchemaVersion(payload.sqliteBytes);
+      final localDeviceProfile = await _db
+          .select(_db.deviceProfiles)
+          .getSingleOrNull();
+      if (localDeviceProfile == null || localDeviceProfile.id != keepDeviceId) {
+        throw StateError(
+          'Local device profile does not match this installation',
+        );
+      }
       await _db.close();
       closed = true;
       await BackupStore(
         supportDir: widget.reset.supportDir,
         photosDir: widget.reset.photosDir,
-      ).replaceWithPayload(payload: payload, reset: widget.reset);
-      next = widget.reopenDatabase?.call() ?? AppDatabase();
-      await _keepLocalDeviceIdBestEffort(
-        next,
-        keepDeviceId,
-        displayName: keepName,
+        failDeviceProfileWrite: widget.failDeviceProfileWrite,
+      ).replaceWithPayload(
+        payload: payload,
+        localDeviceProfile: localDeviceProfile,
+        reset: widget.reset,
       );
+      next = widget.reopenDatabase?.call() ?? AppDatabase();
       try {
         await next.partsDao.relativizeAbsolutePhotoPaths();
         await afterOpen(next, payload);
@@ -183,11 +182,6 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     } catch (e) {
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
-        await _keepLocalDeviceIdBestEffort(
-          next,
-          keepDeviceId,
-          displayName: keepName,
-        );
         if (mounted) {
           setState(() => _bindLive(next!, keepDeviceId));
         }
@@ -195,26 +189,6 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       rethrow;
     } finally {
       _wiping = false;
-    }
-  }
-
-  Future<void> _keepLocalDeviceIdBestEffort(
-    AppDatabase next,
-    String id, {
-    String? displayName,
-  }) async {
-    Future<void> once() {
-      final hook = widget.keepLocalDeviceId;
-      if (hook != null) return hook(next, id);
-      return next.settingsDao.keepLocalDeviceId(id, displayName: displayName);
-    }
-
-    try {
-      await once();
-    } catch (_) {
-      try {
-        await once();
-      } catch (_) {}
     }
   }
 

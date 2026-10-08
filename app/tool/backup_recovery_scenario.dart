@@ -208,7 +208,10 @@ class RecoveryScenario {
             sha256.convert(archive.readAsBytesSync()).toString()) {
       throw StateError('Recovery archive does not match the manifest');
     }
-    if (value['source'] is! Map || value['restored'] is! Map) {
+    if (value['source'] is! Map ||
+        value['restored'] is! Map ||
+        value['receiverDeviceProfiles'] is! List ||
+        (value['receiverDeviceProfiles'] as List).length != 1) {
       throw StateError('Recovery manifest is missing shop receipts');
     }
     return value;
@@ -255,6 +258,7 @@ class RecoveryScenario {
       ),
       (RecoveryStep.restore, bytes, _password, null),
     ];
+    final receiverBaseline = await receipt(scope().db, receiver);
     Map<String, Object?>? restored;
     for (final (step, input, password, expectedError) in cases) {
       final before = await receipt(scope().db, receiver);
@@ -285,7 +289,11 @@ class RecoveryScenario {
           );
         } else {
           require(error == null, 'Restore failed');
-          compareRestored(sourceReceipt, after);
+          compareRestored(
+            sourceReceipt,
+            after,
+            receiverProfiles: receiverBaseline['deviceProfiles'] as List,
+          );
           restored = after;
         }
       } catch (e) {
@@ -302,6 +310,7 @@ class RecoveryScenario {
         'backupHeaderVersion': kBackupHeaderVersion,
         'archiveSha256': sha256.convert(bytes).toString(),
         'source': sourceReceipt,
+        'receiverDeviceProfiles': receiverBaseline['deviceProfiles'],
         'restored': restored,
       }),
       flush: true,
@@ -313,7 +322,11 @@ class RecoveryScenario {
     final after = await receipt(db, receiver);
     final before = Map<String, Object?>.from(saved['restored'] as Map);
     try {
-      compareRestored(Map<String, Object?>.from(saved['source'] as Map), after);
+      compareRestored(
+        Map<String, Object?>.from(saved['source'] as Map),
+        after,
+        receiverProfiles: saved['receiverDeviceProfiles'] as List,
+      );
       compareShop(before, after);
     } catch (e) {
       writeReceipt(RecoveryStep.restart, before, after, validationError: '$e');
@@ -324,8 +337,9 @@ class RecoveryScenario {
 
   void compareRestored(
     Map<String, Object?> expected,
-    Map<String, Object?> actual,
-  ) {
+    Map<String, Object?> actual, {
+    required List<Object?> receiverProfiles,
+  }) {
     require(
       _same(expected['records'], actual['records']),
       'Restored domain records or relationships differ',
@@ -341,6 +355,10 @@ class RecoveryScenario {
     require(
       _same(actual['localDeviceIds'], [receiver.deviceId]),
       'Receiver identity changed',
+    );
+    require(
+      _same(actual['deviceProfiles'], receiverProfiles),
+      'Receiver device profile changed',
     );
     require(
       actual['pinConfigured'] == true,

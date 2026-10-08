@@ -126,6 +126,23 @@ void main() {
         ),
       );
       final db = scenario.openDatabase(scenario.receiver);
+      var liveDatabase = db;
+      addTearDown(() => liveDatabase.close());
+      await tester.runAsync(
+        () => db.customStatement(
+          'UPDATE device_profiles SET display_name = ?, created_at = ?',
+          ['  Synthetic receiver name  ', 1700000123],
+        ),
+      );
+      final receiverProfileBefore = await tester.runAsync(
+        () =>
+            db.customSelect('SELECT * FROM device_profiles ORDER BY id').get(),
+      );
+      expect(receiverProfileBefore!.single.data, {
+        'id': scenario.receiver.deviceId,
+        'display_name': '  Synthetic receiver name  ',
+        'created_at': 1700000123,
+      });
       var reopens = 0;
       await tester.pumpWidget(
         WiredPartsApp(
@@ -139,7 +156,8 @@ void main() {
           ),
           reopenDatabase: () {
             reopens++;
-            return scenario.openDatabase(scenario.receiver);
+            liveDatabase = scenario.openDatabase(scenario.receiver);
+            return liveDatabase;
           },
         ),
       );
@@ -153,6 +171,7 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(tester.takeException(), isNull);
       expect(scenario.readManifest()['state'], 'restored');
       expect(reopens, 1);
       final reports = scenario.receiver.receipts
@@ -171,6 +190,16 @@ void main() {
         expect(row['after']['deviceProfiles'], row['before']['deviceProfiles']);
         expect(row['after']['sqliteSha256'], row['before']['sqliteSha256']);
       }
+      final restoreReport = reports.singleWhere(
+        (row) => row['step'] == 'restore',
+      );
+      expect(restoreReport['after']['deviceProfiles'], [
+        receiverProfileBefore.single.data,
+      ]);
+      expect(
+        restoreReport['after']['deviceProfiles'],
+        restoreReport['before']['deviceProfiles'],
+      );
       expect(
         {for (final row in reports) row['step']: row['actualOutcome']},
         {
@@ -188,8 +217,31 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(live.close);
       final reopened = scenario.openDatabase(scenario.receiver);
+      liveDatabase = reopened;
       try {
         await tester.runAsync(() => scenario.restart(reopened));
+        final profileAfterRestart = await tester.runAsync(
+          () => reopened
+              .customSelect('SELECT * FROM device_profiles ORDER BY id')
+              .get(),
+        );
+        expect(
+          profileAfterRestart!.single.data,
+          receiverProfileBefore.single.data,
+        );
+        await tester.runAsync(
+          () => reopened.customStatement(
+            'UPDATE device_profiles SET created_at = 1700000999',
+          ),
+        );
+        await tester.runAsync(
+          () => expectLater(scenario.restart(reopened), throwsStateError),
+        );
+        await tester.runAsync(
+          () => reopened.customStatement(
+            'UPDATE device_profiles SET created_at = 1700000123',
+          ),
+        );
         await tester.runAsync(
           () =>
               reopened.customStatement('UPDATE order_splits SET quantity = 99'),
