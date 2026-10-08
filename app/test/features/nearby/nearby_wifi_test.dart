@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -51,7 +52,8 @@ void main() {
 
   test('outgoing option failure destroys socket before release', () async {
     final network = _Network();
-    final socket = _Socket('192.168.10.40', '192.168.10.40')..failOption = true;
+    final socket = _Socket('192.168.10.40', '192.168.10.40')
+      ..optionError = const SocketException('Synthetic option failure');
     await _outgoing(socket, () async {
       final task = await network.connect(
         Uri.parse('http://192.168.10.40:6809'),
@@ -65,6 +67,7 @@ void main() {
     ('192.168.10.20', '192.168.10.40', false),
     ('192.168.10.21', '192.168.10.40', true),
     ('192.168.10.20', '192.168.11.40', true),
+    ('192.168.10.20', '192.168.10.20', true),
   ]) {
     test('accepted socket validates listener and peer $endpoint', () async {
       final network = _Network();
@@ -78,7 +81,7 @@ void main() {
           listener.events.add(socket);
           await Future<void>.delayed(Duration.zero);
           expect(socket.destroyed, endpoint.$3);
-          expect(errors.length, endpoint.$3 ? 1 : 0);
+          expect(errors, isEmpty);
           expect(socket.options.length, endpoint.$3 ? 0 : 1);
           await server.close(force: true);
           await subscription.cancel();
@@ -97,6 +100,85 @@ void main() {
             },
       );
     });
+  }
+
+  for (final rejected in [
+    ('wrong listener address', '192.168.10.21', '192.168.10.40', null),
+    ('off-subnet peer', '192.168.10.20', '192.168.11.40', null),
+    ('self peer', '192.168.10.20', '192.168.10.20', null),
+    (
+      'socket option failure',
+      '192.168.10.20',
+      '192.168.10.40',
+      const SocketException('Synthetic option failure'),
+    ),
+    (
+      'OS option failure',
+      '192.168.10.20',
+      '192.168.10.40',
+      const OSError('Synthetic option failure'),
+    ),
+  ]) {
+    test('HTTP listener survives rejected ${rejected.$1}', () async {
+      await _incoming((server, listener) async {
+        final errors = <Object>[];
+        final received = Completer<HttpRequest>();
+        final subscription = server.listen(
+          received.complete,
+          onError: errors.add,
+        );
+        addTearDown(subscription.cancel);
+        final refused = _Socket(rejected.$2, rejected.$3)
+          ..optionError = rejected.$4;
+        final accepted = _Socket('192.168.10.20', '192.168.10.40');
+        listener.events.add(refused);
+        listener.events.add(accepted);
+        accepted.events.add(
+          Uint8List.fromList(
+            ascii.encode(
+              'GET /after-rejection HTTP/1.1\r\nHost: nearby.test\r\n\r\n',
+            ),
+          ),
+        );
+        final request = await received.future.timeout(
+          const Duration(seconds: 2),
+        );
+        expect(request.method, 'GET');
+        expect(request.uri.path, '/after-rejection');
+        expect(refused.destroyed, isTrue);
+        expect(accepted.destroyed, isFalse);
+        expect(accepted.options, hasLength(1));
+        expect(errors, isEmpty);
+      });
+    });
+  }
+
+  for (final error in [
+    const SocketException('Synthetic listener failure'),
+    const OSError('Synthetic listener failure'),
+  ]) {
+    test(
+      'underlying listener ${error.runtimeType} and stack propagate',
+      () async {
+        await _incoming((server, listener) async {
+          final reported = Completer<(Object, StackTrace)>();
+          final subscription = server.listen(
+            (_) {},
+            onError: (Object error, StackTrace stack) {
+              reported.complete((error, stack));
+            },
+          );
+          addTearDown(subscription.cancel);
+          final stack = StackTrace.current;
+          listener.events.addError(error, stack);
+          final observed = await reported.future.timeout(
+            const Duration(seconds: 2),
+          );
+          expect(observed.$1, same(error));
+          expect(observed.$2, same(stack));
+        });
+      },
+    );
   }
 
   test(
@@ -258,6 +340,29 @@ Future<void> _outgoing(_Socket socket, Future<void> Function() body) =>
       },
     );
 
+Future<void> _incoming(
+  Future<void> Function(HttpServer server, _Listener listener) body,
+) async {
+  final network = _Network();
+  final listener = _Listener();
+  await IOOverrides.runZoned(
+    () async {
+      final server = await network.listen();
+      try {
+        await body(server, listener);
+      } finally {
+        await server.close(force: true);
+        await network.close();
+      }
+    },
+    serverSocketBind:
+        (address, port, {backlog = 0, v6Only = false, shared = false}) async {
+          expect((address as InternetAddress).address, '192.168.10.20');
+          return listener;
+        },
+  );
+}
+
 class _Socket extends Stream<Uint8List> implements Socket {
   _Socket(String address, String remote)
     : address = InternetAddress(address),
@@ -269,7 +374,7 @@ class _Socket extends Stream<Uint8List> implements Socket {
   final events = StreamController<Uint8List>();
   final options = <RawSocketOption>[];
   bool destroyed = false;
-  bool failOption = false;
+  Object? optionError;
   @override
   int get port => 6809;
   @override
@@ -284,7 +389,7 @@ class _Socket extends Stream<Uint8List> implements Socket {
 
   @override
   void setRawOption(RawSocketOption option) {
-    if (failOption) throw const SocketException('Synthetic option failure');
+    if (optionError case final error?) throw error;
     options.add(option);
   }
 

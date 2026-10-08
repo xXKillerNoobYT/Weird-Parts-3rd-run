@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -12,9 +13,10 @@ import 'package:wired_parts/features/nearby/nearby_wifi.dart';
 class _Discovery implements NearbyDiscovery {
   final starts = <({int port, Completer<void> ready})>[];
   final started = StreamController<void>.broadcast();
+  final peerUpdates = StreamController<List<NearbyPeer>>.broadcast();
   int stops = 0;
   @override
-  Stream<List<NearbyPeer>> get peers => const Stream.empty();
+  Stream<List<NearbyPeer>> get peers => peerUpdates.stream;
   @override
   Future<void> start({
     required String deviceId,
@@ -43,12 +45,14 @@ class _Discovery implements NearbyDiscovery {
 
 NearbyController _controller(
   NearbyDiscovery discovery, {
+  String deviceId = 'test',
+  String deviceName = 'Test',
   bool native = false,
   Future<List<String>> Function()? localIps,
   Future<NearbyWifiNetwork> Function()? readNetwork,
 }) => NearbyController(
-  deviceId: 'test',
-  deviceName: 'Test',
+  deviceId: deviceId,
+  deviceName: deviceName,
   discovery: discovery,
   bindAddress: native ? null : InternetAddress.loopbackIPv4,
   localIps: localIps ?? () async => ['127.0.0.1'],
@@ -87,7 +91,35 @@ class _Network extends NearbyWifiNetwork {
 }
 
 class _Socket extends Stream<RawSocketEvent> implements RawDatagramSocket {
+  _Socket({this.port = 41000});
+  @override
+  final int port;
+  @override
+  InternetAddress get address => InternetAddress.anyIPv4;
+  @override
+  bool readEventsEnabled = true;
   final events = StreamController<RawSocketEvent>();
+  final incoming = Queue<Datagram>();
+  @override
+  Datagram? receive() => incoming.isEmpty ? null : incoming.removeFirst();
+  void addPeer() {
+    incoming.add(
+      Datagram(
+        Uint8List.fromList(
+          encodeBeacon(
+            deviceId: 'peer-shop',
+            name: 'Peer shop',
+            port: 6900,
+            ips: ['192.168.1.3'],
+          ),
+        ),
+        InternetAddress('192.168.1.3'),
+        49991,
+      ),
+    );
+    events.add(RawSocketEvent.read);
+  }
+
   bool closed = false;
   bool failFirstSend = false;
   int sends = 0;
@@ -176,12 +208,97 @@ Future<void> discover(LanNearbyDiscovery discovery) => discovery.start(
   ips: ['192.168.1.2'],
 );
 
+class _LoopbackHttpOverrides extends HttpOverrides {}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  test(
+    'failed pairing refreshes peers and retries the replacement listener',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final expiredListener = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => expiredListener.close(force: true));
+      expiredListener.listen((request) async {
+        await request.drain<void>();
+        request.response.statusCode = HttpStatus.conflict;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write('{"error":"Pair expired. Try again."}');
+        await request.response.close();
+      });
+
+      final discovery = _Discovery();
+      final nearby = _controller(discovery);
+      addTearDown(nearby.dispose);
+      addTearDown(discovery.peerUpdates.close);
+      var entered = discovery.started.stream.first;
+      final starting = nearby.start();
+      await entered;
+      discovery.starts.single.ready.complete();
+      await starting;
+
+      final oldPeer = NearbyPeer(
+        deviceId: 'peer-device',
+        name: 'Peer',
+        host: '127.0.0.1',
+        port: expiredListener.port,
+      );
+      discovery.peerUpdates.add([oldPeer]);
+      await pumpEventQueue();
+      expect(nearby.state.peers, [oldPeer]);
+      await nearby.pair(nearby.state.peers.single);
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.status, 'Pair expired. Try again.');
+      expect(nearby.state.error, 'Pair expired. Try again.');
+
+      final replacementDiscovery = _Discovery();
+      final replacement = _controller(
+        replacementDiscovery,
+        deviceId: 'peer-device',
+        deviceName: 'Peer',
+      );
+      addTearDown(replacement.dispose);
+      addTearDown(replacementDiscovery.peerUpdates.close);
+      entered = replacementDiscovery.started.stream.first;
+      final replacementStarting = replacement.start();
+      await entered;
+      replacementDiscovery.starts.single.ready.complete();
+      await replacementStarting;
+      final replacementPeer = oldPeer.copyWith(
+        port: replacementDiscovery.starts.single.port,
+      );
+
+      discovery.peerUpdates.add([replacementPeer]);
+      await pumpEventQueue();
+      expect(nearby.state.peers.single.port, replacementPeer.port);
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.status, 'Pair expired. Try again.');
+      expect(nearby.state.error, 'Pair expired. Try again.');
+
+      discovery.peerUpdates.add([]);
+      await pumpEventQueue();
+      expect(nearby.state.peers, isEmpty);
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.status, 'Pair expired. Try again.');
+      expect(nearby.state.error, 'Pair expired. Try again.');
+
+      discovery.peerUpdates.add([replacementPeer]);
+      await pumpEventQueue();
+      await nearby.pair(nearby.state.peers.single);
+      expect(nearby.state.phase, NearbyPhase.pairing);
+      expect(nearby.state.peerName, 'Peer');
+      expect(nearby.state.verifyCode, isNotNull);
+      expect(replacement.state.phase, NearbyPhase.pairing);
+      expect(replacement.state.peerName, 'Test');
+      expect(replacement.state.verifyCode, isNotNull);
+    }, _LoopbackHttpOverrides()),
+  );
 
   for (final failure in ['error', 'closed', 'done', 'startup']) {
     test(
@@ -192,8 +309,9 @@ void main() {
         final mdns = _Mdns();
         final discovery = LanNearbyDiscovery(
           readNetwork: () async => network,
-          bindSocket: (_) async => socket,
-          createMdnsClient: () => mdns,
+          bindSocket: (port) async =>
+              port == 41000 ? socket : _Socket(port: port),
+          createMdnsClient: (_) => mdns,
         );
         final nearby = _controller(
           discovery,
@@ -235,6 +353,56 @@ void main() {
     );
   }
 
+  for (final optional in ['custom multicast', 'mDNS']) {
+    test('optional $optional error preserves HTTP and visible peers', () async {
+      final required = _Socket();
+      final transmitter = _Socket(port: 0)
+        ..failFirstSend = optional == 'custom multicast';
+      final network = _Network();
+      final mdns = _Mdns();
+      final discovery = LanNearbyDiscovery(
+        readNetwork: () async => network,
+        bindSocket: (port) async => port == 41000 ? required : transmitter,
+        createMdnsClient: (_) => mdns,
+      );
+      final nearby = _controller(
+        discovery,
+        native: true,
+        readNetwork: () async => network,
+      );
+      addTearDown(nearby.dispose);
+      await nearby.start();
+      await mdns.started.future;
+      if (optional == 'mDNS') {
+        mdns.socketError!(const SocketException('Synthetic mDNS failure'));
+      }
+      await pumpEventQueue();
+      required.addPeer();
+      await pumpEventQueue();
+      expect(nearby.state.phase, NearbyPhase.looking);
+      expect(nearby.state.error, isNull);
+      expect(
+        nearby.state.peers
+            .map((peer) => (peer.deviceId, peer.name, peer.host, peer.port))
+            .toList(),
+        [('peer-shop', 'Peer shop', '192.168.1.3', 6900)],
+      );
+      final connection = await Socket.connect('127.0.0.1', network.port!);
+      expect(connection.remotePort, network.port);
+      connection.destroy();
+      expect(required.closed, isFalse);
+      if (optional == 'custom multicast') expect(transmitter.closed, isTrue);
+      mdns.ready.complete();
+      await pumpEventQueue();
+      await nearby.stop();
+      expect(required.closed, isTrue);
+      await expectLater(
+        Socket.connect('127.0.0.1', network.port!),
+        throwsA(isA<SocketException>()),
+      );
+    });
+  }
+
   test(
     'normal discovery stop and optional mDNS failure do not report UDP failure',
     () async {
@@ -242,8 +410,9 @@ void main() {
       final mdns = _Mdns();
       final discovery = LanNearbyDiscovery(
         readNetwork: () async => _Network(),
-        bindSocket: (_) async => socket,
-        createMdnsClient: () => mdns,
+        bindSocket: (port) async =>
+            port == 41000 ? socket : _Socket(port: port),
+        createMdnsClient: (_) => mdns,
       );
       final errors = <Object>[];
       final subscription = discovery.peers.listen((_) {}, onError: errors.add);
@@ -312,8 +481,8 @@ void main() {
     final mdns = _Mdns();
     final discovery = LanNearbyDiscovery(
       readNetwork: () async => _Network(),
-      bindSocket: (_) async => socket,
-      createMdnsClient: () => mdns,
+      bindSocket: (port) async => port == 41000 ? socket : _Socket(port: port),
+      createMdnsClient: (_) => mdns,
     );
     addTearDown(discovery.stop);
     final errors = <Object>[];
@@ -461,12 +630,12 @@ void main() {
       final sockets = <_Socket>[];
       final discovery = LanNearbyDiscovery(
         readNetwork: () async => _Network(),
-        bindSocket: (_) async {
-          final socket = _Socket();
+        bindSocket: (port) async {
+          final socket = _Socket(port: port);
           sockets.add(socket);
           return socket;
         },
-        createMdnsClient: () => created++ == 0 ? first : second,
+        createMdnsClient: (_) => created++ == 0 ? first : second,
       );
       addTearDown(discovery.stop);
       await discover(discovery);
@@ -479,14 +648,20 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       first.ready.complete();
       await Future<void>.delayed(Duration.zero);
-      expect(first.stops, 1);
+      expect(first.stops, 2);
       expect(first.lookups, 0);
       expect(second.stops, 0);
       expect(second.lookups, 1);
-      expect(sockets[1].closed, isFalse);
+      expect(
+        sockets.lastWhere((socket) => socket.port == 41000).closed,
+        isFalse,
+      );
       await discovery.stop();
       expect(second.stops, 1);
-      expect(sockets[1].closed, isTrue);
+      expect(
+        sockets.lastWhere((socket) => socket.port == 41000).closed,
+        isTrue,
+      );
     },
   );
 }
