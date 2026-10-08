@@ -6,7 +6,9 @@ Living tracker. End goal is saved under `docs/end-goal/`; details get worked out
 
 **WiredPart** — outdoor / field construction ops app (jobs, notebooks, parts, warehouse, scheduling, chat, fleet, people/Hats, etc.).
 
-**Foundation first** — local-first, server-free Parts + Jobs/JPO on every device, nearby sync, encrypted backup. No cloud required. Accounts/MCP later; company cloud much later.
+**Foundation first.** Authorized company devices keep a durable offline database, portable company users, Parts and Jobs, genuine two-way Sync Now and encrypted recovery. Baseline local MCP uses the same validated commands and permissions. Notebook follows Parts and Jobs. No internet or cloud is required.
+
+The current plan is [issue #33](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/33), extended by [the offline sync and extension plan](docs/sync/foundation-plan.md). [Issue #45](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/45) contains the scoped five-design and 195-scenario documentation increment. Those scenarios are proposals, not passed tests or immediate release gates.
 
 Reference drafts (rough, not binding detail yet):
 
@@ -22,24 +24,24 @@ Reference drafts (rough, not binding detail yet):
 ## Locked decisions (foundation)
 
 
-| Decision           | Choice                                                                                                                                             |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Who uses it        | Crew / shop — shared jobs + catalog                                                                                                                |
-| Platforms (v1)     | iOS, Android, Windows, Mac                                                                                                                         |
-| Stack              | Flutter + SQLite (Drift)                                                                                                                           |
-| Sync               | Bluetooth discover/approve + local Wi‑Fi bulk; BT fallback; **no internet required**                                                               |
-| Catalog edits (v1) | Trusted editors via **shared shop PIN**; field can add custom/temp parts on jobs                                                                   |
-| Photos             | In v1 — capture and sync (prefer Wi‑Fi for media)                                                                                                  |
-| Identity now       | Device ID; no accounts                                                                                                                             |
-| Identity later     | Local user profiles, peer sync + backup (before cloud)                                                                                             |
-| Permissions later  | **Hats** (admin-assigned roles) — replace/extend PIN                                                                                               |
-| AI                 | On-device later; **MCP + 3rd-party AI** sooner than cloud, permissioned by logged-in user + MCP settings                                           |
-| Catalog identity   | **General Part** is the default (info, no MPN). Brand versions optional when brand matters. Part has a **default supplier**.                       |
-| Job line tracking  | Needed / shop-pull separate from orders. **Order splits**: multiple supplier+qty rows per line. Brand optional on the line; else default supplier. |
-| Cloud              | Far future, optional                                                                                                                               |
-| Company IDs        | Future — local company identity shared across crew devices (before/alongside cloud)                                                                |
-| Auto sync          | **Later (Phase 7)** — auto/background nearby sync after manual **two-way** Sync Now is solid; still local-first, no internet |
-| Detail policy      | End goal saved; work out screen/module detail **as we build**                                                                                      |
+| Decision | Choice and current evidence boundary |
+| --- | --- |
+| Users | Company crews and shops. Company, location, user and enrolled device are separate identities. |
+| Platform targets | Windows, Mac, Android and iOS. Current native evidence covers isolated Windows and Mac only. Mobile support is unverified. |
+| Stack | Flutter and Drift/SQLite. Current local schema is v2. |
+| Current Nearby draft | Wi-Fi on the house LAN, UDP discovery port 41000. Pair, Match, Send this shop and Accept shop perform one-way whole-shop replacement. It is not merge sync. |
+| Foundation sync | Changes-only, bounded and recoverable. One Sync Now exchanges changes in both directions, with atomic tracking, receipts, tombstones and visible conflicts. Not implemented or verified yet. |
+| Later radios | Router-free Bluetooth or direct Wi-Fi can use the same transport-independent rules after the core. No radio or hybrid platform support is claimed now. |
+| Company enrollment | Each installation belongs to one company. Create Company or Join Existing Company through an authorized enrolled approver. Join grants permitted company-network participation, not trust in every nearby app. Reset cannot bypass enrollment. |
+| Users and PINs | Users must sign in offline on authorized company devices after protected, versioned user-auth provisioning. That security design is open in issue #38. Keep today's local catalog PIN gate until reviewed migration. Never clone device private keys. |
+| Permissions | Company and user authorization are foundation requirements. Full Hats administration remains later. Catalog writes remain PIN-gated. |
+| Catalog | Company-wide sourceable parts, distinct from per-location stock. Stable IDs and Category to Type to Variant remain required. General part identity, optional brand versions and supplier listings stay. |
+| Job lines | Requested and shop-pull quantities remain separate from supplier order splits. Later actual pickups and returns need attributed events, not invented history from aggregates. |
+| Photos | Portable asset IDs and hashes. First two-way milestone's media-versus-pending policy remains open. Current one-way photo proof does not settle that policy. |
+| MCP and AI | Baseline local MCP in issue #37 shares UI validation, permissions and audit. Optional device-native AI is later and retains a non-AI fallback. |
+| Auto sync | Phase 7, after dependable manual two-way sync. |
+| Partner and internet sharing | Later, explicitly selected data, permissions and provenance. Neither is needed for the offline foundation. |
+| Scope | Resolve module details when pulled into work. A future scenario does not become an immediate foundation blocker. |
 
 
 ---
@@ -55,7 +57,9 @@ Reference drafts (rough, not binding detail yet):
 - [x] App scaffold
 - [x] **Phase 1 — Local core** complete (`feature/phase-1-local-core`)
 
-**Current focus:** Phase 2 — file-tree catalog, Variance under Brands, job Requested / Split / Left to Pull/Order.
+**Current focus.** Phase 4 closeout under [issue #39](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/39) and draft [PR #36](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/36). Main was observed at `a4546d3ae30030bb8884ab31db4167408d1e1ec2`. The feature candidate is `95a06a96994ec03014a37075ce4406f183e3c12e`; it is not assumed merged.
+
+Historical isolated encrypted recovery and one Mac-to-Windows replacement with restart passed. The fresh candidate has build, unit-test, analysis, configured-baseline and discovery evidence. Its required three-leg same-open-page native acceptance is still pending. Phase 5 implementation remains on hold until that gate passes. See the [dated evidence and limits](docs/sync/foundation-plan.md#current-evidence-and-its-limits).
 
 ---
 
@@ -68,7 +72,7 @@ Reference drafts (rough, not binding detail yet):
 - [x] Jobs CRUD + job parts list (general part by default; optional brand; needed · shop pull · **order splits** by supplier; soft-delete remove)
 - [x] Catalog browse/add/edit (name / description / UOM / default supplier / active) + brand versions / listings; taxonomy maintenance (categories, styles, types, devices, brands, suppliers)
 - [x] Editor PIN gate for catalog writes
-- Note: `AppSettings` (PIN hash, etc.) is **local-only** in Phase 1; sync-shaped settings / PIN sync are Phase 5 prep — do not overbuild now.
+- Historical implementation note. `AppSettings`, the local PIN verifier and device credentials remain local. Phase 5 must separate business data from protected portable user authentication; generic settings replication is not that design.
 
 ### Phase 2 — Catalog tree, Variance, job qty
 
@@ -83,27 +87,42 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 - [x] Custom part → promote to catalog (editor) — after the tree (#6)
 - [x] Catalog remove (parts + empty folders, PIN) + local reset / wipe all data
 
-### Phase 3 — Backup
+### Phase 3. Encrypted backup
 
-- [ ] Encrypted export / import
-- [ ] Show backup date + source device
+- [x] Encrypted export and import implementation is present in main.
+- [x] Backup date and source device are part of the backup flow.
+- [ ] Clear the current combined recovery/Nearby PR's remaining gates before calling that candidate ready.
 
-### Phase 4 — Nearby link (one-way test only)
+Isolated recovery proof is recorded in issue #33 and PR #36. Repeat safe backup and restore before any real-shop migration. Bad passwords, damaged files and unsupported schemas must leave existing data unchanged.
 
-- [ ] Manual discover / pair / verify code
-- [ ] One-way test transfer (BT and/or local Wi‑Fi) — engineering step only, not the product sync UX
+### Phase 4. Nearby one-way engineering gate
 
-### Phase 5 — Two-way sync (one session, both directions)
+- [x] Historical actual Mac-to-Windows whole-shop replacement and restart proof.
+- [ ] Finish exact-candidate Mac to Windows, Windows to Mac, then Mac to Windows without recreating the receiving Nearby controllers.
+- [ ] Fresh verified pairing, per-leg domain and local identity checks, photos and final restart admission by independent review.
 
-- [ ] **True two-way sync in a single Sync Now** — both devices send and receive changes; users should not have to run two one-way syncs
-- [ ] Change-set sync, tombstones, sync receipts
-- [ ] Conflict rules + Sync Issues screen
-- [ ] Photo sync policy (Wi‑Fi preferred)
-- [ ] Prep: decide whether `AppSettings` / PIN material becomes syncable (Phase 1 keeps it local-only)
+Keep [PR #29](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/29) and PR #36 draft until their own gates pass. No merge is authorized by this plan. One-way replacement is distinct from genuine two-way merging.
 
-### Phase 6 — Hardening
+### Phase 5. Company-scoped two-way foundation
 
-- [ ] Permissions, performance, sync recovery, multi-device testing
+Begin implementation only after the current issue #39 gate passes.
+
+- [ ] Separate company, location, portable user and enrolled device identities. Enforce enrollment, removal, recovery and the chosen offline freshness policy.
+- [ ] Resolve protected company-user authentication and PIN rotation in [issue #38](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/38).
+- [ ] Shared validated commands commit edits with outgoing operations. Incoming apply, deduplication, audit and receipt intent commit atomically.
+- [ ] One changes-only Sync Now exchanges both ways. Bound batches, dependencies and custody; persist resumable progress where needed.
+- [ ] Preserve causality, IDs, relationships, independent actions, tombstones and attributed conflicts. Original editors answer questions; authorized manager resolution preserves both answers.
+- [ ] Negotiate protocol and semantic capabilities. Preserve unknown data only under understood authenticated carrier contracts; fail closed on unknown required authorization.
+- [ ] Define photo apply and pending-media states. Keep device credentials and unrelated local settings out of business sync.
+- [ ] Provide baseline [local MCP operations](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/37) through the same permissions, validation and audit.
+- [ ] Verify actual offline edits, both-direction exchange, restart, conflict/delete, stale restore, retries, interruptions and rejected devices. Measure larger synthetic limits and verify each mobile target separately.
+- [ ] Add extension conformance fixtures so later registered entities reuse the core. Repeat native tests for changes to platform, persistence, transport, credentials or lifecycle boundaries.
+
+Then migrate existing Parts and Jobs usage gradually with rollback. Notebook is next. The [scenario matrices](docs/sync/scenarios-foundation.md) and [workflow scenarios](docs/sync/scenarios-workflows.md) describe proposed acceptance, not completed work.
+
+### Phase 6. Additional hardening and scale
+
+- [ ] Broaden measured scale, platform stress and long-duration multi-device tests beyond Phase 5's mandatory correctness, permission and recovery acceptance. Those safety checks must already pass in Phase 5.
 
 ### Phase 7 — Auto / background nearby sync (later)
 
@@ -118,18 +137,20 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 Do **not** fully spec these now. Pull from `docs/end-goal/` when a phase starts.
 
 - [ ] Hats data layer + admin (roles from MERGE-PLAN; confirm with Bob)
-- [ ] Local user profiles (peer sync + backup)
-- [ ] MCP bridge (tool permissions per user / settings)
 - [ ] Warehouse stock, locations, movements
 - [ ] Restock orders / receiving / returns
-- [ ] Dashboard, clock, notebooks, panel schedule
+- [ ] Notebook after Parts and Jobs usage migration, using the foundation contract
+- [ ] Dashboard, clock and panel schedule
 - [ ] Scheduling, chat, fleet, tools
 - [ ] People, reports, office, full settings
 - [ ] Outdoor a11y pass (56px actions, photo/voice capture)
 - [ ] Preferred brand on a part, and/or preferred brand for a job (after general-part + optional brand works)
-- [ ] Company IDs (crew/company identity on devices)
 - [ ] Auto / background nearby sync (Phase 7 — after two-way manual sync works)
-- [ ] Optional company cloud
+- [ ] Router-free Bluetooth or direct Wi-Fi transport, including explicit pending-media limits
+- [ ] Selected partner-company or future supplier-app sharing, with permissions and provenance
+- [ ] Scripted redacted diagnostics and reviewed submission under issue #40
+- [ ] Optional on-device AI assistance, with a non-AI fallback
+- [ ] Optional internet peer and company cloud
 
 ---
 
@@ -151,4 +172,3 @@ From end-goal drafts — park here, decide in context:
 1. Check off items when done.
 2. When starting a new end-goal module, add a short “In progress” note under **Where we are** and open the matching `docs/end-goal/` doc.
 3. Don’t expand the whole WiredPart UI into the foundation spec — keep foundation lean; grow the roadmap instead.
-
