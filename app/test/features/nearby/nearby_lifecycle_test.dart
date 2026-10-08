@@ -90,6 +90,103 @@ class _Network extends NearbyWifiNetwork {
   void bindDatagram(RawDatagramSocket socket) {}
 }
 
+class _HttpServer extends Stream<HttpRequest> implements HttpServer {
+  _HttpServer(this.listener, {this.closeReady})
+    : address = listener.address,
+      port = listener.port;
+
+  final HttpServer listener;
+  final Completer<void>? closeReady;
+  final requests = StreamController<HttpRequest>();
+  final closeRequested = Completer<void>();
+  final closed = Completer<void>();
+  Function? _onError;
+  void Function()? _onDone;
+  Future<HttpServer>? _closing;
+
+  static Future<_HttpServer> bind({Completer<void>? closeReady}) async =>
+      _HttpServer(
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
+        closeReady: closeReady,
+      );
+
+  @override
+  final InternetAddress address;
+  @override
+  final int port;
+
+  void fail() =>
+      requests.addError(const SocketException('Synthetic TCP failure'));
+  Future<void> finish() => requests.close();
+
+  void deliverRetainedError() {
+    final onError = _onError;
+    const error = SocketException('Late TCP failure');
+    if (onError is void Function(Object, StackTrace)) {
+      onError(error, StackTrace.current);
+    } else if (onError is void Function(Object)) {
+      onError(error);
+    }
+  }
+
+  void deliverRetainedDone() => _onDone?.call();
+
+  @override
+  StreamSubscription<HttpRequest> listen(
+    void Function(HttpRequest)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    _onError = onError;
+    _onDone = onDone;
+    return requests.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  Future<HttpServer> close({bool force = false}) =>
+      _closing ??= _close(force: force);
+
+  Future<HttpServer> _close({required bool force}) async {
+    await listener.close(force: force);
+    closeRequested.complete();
+    await closeReady?.future;
+    if (!requests.isClosed) {
+      final closeRequests = requests.close();
+      if (requests.hasListener) await closeRequests;
+    }
+    closed.complete();
+    return this;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _HttpNetwork extends _Network {
+  _HttpNetwork(this.server);
+
+  final _HttpServer server;
+  int closes = 0;
+
+  @override
+  Future<HttpServer> listen() async {
+    listens++;
+    port = server.port;
+    return server;
+  }
+
+  @override
+  Future<void> close() async {
+    closes++;
+  }
+}
+
 class _Socket extends Stream<RawSocketEvent> implements RawDatagramSocket {
   _Socket({this.port = 41000});
   @override
@@ -216,6 +313,223 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  for (final failure in ['done', 'error']) {
+    test('TCP $failure stops discovery and closes its listener', () async {
+      final server = await _HttpServer.bind();
+      final network = _HttpNetwork(server);
+      final socket = _Socket();
+      final mdns = _Mdns();
+      final discovery = LanNearbyDiscovery(
+        readNetwork: () async => network,
+        bindSocket: (port) async =>
+            port == 41000 ? socket : _Socket(port: port),
+        createMdnsClient: (_) => mdns,
+      );
+      final nearby = _controller(
+        discovery,
+        native: true,
+        readNetwork: () async => network,
+      );
+      addTearDown(() async {
+        await nearby.dispose();
+        await server.close(force: true);
+      });
+      final failedStates = <NearbyViewState>[];
+      final subscription = nearby.states.listen((state) {
+        if (state.phase == NearbyPhase.failed) failedStates.add(state);
+      });
+      addTearDown(subscription.cancel);
+      await nearby.start();
+      mdns.ready.complete();
+      await pumpEventQueue();
+      expect(nearby.state.phase, NearbyPhase.looking);
+      final connection = await Socket.connect('127.0.0.1', server.port);
+      expect(connection.remotePort, server.port);
+      connection.destroy();
+
+      if (failure == 'done') {
+        await server.finish();
+      } else {
+        server.fail();
+      }
+      await pumpEventQueue();
+
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.error, contains('Nearby connection'));
+      expect(failedStates, hasLength(1));
+      expect(socket.closed, isTrue);
+      expect(network.closes, 1);
+      await expectLater(
+        Socket.connect('127.0.0.1', server.port),
+        throwsA(isA<SocketException>()),
+      );
+    });
+
+    test('TCP $failure during startup cannot return to looking', () async {
+      final server = await _HttpServer.bind();
+      final network = _HttpNetwork(server);
+      final discovery = _Discovery();
+      final nearby = _controller(
+        discovery,
+        native: true,
+        readNetwork: () async => network,
+      );
+      addTearDown(() async {
+        await nearby.dispose();
+        await server.close(force: true);
+      });
+      final states = <NearbyViewState>[];
+      final subscription = nearby.states.listen(states.add);
+      addTearDown(subscription.cancel);
+      final entered = discovery.started.stream.first;
+      final starting = nearby.start();
+      await entered;
+
+      if (failure == 'done') {
+        await server.finish();
+      } else {
+        server.fail();
+      }
+      await pumpEventQueue();
+      discovery.starts.single.ready.complete();
+      await starting;
+      await pumpEventQueue();
+
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.error, contains('Nearby connection'));
+      expect(
+        states.where((state) => state.phase == NearbyPhase.failed),
+        hasLength(1),
+      );
+      expect(
+        states.where((state) => state.phase == NearbyPhase.looking),
+        isEmpty,
+      );
+      expect(discovery.stops, greaterThanOrEqualTo(1));
+      expect(server.closeRequested.isCompleted, isTrue);
+      await expectLater(
+        Socket.connect('127.0.0.1', server.port),
+        throwsA(isA<SocketException>()),
+      );
+    });
+
+    test(
+      'old TCP $failure cleanup cannot stop a replacement listener',
+      () async {
+        final oldCloseReady = Completer<void>();
+        final oldServer = await _HttpServer.bind(closeReady: oldCloseReady);
+        final replacementServer = await _HttpServer.bind();
+        final oldNetwork = _HttpNetwork(oldServer);
+        final replacementNetwork = _HttpNetwork(replacementServer);
+        var networkReads = 0;
+        final discovery = _Discovery();
+        final nearby = _controller(
+          discovery,
+          native: true,
+          readNetwork: () async =>
+              networkReads++ == 0 ? oldNetwork : replacementNetwork,
+        );
+        addTearDown(() async {
+          if (!oldCloseReady.isCompleted) oldCloseReady.complete();
+          await nearby.dispose();
+          await oldServer.close(force: true);
+          await replacementServer.close(force: true);
+        });
+        final states = <NearbyViewState>[];
+        final subscription = nearby.states.listen(states.add);
+        addTearDown(subscription.cancel);
+        var entered = discovery.started.stream.first;
+        final firstStarting = nearby.start();
+        await entered;
+        discovery.starts[0].ready.complete();
+        await firstStarting;
+        expect(nearby.state.phase, NearbyPhase.looking);
+
+        if (failure == 'done') {
+          await oldServer.finish();
+        } else {
+          oldServer.fail();
+        }
+        await pumpEventQueue();
+        expect(oldServer.closeRequested.isCompleted, isTrue);
+        expect(nearby.state.phase, NearbyPhase.idle);
+
+        entered = discovery.started.stream.first;
+        final secondStarting = nearby.start();
+        await entered;
+        discovery.starts[1].ready.complete();
+        await secondStarting;
+        final stops = discovery.stops;
+        oldServer.deliverRetainedError();
+        oldServer.deliverRetainedDone();
+        oldCloseReady.complete();
+        await oldServer.closed.future;
+        await pumpEventQueue();
+
+        expect(nearby.state.phase, NearbyPhase.looking);
+        expect(nearby.state.error, isNull);
+        expect(
+          states.where((state) => state.phase == NearbyPhase.failed),
+          isEmpty,
+        );
+        expect(discovery.stops, stops);
+        expect(replacementNetwork.closes, 0);
+        final connection = await Socket.connect(
+          '127.0.0.1',
+          replacementServer.port,
+        );
+        expect(connection.remotePort, replacementServer.port);
+        connection.destroy();
+      },
+    );
+  }
+
+  for (final dispose in [false, true]) {
+    test(
+      'normal TCP ${dispose ? 'dispose' : 'stop'} leaves Nearby off',
+      () async {
+        final server = await _HttpServer.bind();
+        final network = _HttpNetwork(server);
+        final discovery = _Discovery();
+        final nearby = _controller(
+          discovery,
+          native: true,
+          readNetwork: () async => network,
+        );
+        addTearDown(() async {
+          await nearby.dispose();
+          await server.close(force: true);
+        });
+        final states = <NearbyViewState>[];
+        final subscription = nearby.states.listen(states.add);
+        addTearDown(subscription.cancel);
+        final entered = discovery.started.stream.first;
+        final starting = nearby.start();
+        await entered;
+        discovery.starts.single.ready.complete();
+        await starting;
+        expect(nearby.state.phase, NearbyPhase.looking);
+
+        await (dispose ? nearby.dispose() : nearby.stop());
+        await pumpEventQueue();
+
+        expect(nearby.state.phase, NearbyPhase.idle);
+        expect(nearby.state.status, 'Nearby is off.');
+        expect(nearby.state.error, isNull);
+        expect(
+          states.where((state) => state.phase == NearbyPhase.failed),
+          isEmpty,
+        );
+        expect(discovery.stops, 1);
+        expect(network.closes, 1);
+        await expectLater(
+          Socket.connect('127.0.0.1', server.port),
+          throwsA(isA<SocketException>()),
+        );
+      },
+    );
+  }
 
   test(
     'failed pairing refreshes peers and retries the replacement listener',
