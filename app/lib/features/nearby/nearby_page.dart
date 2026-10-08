@@ -40,6 +40,7 @@ class NearbyPage extends StatefulWidget {
 class _NearbyPageState extends State<NearbyPage> {
   NearbyController? _owned;
   NearbyController? _active;
+  ({AppDatabase db, String deviceId, Object token})? _pendingStart;
   StreamSubscription<NearbyViewState>? _sub;
   NearbyViewState _state = const NearbyViewState(
     phase: NearbyPhase.starting,
@@ -62,23 +63,33 @@ class _NearbyPageState extends State<NearbyPage> {
       });
       return;
     }
-    _start(scope);
+    final pending = _pendingStart;
+    if (pending?.db == scope.db && pending?.deviceId == scope.deviceId) return;
+    final token = Object();
+    _pendingStart = (db: scope.db, deviceId: scope.deviceId, token: token);
+    _start(scope, token);
   }
 
-  Future<void> _start(AppScope scope) async {
+  Future<void> _start(AppScope scope, Object token) async {
     var name = await scope.db.settingsDao.deviceDisplayName();
+    if (!mounted || _pendingStart?.token != token) return;
+    _pendingStart = null;
+    final deviceId = scope.deviceId;
     if (name == 'This device' || name.trim().isEmpty) {
-      name = defaultNearbyName(scope.deviceId);
+      name = defaultNearbyName(deviceId);
     }
-    Future<({BackupPayload payload, NearbyOffer offer})> collectPayload() =>
-        collectNearbyShop(
-          db: scope.db,
-          deviceId: scope.deviceId,
-          deviceName: name,
-          flushWal: widget.flushWal,
-        );
+    Future<({BackupPayload payload, NearbyOffer offer})> collectPayload() {
+      final db = AppScope.of(context).db;
+      return collectNearbyShop(
+        db: db,
+        deviceId: deviceId,
+        deviceName: name,
+        flushWal: widget.flushWal,
+      );
+    }
+
     Future<void> applyPayload(BackupPayload payload) async {
-      final restore = scope.restoreFromPayload;
+      final restore = AppScope.of(context).restoreFromPayload;
       if (restore == null) {
         throw const NearbyException(
           'This build cannot receive a shop. Update Wired Parts.',
@@ -96,14 +107,14 @@ class _NearbyPageState extends State<NearbyPage> {
 
     final controller =
         widget.createController?.call(
-          deviceId: scope.deviceId,
+          deviceId: deviceId,
           deviceName: name,
           db: scope.db,
           collectPayload: collectPayload,
           applyPayload: applyPayload,
         ) ??
         NearbyController(
-          deviceId: scope.deviceId,
+          deviceId: deviceId,
           deviceName: name,
           discovery: LanNearbyDiscovery(),
           collectPayload: collectPayload,
@@ -119,6 +130,7 @@ class _NearbyPageState extends State<NearbyPage> {
 
   @override
   void dispose() {
+    _pendingStart = null;
     _sub?.cancel();
     _owned?.dispose();
     super.dispose();
