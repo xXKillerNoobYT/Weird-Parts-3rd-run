@@ -141,7 +141,391 @@ Future<SealedPrivateSnapshot> saveSnapshot(
   return sealed;
 }
 
+Future<
+  ({
+    NativeNearbyCoordinatorProtocol protocol,
+    Map<TestRole, TestSession> sessions,
+    ComparisonChallenge challenge,
+    List<Map<String, Object>> observations,
+  })
+>
+pairProtocolFixture() async {
+  final protocol = NativeNearbyCoordinatorProtocol();
+  final initialized = await protocol.handle(
+    jsonEncode({
+      'operation': 'initialize',
+      'sources': [for (final role in TestRole.values) sourceJson(role)],
+    }),
+  );
+  final sessions = {
+    for (final role in TestRole.values)
+      role: TestSession.fromJson((initialized['sessions'] as Map)[role.name]),
+  };
+  final issued = await protocol.handle(
+    jsonEncode({'operation': 'newComparison', 'leg': 1}),
+  );
+  final challenge = ComparisonChallenge.fromJson(issued['comparison']);
+  final observations = <Map<String, Object>>[];
+  for (final role in TestRole.values) {
+    final session = sessions[role]!;
+    final sealed = await sealRenderedObservation(
+      session: session,
+      challenge: challenge,
+      observation: RenderedObservation(
+        renderedCode: '739281',
+        attemptId: 'attempt-a',
+        localExpiresAtMillis: 1000000,
+        remainingMillis: 120000,
+        deviceId: session.deviceId,
+        peerId: session.peerId,
+      ),
+    );
+    observations.add({'sourceBindingId': role.name, 'sealed': sealed.toJson()});
+  }
+  return (
+    protocol: protocol,
+    sessions: sessions,
+    challenge: challenge,
+    observations: observations,
+  );
+}
+
 void main() {
+  test('combined pair protocol issues verifiable grants', () async {
+    final f = await pairProtocolFixture();
+    final result = await f.protocol.handle(
+      jsonEncode({
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': f.observations,
+      }),
+    );
+    expect(result.keys.toSet(), {'outcome', 'grants'});
+    expect(result['outcome'], 'grants-issued');
+    for (final role in TestRole.values) {
+      final session = f.sessions[role]!;
+      final grant = MatchGrant.fromJson(
+        (result['grants'] as Map)[role.name],
+        session,
+      );
+      expect(
+        await Ed25519().verify(
+          grant.signingBytes(),
+          signature: Signature(
+            nativeTestBytes(grant.signature, 64),
+            publicKey: SimplePublicKey(
+              nativeTestBytes(session.signingPublicKey, 32),
+              type: KeyPairType.ed25519,
+            ),
+          ),
+        ),
+        isTrue,
+      );
+      final observation = f.observations.singleWhere(
+        (entry) => entry['sourceBindingId'] == role.name,
+      );
+      expect(
+        grant.sealedCiphertextHash,
+        await SealedObservation.fromJson(observation['sealed']).identityHash(),
+      );
+      expect(grant.comparison.toJson(), f.challenge.toJson());
+    }
+    expect(jsonEncode(result).contains('renderedCode'), isFalse);
+  });
+
+  test(
+    'combined pair accepts reversed roles and exact cached replay',
+    () async {
+      final f = await pairProtocolFixture();
+      final request = jsonEncode({
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': f.observations.reversed.toList(),
+      });
+      final result = await f.protocol.handle(request);
+      expect(result['outcome'], 'grants-issued');
+      expect(await f.protocol.handle(request), result);
+      expect(
+        await f.protocol.handle(jsonEncode({'operation': 'matchGrants'})),
+        result,
+      );
+    },
+  );
+
+  test('combined pair parses both entries before accepting either', () async {
+    final f = await pairProtocolFixture();
+    final a = f.observations.first, b = f.observations.last;
+    final malformed = [
+      {'operation': 'acceptObservedPairAndMatch'},
+      {'operation': 'acceptObservedPairAndMatch', 'observations': null},
+      {'operation': 'acceptObservedPairAndMatch', 'observations': []},
+      {
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': [a],
+      },
+      {
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': [a, b, a],
+      },
+      {
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': [a, null],
+      },
+      {
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': [
+          a,
+          {...b, 'extra': 'PRIVATE-CANARY'},
+        ],
+      },
+      {
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': [
+          a,
+          {'sourceBindingId': 'receiver', 'sealed': 'PRIVATE-CANARY'},
+        ],
+      },
+      {
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': [a, b],
+        'extra': 'PRIVATE-CANARY',
+      },
+    ];
+    for (final request in malformed) {
+      expect(await f.protocol.handle(jsonEncode(request)), {
+        'outcome': 'invalid-input',
+      });
+    }
+    expect(
+      await f.protocol.handle(
+        jsonEncode({'operation': 'acceptObserved', ...a}),
+      ),
+      {'outcome': 'accepted'},
+    );
+    expect(await f.protocol.handle(jsonEncode({'operation': 'matchGrants'})), {
+      'outcome': 'not-ready',
+    });
+  });
+
+  for (final invalid in [
+    'duplicate-binding',
+    'same-role',
+    'wrong-binding',
+    'wrong-role-binding',
+    'wrong-challenge',
+  ]) {
+    test('combined pair rejects $invalid before acceptance', () async {
+      final f = await pairProtocolFixture();
+      final observations = [
+        for (final entry in f.observations) copyJson(entry),
+      ];
+      switch (invalid) {
+        case 'duplicate-binding':
+          observations[1]['sourceBindingId'] = 'sender';
+        case 'same-role':
+          observations[1]['sealed'] = observations[0]['sealed'];
+        case 'wrong-binding':
+          observations[1]['sourceBindingId'] = 'unregistered';
+        case 'wrong-role-binding':
+          observations[0]['sourceBindingId'] = 'receiver';
+          observations[1]['sourceBindingId'] = 'sender';
+        case 'wrong-challenge':
+          ((observations[1]['sealed'] as Map)['comparison']
+              as Map)['challenge'] = nativeTestRandom(
+            32,
+          );
+      }
+      expect(
+        await f.protocol.handle(
+          jsonEncode({
+            'operation': 'acceptObservedPairAndMatch',
+            'observations': observations,
+          }),
+        ),
+        {
+          'outcome': invalid == 'wrong-challenge'
+              ? 'comparison-rejected'
+              : 'source-rejected',
+        },
+      );
+      expect(
+        await f.protocol.handle(
+          jsonEncode({'operation': 'acceptObserved', ...f.observations.first}),
+        ),
+        {'outcome': 'accepted'},
+      );
+      expect(
+        await f.protocol.handle(jsonEncode({'operation': 'matchGrants'})),
+        {'outcome': 'not-ready'},
+      );
+    });
+  }
+
+  test(
+    'combined pair rejects prior comparison replay without grants',
+    () async {
+      final f = await pairProtocolFixture();
+      final request = jsonEncode({
+        'operation': 'acceptObservedPairAndMatch',
+        'observations': f.observations,
+      });
+      expect((await f.protocol.handle(request))['outcome'], 'grants-issued');
+      await f.protocol.handle(
+        jsonEncode({'operation': 'newComparison', 'leg': 1}),
+      );
+      expect(await f.protocol.handle(request), {
+        'outcome': 'comparison-rejected',
+      });
+      expect(
+        await f.protocol.handle(jsonEncode({'operation': 'matchGrants'})),
+        {'outcome': 'not-ready'},
+      );
+    },
+  );
+
+  test(
+    'combined pair second authentication failure retains first safely',
+    () async {
+      final f = await pairProtocolFixture();
+      final observations = [
+        for (final entry in f.observations) copyJson(entry),
+      ];
+      final second = observations[1]['sealed'] as Map;
+      final tag = base64Url.decode(second['tag'] as String)..[0] ^= 1;
+      second['tag'] = base64Url.encode(tag);
+      final result = await f.protocol.handle(
+        jsonEncode({
+          'operation': 'acceptObservedPairAndMatch',
+          'observations': observations,
+        }),
+      );
+      expect(result, {'outcome': 'invalid-envelope'});
+      expect(
+        await f.protocol.handle(jsonEncode({'operation': 'matchGrants'})),
+        {'outcome': 'not-ready'},
+      );
+      expect(
+        await f.protocol.handle(
+          jsonEncode({'operation': 'acceptObserved', ...f.observations.first}),
+        ),
+        {'outcome': 'already-accepted'},
+      );
+      expect(
+        (await f.protocol.handle(
+          jsonEncode({
+            'operation': 'acceptObservedPairAndMatch',
+            'observations': f.observations,
+          }),
+        ))['outcome'],
+        'grants-issued',
+      );
+    },
+  );
+
+  test(
+    'combined pair preserves retained observation age and cached grant TTL',
+    () async {
+      final f = Fixture();
+      await f.initialize(remaining: 5000);
+      final pair = [
+        for (final role in TestRole.values)
+          (sourceBindingId: role.name, sealed: f.sealed[role]!),
+      ];
+      await f.root.acceptObserved('sender', f.sealed[TestRole.sender]!);
+      f.clock = 1500;
+      final grants = await f.root.acceptObservedPairAndMatch(pair);
+      expect(grants[TestRole.sender]!.ttlMillis, 2500);
+      f.clock = 3999;
+      expect(await f.root.acceptObservedPairAndMatch(pair), same(grants));
+      f.clock = 4000;
+      await expectLater(f.root.acceptObservedPairAndMatch(pair), failure);
+    },
+  );
+
+  test(
+    'combined pair cannot refresh partial authentication capture on retry',
+    () async {
+      final f = Fixture();
+      await f.initialize(remaining: 5000);
+      final damaged = f.sealed[TestRole.receiver]!.toJson();
+      final tag = base64Url.decode(damaged['tag'] as String)..[0] ^= 1;
+      damaged['tag'] = base64Url.encode(tag);
+      await expectLater(
+        f.root.acceptObservedPairAndMatch([
+          (sourceBindingId: 'sender', sealed: f.sealed[TestRole.sender]!),
+          (
+            sourceBindingId: 'receiver',
+            sealed: SealedObservation.fromJson(damaged),
+          ),
+        ]),
+        failure,
+      );
+      f.clock = 4000;
+      await expectLater(
+        f.root.acceptObservedPairAndMatch([
+          for (final role in TestRole.values)
+            (sourceBindingId: role.name, sealed: f.sealed[role]!),
+        ]),
+        failure,
+      );
+      await expectLater(f.root.matchGrants(), failure);
+    },
+  );
+
+  test(
+    'combined pair mismatched private comparison never issues grants',
+    () async {
+      for (final codeMismatch in [true, false]) {
+        final f = Fixture();
+        await f.initialize(
+          receiverCode: codeMismatch ? '123456' : '739281',
+          receiverAttempt: codeMismatch ? 'attempt-a' : 'attempt-b',
+        );
+        await expectLater(
+          f.root.acceptObservedPairAndMatch([
+            for (final role in TestRole.values)
+              (sourceBindingId: role.name, sealed: f.sealed[role]!),
+          ]),
+          failure,
+        );
+        await expectLater(f.root.matchGrants(), failure);
+      }
+    },
+  );
+
+  test(
+    'combined pair request caps and failure outcomes never echo input',
+    () async {
+      final f = await pairProtocolFixture();
+      for (final secret in [
+        'PRIVATE-CANARY',
+        '739281',
+        'ws://127.0.0.1/auth-canary=/ws',
+      ]) {
+        final result = await f.protocol.handle(
+          jsonEncode({
+            'operation': 'acceptObservedPairAndMatch',
+            'observations': [
+              f.observations.first,
+              {'sourceBindingId': 'receiver', 'sealed': secret * 9000},
+            ],
+          }),
+        );
+        expect(result, {'outcome': 'invalid-input'});
+        expect(jsonEncode(result).contains(secret), isFalse);
+      }
+      final tooManyBytes =
+          'é' * (NativeNearbyCoordinatorProtocol.maxRequestBytes ~/ 2 + 1);
+      expect(await f.protocol.handle(tooManyBytes), {
+        'outcome': 'invalid-input',
+      });
+      expect(
+        await f.protocol.handle(
+          jsonEncode({'operation': 'acceptObserved', ...f.observations.first}),
+        ),
+        {'outcome': 'accepted'},
+      );
+    },
+  );
+
   test(
     'asynchronous coordinator output failure is consumed without logging',
     () async {

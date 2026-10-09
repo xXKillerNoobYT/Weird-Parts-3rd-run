@@ -185,9 +185,9 @@ T _enumValue<T extends Enum>(Object? value, List<T> values) {
 abstract interface class NativeTestHostTransport {
   Future<Object?> getVm();
   Future<Object?> getIsolate(String isolateId);
-  Future<Object?> info(String isolateId);
+  Future<Object?> info(String isolateId, {Duration? timeout});
   Future<Object?> configure(String isolateId, String data);
-  Future<Object?> command(String isolateId, String data);
+  Future<Object?> command(String isolateId, String data, {Duration? timeout});
 }
 
 final class NativeTestHost {
@@ -195,7 +195,12 @@ final class NativeTestHost {
     required this.transport,
     required this.run,
     required this.platform,
+    this.observeContextBudget = const Duration(seconds: 3),
   }) {
+    if (observeContextBudget <= Duration.zero ||
+        observeContextBudget > const Duration(seconds: 3)) {
+      _reject(NativeTestHostError.invalidInput);
+    }
     if (!nativeTestSupportedRuns.contains(run) ||
         (platform != 'windows' && platform != 'macos')) {
       _reject(NativeTestHostError.invalidInput);
@@ -204,6 +209,7 @@ final class NativeTestHost {
 
   final NativeTestHostTransport transport;
   final String run, platform;
+  final Duration observeContextBudget;
   String? _isolate;
   TestSession? _session;
   bool _configureAttempted = false;
@@ -358,8 +364,125 @@ final class NativeTestHost {
     }
   }
 
-  Future<Map<String, Object>> _info() async {
-    final raw = await transport.info(_isolate!);
+  /// The opt-in operation emits a bound context immediately before a completed
+  /// observation. Ordinary operations retain their single-record behavior.
+  Future<List<Map<String, Object>>> handleRecords(String source) async {
+    try {
+      if (source.length <= _maxHostBytes &&
+          utf8.encode(source).length <= _maxHostBytes) {
+        final decoded = jsonDecode(source);
+        if (decoded is Map<String, dynamic> &&
+            decoded['operation'] == 'observeAndContext') {
+          return await _observeAndContext(decoded);
+        }
+      }
+    } catch (_) {
+      // The existing parser owns ordinary malformed-input responses.
+    }
+    return [await handleLine(source)];
+  }
+
+  Future<List<Map<String, Object>>> _observeAndContext(
+    Map<String, dynamic> decoded,
+  ) async {
+    if (_handling) {
+      return [const NativeTestHostFailure(NativeTestHostError.busy).toJson()];
+    }
+    _handling = true;
+    final clock = Stopwatch()..start();
+    Map<String, Object>? last;
+    int? nativeRemainingAtStart;
+    Duration remaining() {
+      var micros =
+          observeContextBudget.inMicroseconds - clock.elapsedMicroseconds;
+      final native = nativeRemainingAtStart;
+      if (native != null) {
+        final nativeMicros = native * 1000 - clock.elapsedMicroseconds;
+        if (nativeMicros < micros) micros = nativeMicros;
+      }
+      if (micros <= 0) _reject(NativeTestHostError.rpcTimeout);
+      return Duration(microseconds: micros);
+    }
+
+    try {
+      _map(decoded, {'operation', 'command'});
+      if (_isolate == null) _reject(NativeTestHostError.notReady);
+      final session = _session;
+      if (session == null) _reject(NativeTestHostError.notConfigured);
+      final data = jsonEncode(decoded['command']);
+      late final NativeTestCommand command;
+      try {
+        command = NativeTestCommand.parseRequest(data, session);
+      } catch (_) {
+        _reject(NativeTestHostError.invalidInput);
+      }
+      if (command.action != NativeTestAction.observe) {
+        _reject(NativeTestHostError.invalidInput);
+      }
+      final currentInfo = await _info(timeout: remaining());
+      if (currentInfo['outcome'] != 'ready' ||
+          currentInfo['configured'] != true) {
+        _reject(NativeTestHostError.notConfigured);
+      }
+      // Counting the initial info RPC again is conservative: it cannot extend
+      // the resident's original deadline or the host's monotonic wait budget.
+      nativeRemainingAtStart =
+          command.deadlineMillis - (currentInfo['elapsedMillis'] as int);
+      while (true) {
+        final reply = _commandReply(
+          await transport.command(_isolate!, data, timeout: remaining()),
+          command,
+          session,
+        );
+        last = {'outcome': 'command', 'value': reply};
+        final state = reply['state'];
+        if (state == 'completed') {
+          final info = await _info(timeout: remaining());
+          remaining();
+          if (info['outcome'] != 'ready' || info['configured'] != true) {
+            _reject(NativeTestHostError.notConfigured);
+          }
+          if ((info['elapsedMillis'] as int) <
+              (currentInfo['elapsedMillis'] as int)) {
+            _reject(NativeTestHostError.identityMismatch);
+          }
+          return [
+            {
+              'outcome': 'info',
+              'isolateId': _isolate!,
+              'value': info,
+              'commandIdentity': {
+                'epoch': command.epoch,
+                'commandId': command.commandId,
+                'sequence': command.sequence,
+                'action': command.action.name,
+                'contentHash': command.contentHash,
+              },
+            },
+            last,
+          ];
+        }
+        if (state != 'accepted' && state != 'running') return [last];
+        final budget = remaining();
+        final delay = budget < const Duration(milliseconds: 50)
+            ? budget
+            : const Duration(milliseconds: 50);
+        await Future<void>.delayed(delay);
+      }
+    } on NativeTestHostFailure catch (failure) {
+      return [?last, failure.toJson()];
+    } catch (_) {
+      return [
+        ?last,
+        const NativeTestHostFailure(NativeTestHostError.rpcFailed).toJson(),
+      ];
+    } finally {
+      _handling = false;
+    }
+  }
+
+  Future<Map<String, Object>> _info({Duration? timeout}) async {
+    final raw = await transport.info(_isolate!, timeout: timeout);
     if (raw is Map && raw['outcome'] == 'not-ready') {
       final m = _map(raw, {'version', 'outcome'});
       if (m['version'] != 1) {
@@ -771,6 +894,7 @@ final class _VmTransport implements NativeTestHostTransport {
   Future<Object?> _call(
     NativeTestVmMethod method, [
     Map<String, String> params = const {},
+    Duration? timeout,
   ]) async {
     if (_closed) {
       throw _failure ??
@@ -778,6 +902,9 @@ final class _VmTransport implements NativeTestHostTransport {
     }
     if (_pending.isNotEmpty) {
       _reject(NativeTestHostError.rpcFailed);
+    }
+    if (timeout != null && timeout <= Duration.zero) {
+      _reject(NativeTestHostError.rpcTimeout);
     }
     final id = ++_nextId;
     final completer = Completer<Object?>();
@@ -793,8 +920,19 @@ final class _VmTransport implements NativeTestHostTransport {
         }),
       );
       return await completer.future.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => _reject(NativeTestHostError.rpcTimeout),
+        timeout ?? const Duration(seconds: 5),
+        onTimeout: () {
+          if (timeout != null) {
+            // A bounded request is never left pending for a later command.
+            _disconnect(
+              const NativeTestHostFailure(NativeTestHostError.rpcTimeout),
+            );
+            unawaited(
+              _socket.close().then<void>((_) {}, onError: (Object _) {}),
+            );
+          }
+          _reject(NativeTestHostError.rpcTimeout);
+        },
       );
     } on NativeTestHostFailure {
       rethrow;
@@ -854,17 +992,18 @@ final class _VmTransport implements NativeTestHostTransport {
   Future<Object?> getIsolate(String id) =>
       _call(NativeTestVmMethod.getIsolate, {'isolateId': _isolateId(id)});
   @override
-  Future<Object?> info(String id) =>
-      _call(NativeTestVmMethod.info, {'isolateId': _isolateId(id)});
+  Future<Object?> info(String id, {Duration? timeout}) =>
+      _call(NativeTestVmMethod.info, {'isolateId': _isolateId(id)}, timeout);
   @override
   Future<Object?> configure(String id, String data) => _call(
     NativeTestVmMethod.configure,
     {'isolateId': _isolateId(id), 'data': data},
   );
   @override
-  Future<Object?> command(String id, String data) => _call(
+  Future<Object?> command(String id, String data, {Duration? timeout}) => _call(
     NativeTestVmMethod.command,
     {'isolateId': _isolateId(id), 'data': data},
+    timeout,
   );
   Future<void> close() async {
     _disconnect();
@@ -1061,10 +1200,14 @@ Future<void> main(List<String> arguments) async {
       'discoveryMaxFrameBytes': transport.discoveryMaxFrameBytes,
     });
     await for (final line in nativeTestHostInputLines(stdin)) {
-      final output = line == null
-          ? <String, Object>{'outcome': 'failed', 'category': 'invalidInput'}
-          : await host.handleLine(line);
-      _emit(output);
+      final records = line == null
+          ? <Map<String, Object>>[
+              {'outcome': 'failed', 'category': 'invalidInput'},
+            ]
+          : await host.handleRecords(line);
+      for (final record in records) {
+        _emit(record);
+      }
     }
     _emit({'outcome': 'hostInputClosed'});
   } on NativeTestHostFailure catch (failure) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,6 +20,10 @@ final class FakeTransport implements NativeTestHostTransport {
   bool failInfo = false;
   Object? infoOverride;
   Object? reply;
+  final commandData = <String>[];
+  final timeouts = <Duration?>[];
+  Future<Object?> Function(Duration?)? onInfo;
+  Future<Object?> Function(Duration?)? onCommand;
   final isolates = ['isolates/123'];
   final isolateReplies = <String, Object?>{};
 
@@ -62,8 +67,10 @@ final class FakeTransport implements NativeTestHostTransport {
   }
 
   @override
-  Future<Object?> info(String id) async {
+  Future<Object?> info(String id, {Duration? timeout}) async {
     calls.add('info');
+    timeouts.add(timeout);
+    if (onInfo != null) return onInfo!(timeout);
     if (failInfo) throw StateError(canary);
     return infoOverride ?? infoValue;
   }
@@ -77,18 +84,24 @@ final class FakeTransport implements NativeTestHostTransport {
   }
 
   @override
-  Future<Object?> command(String id, String data) async {
+  Future<Object?> command(String id, String data, {Duration? timeout}) async {
     calls.add('command');
+    commandData.add(data);
+    timeouts.add(timeout);
+    if (onCommand != null) return onCommand!(timeout);
     return reply;
   }
 }
 
 final class Fixture {
+  Fixture({this.budget = const Duration(seconds: 3)});
+  final Duration budget;
   final transport = FakeTransport();
   late final host = NativeTestHost(
     transport: transport,
     run: run,
     platform: 'windows',
+    observeContextBudget: budget,
   );
   final session = TestSession(
     epoch: 'epoch-a',
@@ -112,6 +125,7 @@ final class Fixture {
       },
     );
     transport.calls.clear();
+    transport.timeouts.clear();
   }
 
   String request({
@@ -126,6 +140,7 @@ final class Fixture {
         action: action,
         deadlineMillis: 1000,
         comparison: comparison,
+        leg: action == NativeTestAction.markReceivedDatabase ? 1 : null,
         snapshotStage: action == NativeTestAction.snapshot
             ? PrivateSnapshotStage.baseline
             : null,
@@ -171,7 +186,399 @@ Map<String, Object> sealedSnapshot(Fixture f) => {
   'tag': base64Url.encode(List.filled(16, 5)),
 };
 
+Map<String, Object> pendingObservation(String state) => {
+  'version': 1,
+  'sequence': 1,
+  'state': state,
+  'outcome': state == 'unknown' ? 'UNKNOWN' : 'pending',
+  'inflight': state != 'accepted',
+  'effect': state == 'unknown' ? 'possible' : 'none',
+};
+
+String contextRequest(Fixture f) => f
+    .request(action: NativeTestAction.observe)
+    .replaceFirst('"operation":"command"', '"operation":"observeAndContext"');
+
+Map<String, Object> completedObservation(Fixture f) => f.result({
+  'outcome': 'success',
+  'effect': 'none',
+  'observation': {
+    'epoch': f.session.epoch,
+    'run': run,
+    'role': 'receiver',
+    'deviceId': f.host.deviceId,
+    'peerId': f.host.peerId,
+    'phase': 'pairing',
+    'sameNearbyState': true,
+    'discovered': true,
+    'codePresent': true,
+  },
+});
+
 void main() {
+  test(
+    'observeAndContext serially polls one exact envelope then binds context',
+    () async {
+      final f = Fixture();
+      await f.ready();
+      final replies = [
+        pendingObservation('accepted'),
+        pendingObservation('running'),
+        completedObservation(f),
+      ];
+      var active = 0, maxActive = 0, index = 0;
+      f.transport.onCommand = (_) async {
+        active++;
+        if (active > maxActive) maxActive = active;
+        await Future<void>.delayed(Duration.zero);
+        active--;
+        return replies[index++];
+      };
+      final source = contextRequest(f);
+      final output = await f.host.handleRecords(source);
+      expect(maxActive, 1);
+      expect(f.transport.commandData.length, 3);
+      expect(f.transport.commandData.toSet().length, 1);
+      expect(
+        jsonDecode(f.transport.commandData.first),
+        jsonDecode(source)['command'],
+      );
+      expect(f.transport.calls, [
+        'info',
+        'command',
+        'command',
+        'command',
+        'info',
+      ]);
+      expect(output.map((r) => r['outcome']), ['info', 'command']);
+      final command = jsonDecode(source)['command'];
+      expect(output.first, {
+        'outcome': 'info',
+        'isolateId': 'isolates/123',
+        'value': f.transport.infoValue,
+        'commandIdentity': {
+          for (final key in [
+            'epoch',
+            'commandId',
+            'sequence',
+            'action',
+            'contentHash',
+          ])
+            key: command[key],
+        },
+      });
+      expect((output.last['value'] as Map)['state'], 'completed');
+      final budgets = f.transport.timeouts.cast<Duration>();
+      expect(
+        budgets.every(
+          (d) => d > Duration.zero && d <= const Duration(seconds: 3),
+        ),
+        isTrue,
+      );
+      for (var i = 1; i < budgets.length; i++) {
+        expect(budgets[i] < budgets[i - 1], isTrue);
+      }
+    },
+  );
+
+  test(
+    'ordinary command stays single reply with unbounded legacy transport',
+    () async {
+      final f = Fixture();
+      await f.ready();
+      f.transport.reply = pendingObservation('accepted');
+      final output = await f.host.handleRecords(
+        f.request(action: NativeTestAction.observe),
+      );
+      expect(output, [
+        {'outcome': 'command', 'value': f.transport.reply},
+      ]);
+      expect(f.transport.calls, ['info', 'command']);
+      expect(f.transport.timeouts, [null, null]);
+    },
+  );
+
+  test(
+    'already completed observation needs one submission and postterminal info',
+    () async {
+      final f = Fixture();
+      await f.ready();
+      f.transport.reply = completedObservation(f);
+      final output = await f.host.handleRecords(contextRequest(f));
+      expect(output.map((r) => r['outcome']), ['info', 'command']);
+      expect(f.transport.calls, ['info', 'command', 'info']);
+    },
+  );
+
+  for (final state in ['unknown', 'failed', 'rejected']) {
+    test(
+      'observeAndContext stops $state without context or further poll',
+      () async {
+        final f = Fixture();
+        await f.ready();
+        f.transport.reply = state == 'unknown'
+            ? pendingObservation(state)
+            : {
+                'version': 1,
+                if (state != 'rejected') 'sequence': 1,
+                'state': state,
+                'outcome': state == 'failed' ? 'stateChanged' : 'busy',
+                'inflight': false,
+                'effect': 'none',
+              };
+        final output = await f.host.handleRecords(contextRequest(f));
+        expect(output, [
+          {'outcome': 'command', 'value': f.transport.reply},
+        ]);
+        expect(f.transport.calls, ['info', 'command']);
+      },
+    );
+  }
+
+  for (final action in NativeTestAction.values.where(
+    (a) =>
+        a != NativeTestAction.observe && a != NativeTestAction.matchWithGrant,
+  )) {
+    test('observeAndContext rejects ${action.name} before transport', () async {
+      final f = Fixture();
+      await f.ready();
+      final source = f
+          .request(action: action)
+          .replaceFirst(
+            '"operation":"command"',
+            '"operation":"observeAndContext"',
+          );
+      expect(await f.host.handleRecords(source), [
+        {'outcome': 'failed', 'category': 'invalidInput'},
+      ]);
+      expect(f.transport.calls, isEmpty);
+    });
+  }
+
+  test(
+    'observeAndContext rejects valid match grant before any transport',
+    () async {
+      final f = Fixture();
+      await f.ready();
+      final comparison = ComparisonChallenge(
+        epoch: f.session.epoch,
+        leg: 1,
+        comparisonId: 1,
+        challenge: base64Url.encode(List.filled(32, 3)),
+      );
+      final grant = MatchGrant(
+        session: f.session,
+        comparison: comparison,
+        attemptId: 'attempt-a',
+        sealedCiphertextHash: base64Url.encode(List.filled(32, 4)),
+        localExpiresAtMillis: 10000,
+        ttlMillis: 20000,
+        signature: base64Url.encode(List.filled(64, 5)),
+      );
+      final source = jsonEncode({
+        'operation': 'observeAndContext',
+        'command': jsonDecode(
+          NativeTestCommand.encodeRequest(
+            session: f.session,
+            sequence: 1,
+            action: NativeTestAction.matchWithGrant,
+            deadlineMillis: 1000,
+            grant: grant,
+          ),
+        ),
+      });
+      expect(await f.host.handleRecords(source), [
+        {'outcome': 'failed', 'category': 'invalidInput'},
+      ]);
+      expect(f.transport.calls, isEmpty);
+    },
+  );
+
+  test(
+    'context timeout preserves completed and does not publish context',
+    () async {
+      final f = Fixture(budget: const Duration(milliseconds: 80));
+      await f.ready();
+      f.transport.reply = completedObservation(f);
+      var count = 0;
+      f.transport.onInfo = (timeout) async {
+        if (count++ == 0) return f.transport.infoValue;
+        await Future<void>.delayed(timeout!);
+        throw const NativeTestHostFailure(NativeTestHostError.rpcTimeout);
+      };
+      final output = await f.host.handleRecords(contextRequest(f));
+      expect(output, [
+        {'outcome': 'command', 'value': completedObservation(f)},
+        {'outcome': 'failed', 'category': 'rpcTimeout'},
+      ]);
+      expect(f.transport.calls, ['info', 'command', 'info']);
+    },
+  );
+
+  test('initial info consumes overall budget before any command', () async {
+    final f = Fixture(budget: const Duration(milliseconds: 40));
+    await f.ready();
+    f.transport.onInfo = (timeout) async {
+      await Future<void>.delayed(timeout!);
+      throw const NativeTestHostFailure(NativeTestHostError.rpcTimeout);
+    };
+    expect(await f.host.handleRecords(contextRequest(f)), [
+      {'outcome': 'failed', 'category': 'rpcTimeout'},
+    ]);
+    expect(f.transport.calls, ['info']);
+  });
+
+  test(
+    'observeAndContext malformed envelope never reaches transport',
+    () async {
+      final f = Fixture();
+      await f.ready();
+      for (final source in [
+        '{"operation":"observeAndContext","command":{}}',
+        '{"operation":"observeAndContext","command":{},"extra":1}',
+      ]) {
+        expect(
+          (await f.host.handleRecords(source)).single['outcome'],
+          'failed',
+        );
+        expect(f.transport.calls, isEmpty);
+      }
+    },
+  );
+
+  for (final malformed in [false, true]) {
+    test(
+      'poll ${malformed ? 'invalid reply' : 'transport error'} retains last accepted and bounded failure',
+      () async {
+        final f = Fixture();
+        await f.ready();
+        var count = 0;
+        f.transport.onCommand = (_) async {
+          if (count++ == 0) return pendingObservation('accepted');
+          if (malformed) return {'raw': canary};
+          throw StateError(canary);
+        };
+        final output = await f.host.handleRecords(contextRequest(f));
+        expect(output.first, {
+          'outcome': 'command',
+          'value': pendingObservation('accepted'),
+        });
+        expect(output.last, {
+          'outcome': 'failed',
+          'category': malformed ? 'invalidOutput' : 'rpcFailed',
+        });
+        expect(jsonEncode(output).contains(canary), isFalse);
+        expect(f.transport.calls, ['info', 'command', 'command']);
+      },
+    );
+  }
+
+  for (final failure in ['transport', 'pid', 'not-ready', 'clock-rollback']) {
+    test('postterminal $failure cannot erase completed observation', () async {
+      final f = Fixture();
+      await f.ready();
+      f.transport.reply = completedObservation(f);
+      var infos = 0;
+      f.transport.onInfo = (_) async {
+        if (infos++ == 0) return f.transport.infoValue;
+        if (failure == 'transport') throw StateError(canary);
+        if (failure == 'pid') return {...f.transport.infoValue, 'appPid': 101};
+        if (failure == 'clock-rollback') {
+          return {...f.transport.infoValue, 'elapsedMillis': 9};
+        }
+        return {'version': 1, 'outcome': 'not-ready'};
+      };
+      final output = await f.host.handleRecords(contextRequest(f));
+      expect(output.first, {
+        'outcome': 'command',
+        'value': completedObservation(f),
+      });
+      expect(output.last['outcome'], 'failed');
+      expect(output.any((r) => r['outcome'] == 'info'), isFalse);
+      expect(jsonEncode(output).contains(canary), isFalse);
+    });
+  }
+
+  test(
+    'overall budget bounds one pending RPC and no later request escapes',
+    () async {
+      final f = Fixture(budget: const Duration(milliseconds: 120));
+      await f.ready();
+      var active = false, count = 0;
+      f.transport.onCommand = (timeout) async {
+        if (count++ == 0) return pendingObservation('accepted');
+        active = true;
+        try {
+          await Future<void>.delayed(timeout!);
+          throw const NativeTestHostFailure(NativeTestHostError.rpcTimeout);
+        } finally {
+          active = false;
+        }
+      };
+      final output = await f.host.handleRecords(contextRequest(f));
+      expect(active, isFalse);
+      expect(count, 2);
+      expect(output, [
+        {'outcome': 'command', 'value': pendingObservation('accepted')},
+        {'outcome': 'failed', 'category': 'rpcTimeout'},
+      ]);
+      expect(
+        f.transport.timeouts.last! < const Duration(milliseconds: 80),
+        isTrue,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(count, 2);
+      f.transport.onCommand = null;
+      f.transport.reply = pendingObservation('accepted');
+      expect((await f.host.handleLine(f.request()))['outcome'], 'command');
+    },
+  );
+
+  test('native deadline already expired blocks the first command', () async {
+    final f = Fixture();
+    await f.ready();
+    f.transport.infoOverride = {
+      ...f.transport.infoValue,
+      'elapsedMillis': 1000,
+    };
+    expect(await f.host.handleRecords(contextRequest(f)), [
+      {'outcome': 'failed', 'category': 'rpcTimeout'},
+    ]);
+    expect(f.transport.calls, ['info']);
+  });
+
+  test('host remains busy across local wait and context collection', () async {
+    final f = Fixture();
+    await f.ready();
+    final pending = Completer<Object?>();
+    f.transport.onCommand = (_) => pending.future;
+    final first = f.host.handleRecords(contextRequest(f));
+    await Future<void>.delayed(Duration.zero);
+    expect(await f.host.handleRecords(contextRequest(f)), [
+      {'outcome': 'failed', 'category': 'busy'},
+    ]);
+    expect(await f.host.handleLine('{"operation":"info"}'), {
+      'outcome': 'failed',
+      'category': 'busy',
+    });
+    pending.complete(completedObservation(f));
+    expect((await first).map((r) => r['outcome']), ['info', 'command']);
+  });
+
+  test('observe context wait budget cannot widen production limit', () {
+    for (final budget in [Duration.zero, const Duration(seconds: 4)]) {
+      expect(
+        () => NativeTestHost(
+          transport: FakeTransport(),
+          run: run,
+          platform: 'windows',
+          observeContextBudget: budget,
+        ),
+        throwsA(isA<NativeTestHostFailure>()),
+      );
+    }
+  });
+
   test('host emits strict fixed diagnostic from split marker', () {
     final records = <NativeTestConfigureDiagnostic>[];
     final scanner = NativeTestLauncherDiagnostics(

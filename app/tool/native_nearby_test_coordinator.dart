@@ -250,6 +250,39 @@ final class NativeNearbyTestCoordinator {
     return ObservationOutcome.accepted;
   }
 
+  Future<Map<TestRole, MatchGrant>> acceptObservedPairAndMatch(
+    List<({String sourceBindingId, SealedObservation sealed})> observations,
+  ) async {
+    if (observations.length != 2) rejectNativeTest();
+    final pair = List.of(observations);
+    final comparison = _comparison;
+    if (comparison == null ||
+        pair[0].sourceBindingId == pair[1].sourceBindingId ||
+        pair[0].sealed.role == pair[1].sealed.role) {
+      rejectNativeTest('source-rejected');
+    }
+    for (final observation in pair) {
+      final source = _sources[observation.sourceBindingId];
+      final sealed = observation.sealed;
+      if (source == null ||
+          source.role != sealed.role ||
+          source.run != sealed.run ||
+          sealed.epoch != publicConfig[source.role]!.epoch) {
+        rejectNativeTest('source-rejected');
+      }
+      if (jsonEncode(sealed.challenge.toJson()) !=
+          jsonEncode(comparison.toJson())) {
+        rejectNativeTest('comparison-rejected');
+      }
+    }
+    // A later authentication failure retains prior accepted observations and
+    // their original capture clocks; it never issues or refreshes grants.
+    for (final observation in pair) {
+      await acceptObserved(observation.sourceBindingId, observation.sealed);
+    }
+    return matchGrants();
+  }
+
   Future<Map<TestRole, MatchGrant>> matchGrants() async {
     final comparison = _comparison;
     final a = _observations[TestRole.sender],
@@ -446,6 +479,29 @@ final class NativeNearbyCoordinatorProtocol {
             'outcome': outcome == ObservationOutcome.accepted
                 ? 'accepted'
                 : 'already-accepted',
+          };
+        case 'acceptObservedPairAndMatch':
+          final m = nativeTestMap(value, {'operation', 'observations'});
+          final values = m['observations'];
+          if (values is! List || values.length != 2) rejectNativeTest();
+          final observations = values.map((value) {
+            final entry = nativeTestMap(value, {'sourceBindingId', 'sealed'});
+            return (
+              sourceBindingId: nativeTestId(entry['sourceBindingId']),
+              sealed: SealedObservation.fromJson(entry['sealed']),
+            );
+          }).toList();
+          final coordinator = _coordinator;
+          if (coordinator == null) rejectNativeTest('not-ready');
+          final grants = await coordinator.acceptObservedPairAndMatch(
+            observations,
+          );
+          return {
+            'outcome': 'grants-issued',
+            'grants': {
+              for (final entry in grants.entries)
+                entry.key.name: entry.value.toJson(),
+            },
           };
         case 'matchGrants':
           nativeTestMap(value, {'operation'});
