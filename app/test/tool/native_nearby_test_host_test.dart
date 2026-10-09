@@ -607,6 +607,40 @@ void main() {
     },
   );
 
+  test('desktop VM trace stays bounded and accepts a split trusted banner', () {
+    const token = 'SYNTHETIC_AUTH_TOKEN=';
+    final scanner = NativeTestVmBannerScanner();
+    for (final line in [
+      'unrelated http://127.0.0.1:12345/$token/',
+      'VM Service URL on device: http://192.0.2.1:12345/$token/',
+      'VM Service URL on device: http://127.0.0.1:0/$token/',
+      'VM Service URL on device: http://127.0.0.1:65536/$token/',
+      'VM Service URL on device: http://127.0.0.1:12345/',
+    ]) {
+      scanner.add(utf8.encode('$line\n'));
+      expect(scanner.privateUri, isNull);
+    }
+    scanner.add(utf8.encode('VM Service URL on device: ${'x' * 5000}'));
+    expect(scanner.bufferedCharacters, lessThanOrEqualTo(4096));
+    scanner.add(utf8.encode('\n'));
+    expect(scanner.privateUri, isNull);
+    for (final chunk in [
+      '[ +27 ms] VM Serv',
+      'ice URL on dev',
+      'ice: http://127.0.',
+      '0.1:12345/SYNTHETIC_',
+      'AUTH_TOKEN=/\r',
+      '\n',
+    ]) {
+      scanner.add(utf8.encode(chunk));
+    }
+    expect(scanner.privateUri?.host, '127.0.0.1');
+    expect(scanner.privateUri?.port, 12345);
+    expect(scanner.privateUri?.path, '/$token/');
+    expect(scanner.bufferedCharacters, 0);
+    expect(scanner.toString().contains(token), isFalse);
+  });
+
   test('VM response boundary accepts only the matching response', () {
     final response = jsonEncode({
       'jsonrpc': '2.0',

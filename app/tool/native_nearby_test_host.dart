@@ -627,6 +627,7 @@ final class NativeTestVmBannerScanner {
     if (_uri != null ||
         (!line.contains('Dart VM service is listening on ') &&
             !line.contains('Dart VM Service on ') &&
+            !line.contains('VM Service URL on device: ') &&
             !line.contains('Dart Development Service started at '))) {
       return;
     }
