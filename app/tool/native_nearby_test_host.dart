@@ -1055,6 +1055,21 @@ Future<void> nativeTestHostOutputDone(Future<void> outputDone) =>
 
 Future<void> main(List<String> arguments) async {
   unawaited(nativeTestHostOutputDone(stdout.done));
+  try {
+    await nativeTestGuardInputEcho(
+      () => _runHost(arguments),
+      windows: Platform.isWindows,
+      terminal: stdin.hasTerminal,
+      readEcho: () => stdin.echoMode,
+      writeEcho: (value) => stdin.echoMode = value,
+    );
+  } catch (_) {
+    _emit({'outcome': 'failed', 'category': 'launcherFailed'});
+    exitCode = 1;
+  }
+}
+
+Future<void> _runHost(List<String> arguments) async {
   _VmTransport? transport;
   try {
     if (arguments.length != 1 || !arguments.single.startsWith('--run=')) {

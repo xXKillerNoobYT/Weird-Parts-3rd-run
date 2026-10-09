@@ -593,6 +593,24 @@ Future<void> main(List<String> args) async {
     }
   }
 
+  try {
+    await nativeTestGuardInputEcho(
+      () => _runCoordinator(args, emit),
+      windows: Platform.isWindows,
+      terminal: stdin.hasTerminal,
+      readEcho: () => stdin.echoMode,
+      writeEcho: (value) => stdin.echoMode = value,
+    );
+  } catch (_) {
+    emit({'outcome': 'input-failed'});
+    exitCode = 1;
+  }
+}
+
+Future<void> _runCoordinator(
+  List<String> args,
+  void Function(Map<String, Object>) emit,
+) async {
   if (args.isNotEmpty) {
     emit({'outcome': 'invalid-input'});
     exitCode = 64;

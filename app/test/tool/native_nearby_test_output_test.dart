@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -30,6 +31,7 @@ List<String> outputLines(NativeTestOutputEncoding value) =>
     value.text.split('\r\n').where((line) => line.isNotEmpty).toList();
 
 void main() {
+  inputEchoTests();
   test('matches the independent Python accepted-reply vector', () {
     final lines = nativeTestOutputFrames(
       accepted,
@@ -201,4 +203,170 @@ void main() {
       contains(':C:00000000000003'),
     );
   });
+}
+
+void inputEchoTests() {
+  Future<void> run(
+    EchoProbe probe,
+    Future<void> Function() body, {
+    bool windows = true,
+    bool terminal = true,
+  }) => nativeTestGuardInputEcho(
+    body,
+    windows: windows,
+    terminal: terminal,
+    readEcho: probe.read,
+    writeEcho: probe.write,
+  );
+
+  for (final old in [true, false]) {
+    test('echo guard restores original $old after awaited body', () async {
+      final probe = EchoProbe(old);
+      final held = Completer<void>();
+      var called = false;
+      final pending = run(probe, () async {
+        called = true;
+        expect(probe.mode, false);
+        await held.future;
+        expect(probe.mode, false);
+      });
+      expect(called, true);
+      expect(probe.writes, [false]);
+      held.complete();
+      await pending;
+      expect(probe.mode, old);
+      expect(probe.writes, [false, old]);
+    });
+  }
+  for (final target in [(false, true), (true, false), (false, false)]) {
+    test('echo guard leaves non-Windows or pipe untouched $target', () async {
+      final probe = EchoProbe(true)..readFailureAt = 1;
+      var called = false;
+      await run(
+        probe,
+        () async {
+          called = true;
+        },
+        windows: target.$1,
+        terminal: target.$2,
+      );
+      expect(called, true);
+      expect(probe.reads, 0);
+      expect(probe.writes, isEmpty);
+    });
+  }
+  test(
+    'echo guard restores after body exception without exposing it',
+    () async {
+      final probe = EchoProbe(true);
+      final original = StateError('private-canary');
+      await expectLater(
+        run(probe, () async {
+          throw original;
+        }),
+        throwsA(same(original)),
+      );
+      expect(probe.writes, [false, true]);
+      expect(probe.mode, true);
+    },
+  );
+  test(
+    'echo guard fails before body when original mode cannot be read',
+    () async {
+      final probe = EchoProbe(true)..readFailureAt = 1;
+      var called = false;
+      await expectLater(
+        run(probe, () async {
+          called = true;
+        }),
+        throwsA(isA<NativeTestInputEchoFailure>()),
+      );
+      expect(called, false);
+      expect(probe.writes, isEmpty);
+    },
+  );
+  test(
+    'echo guard restores even when disable partially changes then throws',
+    () async {
+      final probe = EchoProbe(true)..writeFailureAt = 1;
+      var called = false;
+      await expectLater(
+        run(probe, () async {
+          called = true;
+        }),
+        throwsA(isA<NativeTestInputEchoFailure>()),
+      );
+      expect(called, false);
+      expect(probe.writes, [false, true]);
+      expect(probe.mode, true);
+    },
+  );
+  test('echo guard restores after failed disable readback', () async {
+    final probe = EchoProbe(true)..readFailureAt = 2;
+    var called = false;
+    await expectLater(
+      run(probe, () async {
+        called = true;
+      }),
+      throwsA(isA<NativeTestInputEchoFailure>()),
+    );
+    expect(called, false);
+    expect(probe.writes, [false, true]);
+    expect(probe.mode, true);
+  });
+  test(
+    'echo guard rejects ineffective disable before body and restores',
+    () async {
+      final probe = EchoProbe(true)..ignoreWriteAt = 1;
+      var called = false;
+      await expectLater(
+        run(probe, () async {
+          called = true;
+        }),
+        throwsA(isA<NativeTestInputEchoFailure>()),
+      );
+      expect(called, false);
+      expect(probe.writes, [false, true]);
+    },
+  );
+  for (final failure in ['write', 'read', 'unchanged']) {
+    test(
+      'echo guard rejects failed restoration $failure with fixed error',
+      () async {
+        final probe = EchoProbe(true);
+        if (failure == 'write') probe.writeFailureAt = 2;
+        if (failure == 'read') probe.readFailureAt = 3;
+        if (failure == 'unchanged') probe.ignoreWriteAt = 2;
+        Object? caught;
+        try {
+          await run(probe, () async {});
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught, isA<NativeTestInputEchoFailure>());
+        expect(caught.toString(), 'input echo guard failed');
+        expect(probe.writes, [false, true]);
+      },
+    );
+  }
+}
+
+final class EchoProbe {
+  EchoProbe(this.mode);
+  bool mode;
+  int reads = 0;
+  int? readFailureAt, writeFailureAt, ignoreWriteAt;
+  final writes = <bool>[];
+  bool read() {
+    if (++reads == readFailureAt) throw StateError('private-read-canary');
+    return mode;
+  }
+
+  void write(bool value) {
+    writes.add(value);
+    if (writes.length != ignoreWriteAt) mode = value;
+    if (writes.length == writeFailureAt) {
+      throw StateError('private-write-canary');
+    }
+  }
 }

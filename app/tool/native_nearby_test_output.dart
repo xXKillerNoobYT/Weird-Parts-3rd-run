@@ -109,3 +109,46 @@ final class NativeTestOutputEncoder {
   String _encode(Map<String, Object> record, int messageId) =>
       '\r\n${nativeTestOutputFrames(record, streamId: streamId, messageId: messageId, allowGeneric: allowGeneric).join('\r\n')}\r\n';
 }
+
+/// Restores only the original Windows terminal echo flag, including when the
+/// disable attempt partially succeeds. Non-Windows and pipes never access it.
+Future<void> nativeTestGuardInputEcho(
+  Future<void> Function() body, {
+  required bool windows,
+  required bool terminal,
+  required bool Function() readEcho,
+  required void Function(bool) writeEcho,
+}) async {
+  if (!windows || !terminal) {
+    await body();
+    return;
+  }
+  final bool original;
+  try {
+    original = readEcho();
+  } catch (_) {
+    throw const NativeTestInputEchoFailure();
+  }
+  try {
+    try {
+      writeEcho(false);
+      if (readEcho()) throw const NativeTestInputEchoFailure();
+    } catch (_) {
+      throw const NativeTestInputEchoFailure();
+    }
+    await body();
+  } finally {
+    try {
+      writeEcho(original);
+      if (readEcho() != original) throw const NativeTestInputEchoFailure();
+    } catch (_) {
+      throw const NativeTestInputEchoFailure();
+    }
+  }
+}
+
+final class NativeTestInputEchoFailure implements Exception {
+  const NativeTestInputEchoFailure();
+  @override
+  String toString() => 'input echo guard failed';
+}
