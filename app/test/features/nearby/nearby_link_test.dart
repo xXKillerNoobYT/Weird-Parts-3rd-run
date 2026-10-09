@@ -112,14 +112,28 @@ void main() {
     await pumpEventQueue();
     expect(guest.state.verifyCode, isNotNull);
     expect(host.state.verifyCode, guest.state.verifyCode);
+    expect(guest.state.verificationAttemptId, isNotEmpty);
+    expect(host.state.verificationAttemptId, guest.state.verificationAttemptId);
+    final hostDeadline = host.state.verificationExpiresAt;
+    final guestDeadline = guest.state.verificationExpiresAt;
+    expect(hostDeadline, isNotNull);
+    expect(guestDeadline, isNotNull);
+    expect(hostDeadline!.isAfter(DateTime.now().toUtc()), isTrue);
+    expect(guestDeadline!.isAfter(DateTime.now().toUtc()), isTrue);
 
     await host.confirmCode();
     expect(host.state.phase, NearbyPhase.pairing);
+    expect(host.state.verificationExpiresAt, hostDeadline);
+    expect(host.state.verificationAttemptId, guest.state.verificationAttemptId);
     expect(guest.state.phase, NearbyPhase.pairing);
     expect(received, isNull);
     await guest.confirmCode();
     expect(guest.state.phase, NearbyPhase.paired);
     expect(host.state.phase, NearbyPhase.paired);
+    expect(host.state.verificationAttemptId, isNull);
+    expect(guest.state.verificationAttemptId, isNull);
+    expect(host.state.verificationExpiresAt, isNull);
+    expect(guest.state.verificationExpiresAt, isNull);
 
     guestDisco.setPeers([hostPeer]);
     await pumpEventQueue();
@@ -132,6 +146,9 @@ void main() {
 
     expect(guest.state.phase, NearbyPhase.success);
     expect(host.state.phase, NearbyPhase.success);
+    // Receive success offers a fresh Pair; send success retains Send.
+    expect(host.state.pairedPeer, isNull);
+    expect(guest.state.pairedPeer?.deviceId, 'host-device');
     expect(received, isNotNull);
     expect(received!.sourceDeviceId, 'guest-device');
     expect(received!.sqliteBytes, [10, 20, 30, 40]);

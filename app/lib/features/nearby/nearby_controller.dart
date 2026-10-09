@@ -30,6 +30,8 @@ class NearbyViewState {
     this.status = 'Open Nearby on the other device. Stay on the same Wi‑Fi.',
     this.error,
     this.verifyCode,
+    this.verificationAttemptId,
+    this.verificationExpiresAt,
     this.peerName,
     this.peers = const [],
     this.incoming,
@@ -44,6 +46,10 @@ class NearbyViewState {
   final String status;
   final String? error;
   final String? verifyCode;
+
+  /// Read-only identity and local deadline for the code currently shown.
+  final String? verificationAttemptId;
+  final DateTime? verificationExpiresAt;
   final String? peerName;
   final List<NearbyPeer> peers;
   final NearbyOffer? incoming;
@@ -362,6 +368,7 @@ class NearbyController {
 
   void _armPairExpiry(_PairAttempt attempt) {
     _pairTimer?.cancel();
+    attempt.expiresAt = DateTime.now().toUtc().add(const Duration(minutes: 2));
     _pairTimer = Timer(const Duration(minutes: 2), () {
       if (identical(_pending, attempt)) _fail('Pair expired. Try again.');
     });
@@ -376,6 +383,8 @@ class NearbyController {
         peers: _state.peers,
         peerName: attempt.peer.label,
         verifyCode: attempt.match!.code,
+        verificationAttemptId: attempt.agreement.context.id,
+        verificationExpiresAt: attempt.expiresAt,
         status:
             'Check that ${attempt.peer.label} shows this same code, then tap Match.',
       ),
@@ -1204,6 +1213,7 @@ class _PairAttempt {
   final NearbyPeer peer;
   final NearbyPendingPair agreement;
   NearbyAwaitingMatch? match;
+  DateTime? expiresAt;
   bool localConfirmed = false;
 }
 
@@ -1227,6 +1237,8 @@ extension on NearbyViewState {
     String? status,
     String? error,
     String? verifyCode,
+    String? verificationAttemptId,
+    DateTime? verificationExpiresAt,
     String? peerName,
     List<NearbyPeer>? peers,
     NearbyOffer? incoming,
@@ -1241,6 +1253,10 @@ extension on NearbyViewState {
       status: status ?? this.status,
       error: error,
       verifyCode: verifyCode ?? this.verifyCode,
+      verificationAttemptId:
+          verificationAttemptId ?? this.verificationAttemptId,
+      verificationExpiresAt:
+          verificationExpiresAt ?? this.verificationExpiresAt,
       peerName: peerName ?? this.peerName,
       peers: peers ?? this.peers,
       incoming: incoming ?? this.incoming,
