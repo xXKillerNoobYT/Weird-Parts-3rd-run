@@ -37,3 +37,70 @@ and the intended sandbox identity. Do not overwrite or stop either retained
 lifecycle installation. A successful probe proves bootstrap, Flutter widget
 interaction and native Wi-Fi enumeration on that host. It proves no LAN
 reachability, Pair/Match/PIN flow, shop replacement, restart or two-way sync.
+
+# Resident lifecycle acceptance
+
+The second entrypoint is `integration_test/nearby_resident_test.dart`.
+It admits only Windows receiver or macOS sender, the explicit test flag, and
+the existing `nearby-lifecycle-20261007a` run. The separate
+`nearby-resident-probe-20261009a` run is admitted only if its fixture was already
+initialized. This entrypoint never seeds a database. It holds the fixture lock
+and opens SQLite read-only to verify schema 2, required table/column names,
+integrity and the exact local device profile before production startup.
+
+`tool/native_nearby_test_host.dart` starts the stock Flutter native test runner.
+Its only argument is `--run=<one of those runs>`. It privately discovers the
+authenticated localhost VM service and one actual isolate. It accepts only
+`info`, configure-once public session data, and typed finite `command` requests
+over bounded JSON lines on standard input. It exposes no runtime evaluation,
+arbitrary RPC method, path, executable or VM-service URL argument. Raw runner
+output and exceptions are discarded rather than included in public receipts.
+
+The coordinator must independently acquire the native PID, start time, exact
+image/kernel/source hashes, run, role, device IDs and host/isolate connection.
+It validates two distinct reciprocal sources before sending public session
+configuration. `tool/native_nearby_test_coordinator.dart` retains its private
+encryption and signing keys only in memory. It decrypts both freshly observed
+rendered codes internally and issues short-lived signed Match grants only if
+they match. Neither codes nor PIN-derived digests are printed. Match rechecks
+the current attempt, code and deadline after asynchronous work and immediately
+before the rendered button receives pointer-up.
+
+The resident test uses actual More, Nearby, Pair, Match, Editor PIN, Send and
+Accept controls. It keeps the same Nearby page state throughout three whole-shop
+copies, Mac to Windows, Windows to Mac, then Mac to Windows. The real UI offers
+fresh Pair/Match from the receiving device after each receipt. Receive success
+clears the visible pairedPeer, while send success retains it. Mac initiates the
+first pairing, Windows the second, and Mac the third. After each of the first
+two receipts, a fixed synthetic job-note marker proves the next send reads the
+replacement database. Those markers are test-only database mutations. They do
+not prove offline UI edits or genuine two-way merge.
+
+Commands have monotonically increasing sequence numbers, absolute local
+deadlines and bounded cached outcomes. Identical retries return the same result;
+changed or evicted old requests cannot execute again. An expired running action
+remains UNKNOWN and busy until its original future settles. Snapshot responses
+include schema, row/reference checks, hashes excluding PIN settings and a sealed
+private proof for full settings/PIN equality. Device profiles and fixture
+ownership must remain local. The app reacquires its current database after each
+replacement.
+
+`finish` writes a witness and keeps the app resident. `normalExit` requests the
+public Flutter cancelable application-exit API. A witness or disconnected test
+runner does not prove exit. Independently verify PID disappearance, collect cold
+SQLite/assets/settings evidence, restart the same isolated installation and
+read it back. A stock test-runner cleanup is not normal-quit evidence.
+
+The native owner must preserve original bundles and fixture contents, bind the
+actual test process, and verify narrowly scoped network rules for its exact
+executable. Flutter's desktop integration runner builds and launches the
+candidate's `app/build` executable. On Windows this requires an additional
+exact-program Private/LocalSubnet/Wi-Fi rule, rather than overwriting the retained
+original bundle. Preserve existing rules, adapter state and network defaults.
+No Wi-Fi disconnect, driver reset or legal-term acceptance is part of this test.
+
+Source/unit review and a successful native bootstrap do not clear #39. The three
+physical transfers, both normal quits, cold/readback checks and recipient-owned
+evidence at the exact reviewed commit remain separate acceptance gates. Company
+membership, changes-only two-way sync and mobile acceptance are outside this
+test harness and remain unfinished under #33.
