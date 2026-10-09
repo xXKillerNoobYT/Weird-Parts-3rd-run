@@ -115,6 +115,20 @@ These flags report text markers, not a verified termination cause or OS crash.
 Missing markers do not establish success, and OS crash evidence remains a
 separate native-owner check.
 
+A rejected configuration also writes one fixed-prefix diagnostic containing
+only its known rejection reason, owner-loop/pump counters, `pumpPending`, and
+the age of the last published public snapshot (null before publication).
+The host validates the exact schema from each bounded line, emits at most eight
+`diagnostic` records immediately, and retains the last accepted record in
+`launcherExit.configureDiagnostic`. Operator readers must accept these records
+between normal replies. Counters cover the resident owner-loop pump, not nested
+command pumps; completions count settled awaits, including errors, and do not
+prove a successful frame. A live info clock does not prove loop progress.
+Diagnostic sink failures do not affect configuration outcomes. The v1 RPC
+schemas, one-attempt latch and three-second configure expiry remain unchanged.
+Unit parsing tests do not prove delivery through the native app and stock runner;
+that stream path requires a new native observation.
+
 The native owner must preserve original bundles and fixture contents, bind the
 actual test process, and verify narrowly scoped network rules for its exact
 executable. Flutter's desktop integration runner builds and launches the

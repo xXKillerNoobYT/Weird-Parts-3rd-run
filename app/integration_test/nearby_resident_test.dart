@@ -111,6 +111,13 @@ final class _Resident {
     deviceId: workspace.deviceId,
     peerId: peerId,
     clockMillis: () => clock.elapsedMilliseconds,
+    onDiagnostic: (record) {
+      // The stock integration runner forwards test-zone print records.
+      // ignore: avoid_print
+      print(
+        '$nativeTestConfigureDiagnosticPrefix${jsonEncode(record.toJson())}',
+      );
+    },
     readInfoInLoop: () {
       final current = view;
       return NativeTestResidentViewInfo(
@@ -197,6 +204,7 @@ final class _Resident {
   Future<void> run() async {
     try {
       while (!finished) {
+        rpc.markLoopStarted();
         rpc.processConfigurationInLoop((next) {
           if (session != null ||
               exitRequested ||
@@ -226,7 +234,12 @@ final class _Resident {
             failure = NativeTestCommandError.harnessFailed;
           }
         }
-        await tester.pump(const Duration(milliseconds: 100));
+        rpc.markPumpStarted();
+        try {
+          await tester.pump(const Duration(milliseconds: 100));
+        } finally {
+          rpc.markPumpSettled();
+        }
         rpc.refreshInfoInLoop();
         // A terminal reply is visible only after the rendered view has been
         // pumped and published. The host reads info immediately on completion.

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'native_nearby_test_commands.dart';
 import 'native_nearby_test_crypto.dart';
+import 'native_nearby_test_rpc.dart';
 
 const nativeTestSupportedRuns = {
   'nearby-lifecycle-20261007a',
@@ -612,6 +613,8 @@ final class NativeTestHost {
 }
 
 final class NativeTestLauncherDiagnostics {
+  NativeTestLauncherDiagnostics({this.onConfigureDiagnostic});
+  final void Function(NativeTestConfigureDiagnostic)? onConfigureDiagnostic;
   final _clock = Stopwatch()..start();
   final _buffers = ['', ''];
   final _discard = [false, false];
@@ -619,6 +622,8 @@ final class NativeTestLauncherDiagnostics {
   bool _outOfBand = false;
   bool _cleanup = false;
   bool _nativeFailure = false;
+  NativeTestConfigureDiagnostic? _lastConfigureDiagnostic;
+  int _configureDiagnosticCount = 0;
 
   int get bufferedCharacters => _buffers[0].length + _buffers[1].length;
   void addStdout(List<int> bytes) => _add(bytes, 0);
@@ -642,7 +647,9 @@ final class NativeTestLauncherDiagnostics {
         if (_buffers[channel].length >= 4096) {
           _buffers[channel] = '';
           _discard[channel] = true;
-        } else if (byte >= 32 && byte <= 126) {
+        } else {
+          // Preserve bytes privately; malformed payload bytes must not be
+          // stripped into a valid diagnostic. The full line remains bounded.
           _buffers[channel] += String.fromCharCode(byte);
         }
       }
@@ -654,6 +661,20 @@ final class NativeTestLauncherDiagnostics {
     _outOfBand |= line.contains('finished with out-of-band failure');
     _cleanup |= line.contains('ensuring test device is terminated');
     _nativeFailure |= line.contains('NativeTestFailure');
+    if (!line.startsWith(nativeTestConfigureDiagnosticPrefix) ||
+        _configureDiagnosticCount >= 8) {
+      return;
+    }
+    try {
+      final record = NativeTestConfigureDiagnostic.fromJson(
+        jsonDecode(line.substring(nativeTestConfigureDiagnosticPrefix.length)),
+      );
+      _lastConfigureDiagnostic = record;
+      _configureDiagnosticCount++;
+      onConfigureDiagnostic?.call(record);
+    } catch (_) {
+      // Neither malformed log text nor a failed diagnostic sink is forwarded.
+    }
   }
 
   Map<String, Object> toJson() => {
@@ -662,6 +683,8 @@ final class NativeTestLauncherDiagnostics {
     'outOfBandFailureMarkerSeen': _outOfBand,
     'cleanupMarkerSeen': _cleanup,
     'nativeTestFailureMarkerSeen': _nativeFailure,
+    if (_lastConfigureDiagnostic != null)
+      'configureDiagnostic': _lastConfigureDiagnostic!.toJson(),
   };
 }
 
@@ -916,7 +939,10 @@ Future<void> main(List<String> arguments) async {
             .existsSync()) {
       _reject(NativeTestHostError.launcherFailed);
     }
-    final launcherDiagnostics = NativeTestLauncherDiagnostics();
+    final launcherDiagnostics = NativeTestLauncherDiagnostics(
+      onConfigureDiagnostic: (record) =>
+          _emit({'outcome': 'diagnostic', 'diagnostic': record.toJson()}),
+    );
     final child = await Process.start(
       Platform.resolvedExecutable,
       [

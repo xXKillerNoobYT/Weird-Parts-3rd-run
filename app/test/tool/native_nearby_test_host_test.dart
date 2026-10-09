@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../tool/native_nearby_test_commands.dart';
 import '../../tool/native_nearby_test_crypto.dart';
 import '../../tool/native_nearby_test_host.dart';
+import '../../tool/native_nearby_test_rpc.dart';
 
 const run = 'nearby-lifecycle-20261007a';
 const canary =
@@ -171,6 +172,163 @@ Map<String, Object> sealedSnapshot(Fixture f) => {
 };
 
 void main() {
+  test('host emits strict fixed diagnostic from split marker', () {
+    final records = <NativeTestConfigureDiagnostic>[];
+    final scanner = NativeTestLauncherDiagnostics(
+      onConfigureDiagnostic: records.add,
+    );
+    final record = const NativeTestConfigureDiagnostic(
+      reason: NativeTestConfigureRejection.timerExpired,
+      pumpPending: true,
+      loopIterations: 1,
+      pumpStarts: 1,
+      pumpCompletions: 0,
+      publicationAgeMillis: 3000,
+    ).toJson();
+    final marker = '$nativeTestConfigureDiagnosticPrefix${jsonEncode(record)}';
+    scanner.addStdout(utf8.encode(marker.substring(0, 25)));
+    scanner.addStdout(utf8.encode('${marker.substring(25)}\r'));
+    scanner.addStdout(utf8.encode('\n'));
+    expect(records, hasLength(1));
+    expect(records.single.toJson(), record);
+  });
+
+  test('diagnostic marker survives every chunk split and final EOF without raw prefix', () {
+    final record = const NativeTestConfigureDiagnostic(
+      reason: NativeTestConfigureRejection.expiredInLoop,
+      pumpPending: true,
+      loopIterations: 2,
+      pumpStarts: 2,
+      pumpCompletions: 1,
+      publicationAgeMillis: 3000,
+    ).toJson();
+    final line = utf8.encode(
+      '$nativeTestConfigureDiagnosticPrefix${jsonEncode(record)}',
+    );
+    for (var split = 0; split <= line.length; split++) {
+      final records = <NativeTestConfigureDiagnostic>[];
+      final scanner = NativeTestLauncherDiagnostics(
+        onConfigureDiagnostic: records.add,
+      );
+      scanner.addStdout(utf8.encode('$canary\n'));
+      scanner.addStdout(line.sublist(0, split));
+      scanner.addStdout(line.sublist(split));
+      scanner.finishStdout();
+      expect(records, hasLength(1));
+      expect(records.single.toJson(), record);
+      expect(scanner.bufferedCharacters, 0);
+      expect(jsonEncode(scanner.toJson()).contains(canary), isFalse);
+    }
+  });
+
+  test('diagnostic scanner rejects malformed fields, trailing text and nonascii laundering', () {
+    final valid = const NativeTestConfigureDiagnostic(
+      reason: NativeTestConfigureRejection.closed,
+      pumpPending: false,
+      loopIterations: 0,
+      pumpStarts: 0,
+      pumpCompletions: 0,
+      publicationAgeMillis: null,
+    ).toJson();
+    final malformed = [
+      '{}',
+      '[1]',
+      '{',
+      jsonEncode({...valid, 'reason': canary}),
+      jsonEncode({...valid, 'code': canary}),
+      jsonEncode({...valid, 'pumpPending': 'false'}),
+      jsonEncode({...valid, 'loopIterations': -1}),
+      jsonEncode({...valid, 'pumpStarts': 9007199254740992}),
+      jsonEncode({...valid, 'publicationAgeMillis': 1.0}),
+      '${jsonEncode(valid)} $canary',
+      jsonEncode(valid).replaceFirst('reason', 'reas\u00e9on'),
+    ];
+    final records = <NativeTestConfigureDiagnostic>[];
+    final scanner = NativeTestLauncherDiagnostics(
+      onConfigureDiagnostic: records.add,
+    );
+    for (final text in malformed) {
+      scanner.addStderr(
+        utf8.encode('$nativeTestConfigureDiagnosticPrefix$text\n'),
+      );
+    }
+    scanner.addStderr(
+      utf8.encode(
+        '$canary $nativeTestConfigureDiagnosticPrefix${jsonEncode(valid)}\n',
+      ),
+    );
+    scanner.addStdout(
+      utf8.encode(
+        '[+ 1 ms] flutter: $nativeTestConfigureDiagnosticPrefix${jsonEncode(valid)}\n',
+      ),
+    );
+    expect(records, isEmpty);
+    expect(jsonEncode(scanner.toJson()).contains(canary), isFalse);
+    expect(scanner.toJson().containsKey('configureDiagnostic'), isFalse);
+  });
+
+  test(
+    'diagnostic scanner bounds lines and never combines separate streams',
+    () {
+      final record = const NativeTestConfigureDiagnostic(
+        reason: NativeTestConfigureRejection.oversize,
+        pumpPending: false,
+        loopIterations: 0,
+        pumpStarts: 0,
+        pumpCompletions: 0,
+        publicationAgeMillis: null,
+      ).toJson();
+      final line = '$nativeTestConfigureDiagnosticPrefix${jsonEncode(record)}';
+      final records = <NativeTestConfigureDiagnostic>[];
+      final scanner = NativeTestLauncherDiagnostics(
+        onConfigureDiagnostic: records.add,
+      );
+      scanner.addStdout(utf8.encode(line.substring(0, 20)));
+      scanner.addStderr(utf8.encode('${line.substring(20)}\n'));
+      scanner.addStdout(utf8.encode('\n'));
+      scanner.addStdout(utf8.encode('${'x' * 100000}$line'));
+      expect(scanner.bufferedCharacters, lessThanOrEqualTo(8192));
+      scanner.finishStdout();
+      scanner.addStderr(utf8.encode('$nativeTestConfigureDiagnosticPrefix{'));
+      scanner.finishStderr();
+      expect(records, isEmpty);
+      scanner.addStdout(utf8.encode('$line\r'));
+      scanner.addStdout(utf8.encode('\n'));
+      expect(records, hasLength(1));
+    },
+  );
+
+  test(
+    'diagnostic emission is capped and sink errors never escape scanner',
+    () {
+      final record = const NativeTestConfigureDiagnostic(
+        reason: NativeTestConfigureRejection.installerRejected,
+        pumpPending: false,
+        loopIterations: 1,
+        pumpStarts: 1,
+        pumpCompletions: 1,
+        publicationAgeMillis: 0,
+      ).toJson();
+      var calls = 0;
+      final scanner = NativeTestLauncherDiagnostics(
+        onConfigureDiagnostic: (_) {
+          calls++;
+          throw StateError(canary);
+        },
+      );
+      for (var i = 0; i < 20; i++) {
+        scanner.addStdout(
+          utf8.encode(
+            '$nativeTestConfigureDiagnosticPrefix${jsonEncode(record)}\n',
+          ),
+        );
+      }
+      expect(calls, 8);
+      expect(scanner.toJson()['configureDiagnostic'], record);
+      expect(jsonEncode(scanner.toJson()).contains(canary), isFalse);
+    },
+  );
+
   test(
     'launcher diagnostics classify split SDK markers without raw values',
     () {
