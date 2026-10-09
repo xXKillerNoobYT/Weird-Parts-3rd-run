@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'native_nearby_test_commands.dart';
 import 'native_nearby_test_crypto.dart';
+import 'native_nearby_test_output.dart';
 import 'native_nearby_test_rpc.dart';
 
 const nativeTestSupportedRuns = {
@@ -893,9 +894,13 @@ Stream<String?> nativeTestHostInputLines(Stream<List<int>> source) async* {
   if (oversized || bytes.isNotEmpty) yield null;
 }
 
+final _outputEncoder = NativeTestOutputEncoder(framed: Platform.isWindows);
+
 void _emit(Map<String, Object> record) {
   try {
-    stdout.writeln(jsonEncode(record));
+    final encoded = _outputEncoder.encode(record);
+    if (encoded.invalidOutput) exitCode = 1;
+    stdout.write(encoded.text);
   } catch (_) {
     exitCode = 1;
   }

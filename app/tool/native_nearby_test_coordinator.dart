@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 
 import 'native_nearby_test_crypto.dart';
+import 'native_nearby_test_output.dart';
 
 final class TestSourceBinding {
   TestSourceBinding({
@@ -522,9 +523,15 @@ void guardNativeCoordinatorOutput(
 
 Future<void> main(List<String> args) async {
   guardNativeCoordinatorOutput(stdout.done, () => exitCode = 1);
+  final outputEncoder = NativeTestOutputEncoder(
+    framed: Platform.isWindows,
+    allowGeneric: true,
+  );
   void emit(Map<String, Object> result) {
     try {
-      stdout.writeln(jsonEncode(result));
+      final encoded = outputEncoder.encode(result);
+      if (encoded.invalidOutput) exitCode = 1;
+      stdout.write(encoded.text);
     } catch (_) {
       exitCode = 1;
     }
