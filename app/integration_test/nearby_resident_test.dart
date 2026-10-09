@@ -17,6 +17,7 @@ import '../tool/native_nearby_test_commands.dart';
 import '../tool/native_nearby_test_crypto.dart';
 import '../tool/native_nearby_test_exit.dart';
 import '../tool/native_nearby_test_fixture.dart';
+import '../tool/native_nearby_test_rpc.dart';
 import '../tool/native_nearby_test_tap.dart';
 
 const _run = String.fromEnvironment('LAN_VALIDATION_RUN');
@@ -103,6 +104,23 @@ final class _Resident {
   var snapshotOrdinal = 0;
   var markedLeg = 0;
   var exitRequested = false;
+  late final rpc = NativeTestResidentRpc(
+    appPid: pid,
+    run: _run,
+    role: role,
+    deviceId: workspace.deviceId,
+    peerId: peerId,
+    clockMillis: () => clock.elapsedMilliseconds,
+    readInfoInLoop: () {
+      final current = view;
+      return NativeTestResidentViewInfo(
+        phase: NativeTestPhase.values.byName(current.phase.name),
+        sameNearbyState: sameNearbyState,
+        discovered: current.peers.any((peer) => peer.deviceId == peerId),
+        codePresent: current.verifyCode != null,
+      );
+    },
+  );
 
   TestRole get role =>
       TestRole.values.singleWhere((role) => role.name == _roleName);
@@ -130,6 +148,7 @@ final class _Resident {
         scope.deviceId != workspace.deviceId) {
       rejectNativeTest('fixture-rejected');
     }
+    rpc.refreshInfoInLoop();
   }
 
   void register() {
@@ -140,52 +159,16 @@ final class _Resident {
       if (!_keys(params, {})) {
         return _response({'version': 1, 'outcome': 'rejected'});
       }
-      final current = view;
-      return _response({
-        'version': 1,
-        'outcome': 'ready',
-        'appPid': pid,
-        'run': _run,
-        'role': _roleName,
-        'deviceId': workspace.deviceId,
-        'peerId': peerId,
-        'configured': session != null,
-        'elapsedMillis': clock.elapsedMilliseconds,
-        'phase': current.phase.name,
-        'sameNearbyState': sameNearbyState,
-        'discovered': current.peers.any((peer) => peer.deviceId == peerId),
-        'codePresent': current.verifyCode != null,
-      });
+      return _response(rpc.info());
     });
     developer.registerExtension('ext.wired_parts.nearbyTest.configure', (
       _,
       params,
     ) async {
-      try {
-        if (!_keys(params, {'data'}) ||
-            session != null ||
-            utf8.encode(params['data']!).length > nativeTestMaxEnvelopeBytes) {
-          rejectNativeTest();
-        }
-        final next = TestSession.fromJson(jsonDecode(params['data']!));
-        if (next.run != _run ||
-            next.role != role ||
-            next.deviceId != workspace.deviceId ||
-            next.peerId != peerId ||
-            scope.deviceId != workspace.deviceId ||
-            !sameNearbyState) {
-          rejectNativeTest();
-        }
-        session = next;
-        cache = NativeTestCommandCache(
-          session: next,
-          clockMillis: () => clock.elapsedMilliseconds,
-        );
-        verifier = MatchGrantVerifier(next);
-        return _response({'version': 1, 'outcome': 'configured'});
-      } catch (_) {
+      if (!_keys(params, {'data'})) {
         return _response({'version': 1, 'outcome': 'rejected'});
       }
+      return _response(await rpc.configure(params['data']!));
     });
     developer.registerExtension('ext.wired_parts.nearbyTest.command', (
       _,
@@ -212,30 +195,53 @@ final class _Resident {
   ) => developer.ServiceExtensionResponse.result(jsonEncode(result));
 
   Future<void> run() async {
-    while (!finished) {
-      cache?.tick();
-      final command = cache?.takeNext();
-      if (command != null) {
-        try {
-          final result = await perform(command);
-          cache!.complete(command, result);
-        } on NativeTestFailure {
-          cache!.fail(
-            command,
-            NativeTestCommandError.stateChanged,
-            effect: NativeTestEffect.possible,
+    try {
+      while (!finished) {
+        rpc.processConfigurationInLoop((next) {
+          if (session != null ||
+              exitRequested ||
+              scope.deviceId != workspace.deviceId ||
+              !sameNearbyState) {
+            rejectNativeTest();
+          }
+          final nextCache = NativeTestCommandCache(
+            session: next,
+            clockMillis: () => clock.elapsedMilliseconds,
           );
-        } catch (_) {
-          cache!.fail(
-            command,
-            NativeTestCommandError.harnessFailed,
-            effect: NativeTestEffect.possible,
-          );
+          final nextVerifier = MatchGrantVerifier(next);
+          session = next;
+          cache = nextCache;
+          verifier = nextVerifier;
+        });
+        cache?.tick();
+        final command = cache?.takeNext();
+        NativeTestCommandResult? result;
+        NativeTestCommandError? failure;
+        if (command != null) {
+          try {
+            result = await perform(command);
+          } on NativeTestFailure {
+            failure = NativeTestCommandError.stateChanged;
+          } catch (_) {
+            failure = NativeTestCommandError.harnessFailed;
+          }
         }
+        await tester.pump(const Duration(milliseconds: 100));
+        rpc.refreshInfoInLoop();
+        // A terminal reply is visible only after the rendered view has been
+        // pumped and published. The host reads info immediately on completion.
+        if (command != null) {
+          if (result != null) {
+            cache!.complete(command, result);
+          } else {
+            cache!.fail(command, failure!, effect: NativeTestEffect.possible);
+          }
+        }
+        // Real native timers/HTTP need event-loop time even if no frame changed.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       }
-      await tester.pump(const Duration(milliseconds: 100));
-      // Real native timers/HTTP need event-loop time even if no frame changed.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+    } finally {
+      rpc.close();
     }
   }
 
