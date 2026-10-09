@@ -86,7 +86,11 @@ ownership must remain local. The app reacquires its current database after each
 replacement.
 
 `finish` writes a witness and keeps the app resident. `normalExit` requests the
-public Flutter cancelable application-exit API. A witness or disconnected test
+public Flutter platform-channel cancelable application-exit API with exitCode 0.
+The ServicesBinding convenience method is intentionally avoided because the
+integration test binding overrides it to cancel without native communication.
+A native channel reply alone is not proof of cancellation or exit, including
+Windows' immediate response before its asynchronous exit callback. A witness or disconnected test
 runner does not prove exit. Independently verify PID disappearance, collect cold
 SQLite/assets/settings evidence, restart the same isolated installation and
 read it back. A stock test-runner cleanup is not normal-quit evidence.

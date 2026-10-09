@@ -1,10 +1,8 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
-import 'dart:ui' show AppExitType;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path/path.dart' as p;
@@ -17,6 +15,7 @@ import 'package:wired_parts/main.dart' as production;
 import '../tool/nearby_lan_workspace.dart';
 import '../tool/native_nearby_test_commands.dart';
 import '../tool/native_nearby_test_crypto.dart';
+import '../tool/native_nearby_test_exit.dart';
 import '../tool/native_nearby_test_fixture.dart';
 import '../tool/native_nearby_test_tap.dart';
 
@@ -460,7 +459,10 @@ final class _Resident {
         if (view.phase != NearbyPhase.success) rejectNativeTest('wrong-phase');
         _writeWitness('normal-exit-requested');
         exitRequested = true;
-        await ServicesBinding.instance.exitApplication(AppExitType.cancelable);
+        await requestNativeTestExit();
+        // Windows replies before its asynchronous request-app-exit callback.
+        // Remaining alive after this grace is unverified, never an exit pass.
+        await Future<void>.delayed(const Duration(seconds: 2));
         rejectNativeTest('exit-unverified');
     }
   }
