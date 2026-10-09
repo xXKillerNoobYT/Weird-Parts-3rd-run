@@ -142,3 +142,88 @@ physical transfers, both normal quits, cold/readback checks and recipient-owned
 evidence at the exact reviewed commit remain separate acceptance gates. Company
 membership, changes-only two-way sync and mobile acceptance are outside this
 test harness and remain unfinished under #33.
+
+# Existing-installation restart acceptance
+
+`integration_test/nearby_restart_test.dart` is the finite restart target for
+issues #33 and #49. It admits only the existing `nearby-lifecycle-20261007a`
+installation, Windows receiver or macOS sender, and explicit native test mode.
+It never seeds, repairs, migrates, restores, opens Nearby, or writes a fixture
+receipt. Missing auxiliary directories, a pending restore marker, an ownership
+mismatch, or a database outside the frozen schema are rejection conditions.
+
+The coordinator must first complete all three physical replacement legs and
+independently prove both native apps quit normally and their PIDs disappeared.
+Preserve cold evidence before building or launching this target. Keep the same
+isolated native app location, identity and fixture root. Bind the exact source,
+tree, image/kernel and owner evidence externally. This target does not replace
+those admission checks or authorize rebuilding either owner's app.
+
+Supply `NATIVE_NEARBY_TEST_MODE=true`, the exact `LAN_VALIDATION_RUN` and
+`LAN_VALIDATION_ROLE`, `NATIVE_NEARBY_SOURCE_REVISION`,
+`NATIVE_NEARBY_SOURCE_TREE`, and `NATIVE_NEARBY_RESTART_EXPECTATION` as Dart
+defines. The last value is an absolute canonical path to a controlled private
+JSON file, at most 8192 bytes. Do not put the file or its contents in Git or
+public logs. Its exact envelope keys are `format` (1), `run`, `role`,
+`sourceRevision`, `sourceTree`, `stage` (`postLeg3`), `ownerDigest` and `proof`.
+`proof` uses the existing `PrivateSnapshotProof.fromJson` schema. Supply each
+role's authenticated final post-leg3 proof, including full settings and PIN,
+and the unchanged local ownership digest. Baselines and post-leg1 proofs are
+not valid restart expectations. The source fields bind the restart build;
+retain the transfer build's separate source binding in coordinator evidence.
+
+The actual native app runs production startup and compares its live AppScope
+database, full rows and relations including tombstones, assets, local profile,
+settings and PIN against that private proof. It renders the received Jobs and
+part screens, decodes the managed photo, unlocks through the existing Editor
+PIN dialog using the synthetic fixture PIN, cancels New part, locks the catalog,
+and verifies exact state again. No catalog change is saved. The final PIN is
+the persisted PIN after replacement, not a promise that an original receiver
+PIN survives transfer. Only bounded booleans and fixed failure codes leave the
+target. Private digest comparisons never appear in assertion diagnostics.
+
+Ordinary test return closes the database and releases the workspace lock.
+Subsequent stock runner cleanup is expected and is not prior normal-quit proof.
+A passing target proves native restart/readback on that host only. Require the
+stock test result, external process/binary binding and recipient-owned evidence
+on both hosts before counting restart acceptance. Current preparation alone
+leaves the physical gate incomplete and Phase 5 held.
+
+Expectation preparation has a supported file-only route in
+`tool/native_nearby_restart.dart`. After normal quit and before restart, the
+native owner supplies an independently accepted cold archive with this layout:
+`validation-owner.json`, `support/wired_parts.sqlite`, any retained SQLite
+sidecars, and `support/part_photos/`. Keep the original owner bytes and paths in
+the archived marker. Verify its retained hash/manifest first. This archive must
+come from the stopped final installation, not a capture taken after reopening.
+
+Call the helper from a private local Dart preparation script using the existing
+package configuration. It needs the role's accepted native post-leg3
+`NativeTestSnapshotResult` and the independently accepted final PIN digest from
+the approved import-policy/source-PIN evidence. Those inputs are private local
+records. The coordinator CLI has no plaintext proof export and none is added.
+
+```dart
+await prepareNativeRestartExpectation(
+  archive: Directory(acceptedColdArchive),
+  role: ValidationRole.receiver,
+  postLeg3: acceptedRolePostLeg3Snapshot,
+  acceptedPinDigest: independentlyAcceptedFinalPinDigest,
+  sourceRevision: restartBuildRevision,
+  sourceTree: restartBuildTree,
+  destination: File(controlledExpectationPath),
+);
+```
+
+For the Mac use `ValidationRole.sender` and its own archive and native snapshot.
+The helper copies into its own disposable scratch workspace, opens that copied
+SQLite read-only with Drift migrations disabled, and reuses
+`NativeFixtureSnapshot.capture`. It matches native domain/assets/shared-settings/
+profile/count/source/timestamp commitments and the separately supplied private
+PIN digest. It then writes the complete private expectation to a new controlled
+file outside the archive. It exclusively creates that file at the final write,
+so a racing preparation cannot overwrite it. It rejects an existing destination.
+It never prints the expectation or opens the live installation, and it deletes
+only its own scratch directory. Tests prove accepted/rejected preparation leaves
+archive bytes unchanged. Reopening and deriving both sides from that reopened
+state would be self-comparison and must not count as restart proof.
