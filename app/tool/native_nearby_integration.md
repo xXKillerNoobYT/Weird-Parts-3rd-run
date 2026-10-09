@@ -106,6 +106,15 @@ runner does not prove exit. Independently verify PID disappearance, collect cold
 SQLite/assets/settings evidence, restart the same isolated installation and
 read it back. A stock test-runner cleanup is not normal-quit evidence.
 
+`launcherExit` includes elapsed milliseconds since stock-runner launch and fixed
+booleans for observed SDK timeout, out-of-band failure, cleanup, and sanitized
+`NativeTestFailure` markers. Raw stdout/stderr are discarded; each diagnostic
+line buffer is limited to 4096 characters. `launcherOutputComplete` is false if
+the streams fail or do not finish within two seconds after launcher exit.
+These flags report text markers, not a verified termination cause or OS crash.
+Missing markers do not establish success, and OS crash evidence remains a
+separate native-owner check.
+
 The native owner must preserve original bundles and fixture contents, bind the
 actual test process, and verify narrowly scoped network rules for its exact
 executable. Flutter's desktop integration runner builds and launches the

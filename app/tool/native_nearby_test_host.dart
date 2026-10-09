@@ -611,6 +611,60 @@ final class NativeTestHost {
   }
 }
 
+final class NativeTestLauncherDiagnostics {
+  final _clock = Stopwatch()..start();
+  final _buffers = ['', ''];
+  final _discard = [false, false];
+  bool _timeout = false;
+  bool _outOfBand = false;
+  bool _cleanup = false;
+  bool _nativeFailure = false;
+
+  int get bufferedCharacters => _buffers[0].length + _buffers[1].length;
+  void addStdout(List<int> bytes) => _add(bytes, 0);
+  void addStderr(List<int> bytes) => _add(bytes, 1);
+  void finishStdout() => _finish(0);
+  void finishStderr() => _finish(1);
+
+  void _finish(int channel) {
+    if (!_discard[channel]) _line(_buffers[channel]);
+    _buffers[channel] = '';
+    _discard[channel] = false;
+  }
+
+  void _add(List<int> bytes, int channel) {
+    for (final byte in bytes) {
+      if (byte == 10 || byte == 13) {
+        if (!_discard[channel]) _line(_buffers[channel]);
+        _buffers[channel] = '';
+        _discard[channel] = false;
+      } else if (!_discard[channel]) {
+        if (_buffers[channel].length >= 4096) {
+          _buffers[channel] = '';
+          _discard[channel] = true;
+        } else if (byte >= 32 && byte <= 126) {
+          _buffers[channel] += String.fromCharCode(byte);
+        }
+      }
+    }
+  }
+
+  void _line(String line) {
+    _timeout |= line.contains('Test timed out after ');
+    _outOfBand |= line.contains('finished with out-of-band failure');
+    _cleanup |= line.contains('ensuring test device is terminated');
+    _nativeFailure |= line.contains('NativeTestFailure');
+  }
+
+  Map<String, Object> toJson() => {
+    'launcherElapsedMillis': _clock.elapsedMilliseconds,
+    'testTimeoutMarkerSeen': _timeout,
+    'outOfBandFailureMarkerSeen': _outOfBand,
+    'cleanupMarkerSeen': _cleanup,
+    'nativeTestFailureMarkerSeen': _nativeFailure,
+  };
+}
+
 final class NativeTestVmBannerScanner {
   String _buffer = '';
   bool _discardLine = false;
@@ -862,6 +916,7 @@ Future<void> main(List<String> arguments) async {
             .existsSync()) {
       _reject(NativeTestHostError.launcherFailed);
     }
+    final launcherDiagnostics = NativeTestLauncherDiagnostics();
     final child = await Process.start(
       Platform.resolvedExecutable,
       [
@@ -884,15 +939,63 @@ Future<void> main(List<String> arguments) async {
     );
     final stdoutScanner = NativeTestVmBannerScanner();
     final stderrScanner = NativeTestVmBannerScanner();
-    child.stdout.listen(stdoutScanner.add, onError: (_) {});
-    child.stderr.listen(stderrScanner.add, onError: (_) {});
+    final stdoutDone = Completer<void>();
+    final stderrDone = Completer<void>();
+    var launcherOutputComplete = true;
+    void finishStdout() {
+      if (!stdoutDone.isCompleted) {
+        launcherDiagnostics.finishStdout();
+        stdoutDone.complete();
+      }
+    }
+
+    void finishStderr() {
+      if (!stderrDone.isCompleted) {
+        launcherDiagnostics.finishStderr();
+        stderrDone.complete();
+      }
+    }
+
+    child.stdout.listen(
+      (bytes) {
+        stdoutScanner.add(bytes);
+        launcherDiagnostics.addStdout(bytes);
+      },
+      onError: (_) {
+        launcherOutputComplete = false;
+        finishStdout();
+      },
+      onDone: finishStdout,
+    );
+    child.stderr.listen(
+      (bytes) {
+        stderrScanner.add(bytes);
+        launcherDiagnostics.addStderr(bytes);
+      },
+      onError: (_) {
+        launcherOutputComplete = false;
+        finishStderr();
+      },
+      onDone: finishStderr,
+    );
     Uri? privateUri() => stdoutScanner.privateUri ?? stderrScanner.privateUri;
     int? childExit;
     unawaited(
       child.exitCode.then<void>(
-        (code) {
+        (code) async {
           childExit = code;
-          _emit({'outcome': 'launcherExit', 'exitCode': code});
+          try {
+            await Future.wait([stdoutDone.future, stderrDone.future])
+                .timeout(const Duration(seconds: 2));
+          } catch (_) {
+            launcherOutputComplete = false;
+          }
+          _emit({
+            'outcome': 'launcherExit',
+            'exitCode': code,
+            'launcherOutputComplete': launcherOutputComplete,
+            ...launcherDiagnostics.toJson(),
+          });
         },
         onError: (Object _) {
           childExit = 1;

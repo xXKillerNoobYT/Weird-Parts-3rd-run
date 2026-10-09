@@ -172,6 +172,90 @@ Map<String, Object> sealedSnapshot(Fixture f) => {
 
 void main() {
   test(
+    'launcher diagnostics classify split SDK markers without raw values',
+    () {
+      final diagnostics = NativeTestLauncherDiagnostics();
+      diagnostics.addStdout(utf8.encode('$canary Test timed '));
+      diagnostics.addStdout(utf8.encode('out after 25 minutes.\n'));
+      diagnostics.addStderr(utf8.encode('test 0: finished with out-of-'));
+      diagnostics.addStderr(utf8.encode('band failure $canary\n'));
+      diagnostics.addStdout(
+        utf8.encode('test 0: ensuring test device is terminated.\n'),
+      );
+      diagnostics.addStderr(
+        utf8.encode('Exception: NativeTestFailure $canary\r'),
+      );
+      diagnostics.addStderr(utf8.encode('\n'));
+      final receipt = diagnostics.toJson();
+      expect(receipt.keys.toSet(), {
+        'launcherElapsedMillis',
+        'testTimeoutMarkerSeen',
+        'outOfBandFailureMarkerSeen',
+        'cleanupMarkerSeen',
+        'nativeTestFailureMarkerSeen',
+      });
+      expect(receipt['launcherElapsedMillis'], isNonNegative);
+      expect(receipt['testTimeoutMarkerSeen'], isTrue);
+      expect(receipt['outOfBandFailureMarkerSeen'], isTrue);
+      expect(receipt['cleanupMarkerSeen'], isTrue);
+      expect(receipt['nativeTestFailureMarkerSeen'], isTrue);
+      expect(jsonEncode(receipt).contains(canary), isFalse);
+      expect(diagnostics.bufferedCharacters, 0);
+    },
+  );
+
+  test(
+    'launcher diagnostics bound lines and keep stdout and stderr separate',
+    () {
+      final diagnostics = NativeTestLauncherDiagnostics();
+      diagnostics.addStdout(utf8.encode('Test timed '));
+      diagnostics.addStderr(utf8.encode('out after 25 minutes.\n'));
+      diagnostics.addStdout(utf8.encode('\n'));
+      diagnostics.addStdout(
+        utf8.encode('Test timed out after ${'x' * 100000}$canary'),
+      );
+      diagnostics.addStderr(
+        utf8.encode('ensuring test device is terminated${'x' * 100000}$canary'),
+      );
+      expect(diagnostics.bufferedCharacters, lessThanOrEqualTo(8192));
+      diagnostics.addStdout(utf8.encode('\n'));
+      diagnostics.addStderr(utf8.encode('\r\n'));
+      diagnostics.addStdout(utf8.encode('Connection closed $canary\n'));
+      final receipt = diagnostics.toJson();
+      expect(receipt.remove('launcherElapsedMillis'), isNonNegative);
+      expect(receipt, {
+        'testTimeoutMarkerSeen': false,
+        'outOfBandFailureMarkerSeen': false,
+        'cleanupMarkerSeen': false,
+        'nativeTestFailureMarkerSeen': false,
+      });
+      expect(diagnostics.bufferedCharacters, 0);
+      expect(jsonEncode(diagnostics.toJson()).contains(canary), isFalse);
+      diagnostics.addStderr(utf8.encode('Test timed out after 25 minutes.\n'));
+      expect(diagnostics.toJson()['testTimeoutMarkerSeen'], isTrue);
+    },
+  );
+
+  test('launcher diagnostics classify bounded unterminated lines at EOF', () {
+    final diagnostics = NativeTestLauncherDiagnostics();
+    diagnostics.addStdout(
+      utf8.encode('${'x' * 5000}NativeTestFailure $canary'),
+    );
+    diagnostics.addStderr(
+      utf8.encode('Test timed out after 25 minutes. $canary'),
+    );
+    diagnostics.finishStdout();
+    diagnostics.finishStderr();
+    final receipt = diagnostics.toJson();
+    expect(receipt['testTimeoutMarkerSeen'], isTrue);
+    expect(receipt['nativeTestFailureMarkerSeen'], isFalse);
+    expect(receipt['cleanupMarkerSeen'], isFalse);
+    expect(receipt['outOfBandFailureMarkerSeen'], isFalse);
+    expect(diagnostics.bufferedCharacters, 0);
+    expect(jsonEncode(receipt).contains(canary), isFalse);
+  });
+
+  test(
     'asynchronous output failures become fixed exit status without raw errors',
     () async {
       final savedExit = exitCode;
