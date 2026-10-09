@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 
@@ -71,12 +72,17 @@ class WiredPartsApp extends StatefulWidget {
   State<WiredPartsApp> createState() => _WiredPartsAppState();
 }
 
-class _WiredPartsAppState extends State<WiredPartsApp> {
+class _WiredPartsAppState extends State<WiredPartsApp>
+    with WidgetsBindingObserver {
   late AppDatabase _db;
   late PinService _pin;
   late String _deviceId;
   var _generation = 0;
   var _wiping = false;
+  var _exiting = false;
+  Future<AppExitResponse>? _exitRequest;
+  Future<void>? _storageShutdown;
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
 
   @override
   void initState() {
@@ -84,10 +90,54 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     _db = widget.db;
     _pin = widget.pin;
     _deviceId = widget.deviceId;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _closeStorage() {
+    return _storageShutdown ??= Future<void>.sync(_db.close)
+        .catchError((Object error, StackTrace stack) {
+          _storageShutdown = null;
+          Error.throwWithStackTrace(error, stack);
+        });
+  }
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() {
+    // A replacement/export must finish before its storage can be closed.
+    if (_wiping || BackupIo.isBusy) {
+      return Future.value(AppExitResponse.cancel);
+    }
+    if (_exitRequest != null) return _exitRequest!;
+    setState(() => _exiting = true);
+    _exitRequest = _closeStorage()
+        .timeout(const Duration(seconds: 5))
+        .then<AppExitResponse>(
+          (_) => AppExitResponse.exit,
+          onError: (Object error, StackTrace stack) {
+            _exitRequest = null;
+            // Storage may already be closed. Keep editing blocked, and retry
+            // the same pending shutdown on the next ordinary exit request.
+            _messenger.currentState?.showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Could not close local storage. The app remains open; try closing again.',
+                ),
+              ),
+            );
+            return AppExitResponse.cancel;
+          },
+        );
+    return _exitRequest!;
   }
 
   Future<void> _wipeLocalData() async {
-    if (_wiping) {
+    if (_wiping || _exiting) {
       throw const RestoreBusyException();
     }
     if (!BackupIo.tryStart()) {
@@ -142,7 +192,7 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
     required Future<void> Function(AppDatabase next, BackupPayload payload)
     afterOpen,
   }) async {
-    if (_wiping) {
+    if (_wiping || _exiting) {
       throw const RestoreBusyException();
     }
     _wiping = true;
@@ -188,7 +238,11 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       }
       rethrow;
     } finally {
-      _wiping = false;
+      try {
+        if (!mounted) await next?.close();
+      } finally {
+        _wiping = false;
+      }
     }
   }
 
@@ -201,9 +255,15 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
 
   Future<void> _reopen() async {
     final next = widget.reopenDatabase?.call() ?? AppDatabase();
-    final deviceId = await next.settingsDao.ensureDeviceId();
-    if (!mounted) return;
-    setState(() => _bindLive(next, deviceId));
+    var bound = false;
+    try {
+      final deviceId = await next.settingsDao.ensureDeviceId();
+      if (!mounted) return;
+      setState(() => _bindLive(next, deviceId));
+      bound = true;
+    } finally {
+      if (!bound) await next.close();
+    }
   }
 
   @override
@@ -217,9 +277,17 @@ class _WiredPartsAppState extends State<WiredPartsApp> {
       restoreFromPayload: _restoreFromPayload,
       child: MaterialApp(
         title: 'Wired Parts',
+        scaffoldMessengerKey: _messenger,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
           useMaterial3: true,
+        ),
+        builder: (context, navigator) => AbsorbPointer(
+          absorbing: _exiting,
+          child: ExcludeFocus(
+            excluding: _exiting,
+            child: navigator ?? const SizedBox.shrink(),
+          ),
         ),
         home: HomeShell(key: ValueKey(_generation)),
       ),
