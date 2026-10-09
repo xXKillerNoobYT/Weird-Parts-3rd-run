@@ -652,7 +652,7 @@ void main() {
         response,
         method: NativeTestVmMethod.getVM,
         expectedId: 1,
-      ),
+      ).value,
       {'type': 'VM'},
     );
     expect(
@@ -728,7 +728,7 @@ void main() {
       try {
         nativeTestVmResult(
           message,
-          method: NativeTestVmMethod.getIsolate,
+          method: NativeTestVmMethod.info,
           expectedId: 1,
         );
       } on NativeTestHostFailure catch (caught) {
@@ -740,11 +740,84 @@ void main() {
         'category': 'disconnected',
         'diagnostic': {
           'reason': 'frameTooLarge',
-          'method': 'getIsolate',
+          'method': 'ext.wired_parts.nearbyTest.info',
           'byteCount': expectedBytes,
         },
       });
       expect(jsonEncode(failure.toJson()).contains(canary), isFalse);
+    }
+  });
+
+  test('large discovery metadata has a separate measured frame limit', () {
+    final payload = {'type': 'Isolate', 'padding': 'x' * 70000};
+    final response = jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': payload});
+    final expectedBytes = utf8.encode(response).length;
+    expect(expectedBytes, greaterThan(65536));
+    expect(expectedBytes, lessThan(1048576));
+    for (final method in [
+      NativeTestVmMethod.getVM,
+      NativeTestVmMethod.getIsolate,
+    ]) {
+      final result = nativeTestVmResult(
+        response,
+        method: method,
+        expectedId: 1,
+      );
+      expect(result.value, payload);
+      expect(result.byteCount, expectedBytes);
+    }
+    for (final method in [
+      NativeTestVmMethod.info,
+      NativeTestVmMethod.configure,
+      NativeTestVmMethod.command,
+    ]) {
+      expect(
+        () => nativeTestVmResult(response, method: method, expectedId: 1),
+        throwsA(
+          isA<NativeTestHostFailure>()
+              .having(
+                (failure) => failure.diagnostic?.reason,
+                'reason',
+                NativeTestVmFailureReason.frameTooLarge,
+              )
+              .having(
+                (failure) => failure.diagnostic?.byteCount,
+                'byteCount',
+                isNull,
+              ),
+        ),
+      );
+    }
+  });
+
+  test('discovery metadata retains early and UTF8 byte bounds', () {
+    final cases = <(String, int?)>[
+      ('x' * 1048577, null),
+      ('é' * 1048577, null),
+      ('é' * 524289, 1048578),
+    ];
+    for (final method in [
+      NativeTestVmMethod.getVM,
+      NativeTestVmMethod.getIsolate,
+    ]) {
+      for (final (message, expectedBytes) in cases) {
+        expect(
+          () => nativeTestVmResult(message, method: method, expectedId: 1),
+          throwsA(
+            isA<NativeTestHostFailure>()
+                .having(
+                  (failure) => failure.diagnostic?.reason,
+                  'reason',
+                  NativeTestVmFailureReason.frameTooLarge,
+                )
+                .having(
+                  (failure) => failure.diagnostic?.byteCount,
+                  'byteCount',
+                  expectedBytes,
+                ),
+          ),
+        );
+      }
     }
   });
 }

@@ -10,6 +10,7 @@ const nativeTestSupportedRuns = {
   'nearby-resident-probe-20261009a',
 };
 const _maxHostBytes = 65536;
+const _maxDiscoveryVmBytes = 1048576;
 const _extensions = {
   'ext.wired_parts.nearbyTest.info',
   'ext.wired_parts.nearbyTest.configure',
@@ -44,6 +45,8 @@ enum NativeTestVmMethod {
   info,
   configure,
   command;
+
+  bool get isDiscovery => this == getVM || this == getIsolate;
 
   String get wireName => switch (this) {
     getVM => 'getVM',
@@ -80,25 +83,34 @@ final class NativeTestHostFailure implements Exception {
   String toString() => 'NativeTestHostFailure';
 }
 
-Object? nativeTestVmResult(
+final class NativeTestVmResult {
+  const NativeTestVmResult(this.value, this.byteCount);
+  final Object? value;
+  final int byteCount;
+}
+
+NativeTestVmResult nativeTestVmResult(
   Object? message, {
   required NativeTestVmMethod? method,
   required int? expectedId,
 }) {
+  final limit = method?.isDiscovery == true
+      ? _maxDiscoveryVmBytes
+      : _maxHostBytes;
   int? bytes;
   Never fail(NativeTestVmFailureReason reason) => throw NativeTestHostFailure(
     NativeTestHostError.disconnected,
     diagnostic: NativeTestVmDiagnostic(reason, method, bytes),
   );
   if (message is String) {
-    if (message.length > _maxHostBytes) {
+    if (message.length > limit) {
       fail(NativeTestVmFailureReason.frameTooLarge);
     }
     bytes = utf8.encode(message).length;
   } else if (message is List<int>) {
     bytes = message.length;
   }
-  if (bytes != null && bytes > _maxHostBytes) {
+  if (bytes != null && bytes > limit) {
     fail(NativeTestVmFailureReason.frameTooLarge);
   }
   try {
@@ -113,7 +125,7 @@ Object? nativeTestVmResult(
       fail(NativeTestVmFailureReason.invalidEnvelope);
     }
     if (m.containsKey('error')) fail(NativeTestVmFailureReason.rpcError);
-    return m['result'];
+    return NativeTestVmResult(m['result'], bytes!);
   } on NativeTestHostFailure {
     rethrow;
   } catch (_) {
@@ -655,6 +667,8 @@ final class _VmTransport implements NativeTestHostTransport {
   bool _closed = false;
   NativeTestVmMethod? _activeMethod;
   NativeTestHostFailure? _failure;
+  int _discoveryMaxFrameBytes = 0;
+  int get discoveryMaxFrameBytes => _discoveryMaxFrameBytes;
 
   static Future<_VmTransport> connect(Uri uri) async {
     if (uri.scheme != 'http' ||
@@ -724,7 +738,11 @@ final class _VmTransport implements NativeTestHostTransport {
             ? null
             : _pending.keys.single,
       );
-      pending!.complete(result);
+      if (_activeMethod?.isDiscovery == true &&
+          result.byteCount > _discoveryMaxFrameBytes) {
+        _discoveryMaxFrameBytes = result.byteCount;
+      }
+      pending!.complete(result.value);
     } on NativeTestHostFailure catch (failure) {
       _disconnect(failure);
     } catch (_) {
@@ -904,7 +922,10 @@ Future<void> main(List<String> arguments) async {
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
-    _emit({'outcome': 'connected'});
+    _emit({
+      'outcome': 'connected',
+      'discoveryMaxFrameBytes': transport.discoveryMaxFrameBytes,
+    });
     await for (final line in nativeTestHostInputLines(stdin)) {
       final output = line == null
           ? <String, Object>{'outcome': 'failed', 'category': 'invalidInput'}

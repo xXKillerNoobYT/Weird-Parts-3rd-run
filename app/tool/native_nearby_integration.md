@@ -60,8 +60,12 @@ a DDS proxy for the first direct VM-service endpoint. Localhost authentication
 remains enabled. Discovery skips worker isolates with no registered extensions
 and isolates reported collected, while rejecting ambiguous matches and malformed
 identities. Failure diagnostics contain only fixed reason/method values and a
-byte count when known. Frame, isolate and startup limits remain bounded. This
-change does not establish the cause of an earlier native disconnection.
+byte count when known. VM discovery replies for getVM and getIsolate have a
+separate fixed 1 MiB limit because Flutter metadata can exceed 64 KiB. Other
+RPC replies and stdin retain the 64 KiB limit. Both paths reject oversized
+strings before UTF8 allocation. The connected receipt reports the largest
+accepted discovery response in bytes. Isolate and startup bounds are unchanged.
+These changes do not establish the cause of the original native disconnection.
 
 The coordinator must independently acquire the native PID, start time, exact
 image/kernel/source hashes, run, role, device IDs and host/isolate connection.
