@@ -19,6 +19,7 @@ final class FakeTransport implements NativeTestHostTransport {
   Object? infoOverride;
   Object? reply;
   final isolates = ['isolates/123'];
+  final isolateReplies = <String, Object?>{};
 
   Map<String, Object> get infoValue => {
     'version': 1,
@@ -48,6 +49,7 @@ final class FakeTransport implements NativeTestHostTransport {
   @override
   Future<Object?> getIsolate(String id) async {
     calls.add('getIsolate');
+    if (isolateReplies.containsKey(id)) return isolateReplies[id];
     return {
       'id': id,
       'extensionRPCs': [
@@ -214,6 +216,57 @@ void main() {
     });
     f.transport.isolates.add('isolates/124');
     await expectLater(f.host.discover(), throwsA(isA<NativeTestHostFailure>()));
+  });
+
+  test('discovery skips workers without registered extensions', () async {
+    for (final includeNull in [false, true]) {
+      final f = Fixture();
+      f.transport.isolates.insert(0, 'isolates/125');
+      f.transport.isolateReplies['isolates/125'] = {
+        'id': 'isolates/125',
+        if (includeNull) 'extensionRPCs': null,
+      };
+      expect(await f.host.discover(), isTrue);
+      expect(
+        (await f.host.handleLine('{"operation":"info"}'))['isolateId'],
+        'isolates/123',
+      );
+    }
+  });
+
+  test('collected isolate permits main match and later rediscovery', () async {
+    final f = Fixture();
+    f.transport.isolateReplies['isolates/123'] = {
+      'type': 'Sentinel',
+      'kind': 'Collected',
+    };
+    expect(await f.host.discover(), isFalse);
+    f.transport.isolates.add('isolates/126');
+    expect(await f.host.discover(), isTrue);
+    expect(
+      (await f.host.handleLine('{"operation":"info"}'))['isolateId'],
+      'isolates/126',
+    );
+  });
+
+  test('worker extension types and isolate identity remain strict', () async {
+    for (final reply in <Object>[
+      {'id': 'isolates/125', 'extensionRPCs': canary},
+      {
+        'id': 'isolates/125',
+        'extensionRPCs': [1],
+      },
+      {'id': 'isolates/999'},
+      {'type': 'Sentinel', 'kind': 'Expired'},
+    ]) {
+      final f = Fixture();
+      f.transport.isolates.insert(0, 'isolates/125');
+      f.transport.isolateReplies['isolates/125'] = reply;
+      await expectLater(
+        f.host.discover(),
+        throwsA(isA<NativeTestHostFailure>()),
+      );
+    }
   });
 
   test('missing isolate is notReady and identity changes reject', () async {
@@ -553,4 +606,111 @@ void main() {
       ]);
     },
   );
+
+  test('VM response boundary accepts only the matching response', () {
+    final response = jsonEncode({
+      'jsonrpc': '2.0',
+      'id': 1,
+      'result': {'type': 'VM'},
+    });
+    expect(
+      nativeTestVmResult(
+        response,
+        method: NativeTestVmMethod.getVM,
+        expectedId: 1,
+      ),
+      {'type': 'VM'},
+    );
+    expect(
+      () => nativeTestVmResult(
+        response,
+        method: NativeTestVmMethod.getVM,
+        expectedId: 2,
+      ),
+      throwsA(
+        isA<NativeTestHostFailure>().having(
+          (failure) => failure.diagnostic?.reason,
+          'reason',
+          NativeTestVmFailureReason.invalidEnvelope,
+        ),
+      ),
+    );
+  });
+
+  test('VM failure diagnostics expose only fixed metadata', () {
+    final cases = <(Object, NativeTestVmFailureReason)>[
+      (canary, NativeTestVmFailureReason.invalidEnvelope),
+      (
+        jsonEncode({
+          'jsonrpc': '2.0',
+          'id': 1,
+          'error': {'message': canary, 'data': canary},
+        }),
+        NativeTestVmFailureReason.rpcError,
+      ),
+      (
+        jsonEncode({
+          'jsonrpc': '2.0',
+          'method': 'streamNotify',
+          'params': {'event': canary},
+        }),
+        NativeTestVmFailureReason.invalidEnvelope,
+      ),
+    ];
+    for (final (message, reason) in cases) {
+      NativeTestHostFailure? failure;
+      try {
+        nativeTestVmResult(
+          message,
+          method: NativeTestVmMethod.getIsolate,
+          expectedId: 1,
+        );
+      } on NativeTestHostFailure catch (caught) {
+        failure = caught;
+      }
+      expect(failure, isNotNull);
+      expect(failure!.toJson(), {
+        'outcome': 'failed',
+        'category': 'disconnected',
+        'diagnostic': {
+          'reason': reason.name,
+          'method': 'getIsolate',
+          'byteCount': utf8.encode(message as String).length,
+        },
+      });
+      expect(jsonEncode(failure.toJson()).contains(canary), isFalse);
+      expect(failure.toString(), 'NativeTestHostFailure');
+    }
+  });
+
+  test('oversized VM text reports only boundedly measured byte counts', () {
+    final cases = <(String, int?)>[
+      ('$canary${'x' * 65536}', null),
+      ('é' * 65537, null),
+      ('é' * 32769, 65538),
+    ];
+    for (final (message, expectedBytes) in cases) {
+      NativeTestHostFailure? failure;
+      try {
+        nativeTestVmResult(
+          message,
+          method: NativeTestVmMethod.getIsolate,
+          expectedId: 1,
+        );
+      } on NativeTestHostFailure catch (caught) {
+        failure = caught;
+      }
+      expect(failure, isNotNull);
+      expect(failure!.toJson(), {
+        'outcome': 'failed',
+        'category': 'disconnected',
+        'diagnostic': {
+          'reason': 'frameTooLarge',
+          'method': 'getIsolate',
+          'byteCount': expectedBytes,
+        },
+      });
+      expect(jsonEncode(failure.toJson()).contains(canary), isFalse);
+    }
+  });
 }

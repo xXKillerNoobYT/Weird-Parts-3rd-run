@@ -31,11 +31,94 @@ enum NativeTestHostError {
   unsupportedHost,
 }
 
+enum NativeTestVmFailureReason {
+  socketClosed,
+  frameTooLarge,
+  invalidEnvelope,
+  rpcError,
+}
+
+enum NativeTestVmMethod {
+  getVM,
+  getIsolate,
+  info,
+  configure,
+  command;
+
+  String get wireName => switch (this) {
+    getVM => 'getVM',
+    getIsolate => 'getIsolate',
+    info => 'ext.wired_parts.nearbyTest.info',
+    configure => 'ext.wired_parts.nearbyTest.configure',
+    command => 'ext.wired_parts.nearbyTest.command',
+  };
+}
+
+final class NativeTestVmDiagnostic {
+  const NativeTestVmDiagnostic(this.reason, this.method, this.byteCount);
+  final NativeTestVmFailureReason reason;
+  final NativeTestVmMethod? method;
+  final int? byteCount;
+
+  Map<String, Object?> toJson() => {
+    'reason': reason.name,
+    'method': method?.wireName ?? 'none',
+    'byteCount': byteCount,
+  };
+}
+
 final class NativeTestHostFailure implements Exception {
-  const NativeTestHostFailure(this.category);
+  const NativeTestHostFailure(this.category, {this.diagnostic});
   final NativeTestHostError category;
+  final NativeTestVmDiagnostic? diagnostic;
+  Map<String, Object> toJson() => {
+    'outcome': 'failed',
+    'category': category.name,
+    if (diagnostic != null) 'diagnostic': diagnostic!.toJson(),
+  };
   @override
   String toString() => 'NativeTestHostFailure';
+}
+
+Object? nativeTestVmResult(
+  Object? message, {
+  required NativeTestVmMethod? method,
+  required int? expectedId,
+}) {
+  int? bytes;
+  Never fail(NativeTestVmFailureReason reason) => throw NativeTestHostFailure(
+    NativeTestHostError.disconnected,
+    diagnostic: NativeTestVmDiagnostic(reason, method, bytes),
+  );
+  if (message is String) {
+    if (message.length > _maxHostBytes) {
+      fail(NativeTestVmFailureReason.frameTooLarge);
+    }
+    bytes = utf8.encode(message).length;
+  } else if (message is List<int>) {
+    bytes = message.length;
+  }
+  if (bytes != null && bytes > _maxHostBytes) {
+    fail(NativeTestVmFailureReason.frameTooLarge);
+  }
+  try {
+    if (message is! String) fail(NativeTestVmFailureReason.invalidEnvelope);
+    final m = jsonDecode(message);
+    if (m is! Map ||
+        expectedId == null ||
+        m['jsonrpc'] != '2.0' ||
+        m['id'] is! int ||
+        m['id'] != expectedId ||
+        m.containsKey('error') == m.containsKey('result')) {
+      fail(NativeTestVmFailureReason.invalidEnvelope);
+    }
+    if (m.containsKey('error')) fail(NativeTestVmFailureReason.rpcError);
+    return m['result'];
+  } on NativeTestHostFailure {
+    rethrow;
+  } catch (_) {
+    fail(NativeTestVmFailureReason.invalidEnvelope);
+  }
 }
 
 Never _reject([
@@ -135,12 +218,17 @@ final class NativeTestHost {
       }
       final id = _isolateId(ref['id']);
       final isolate = await transport.getIsolate(id);
-      if (isolate is! Map ||
-          isolate['id'] != id ||
-          isolate['extensionRPCs'] is! List) {
+      if (isolate is Map &&
+          isolate['type'] == 'Sentinel' &&
+          isolate['kind'] == 'Collected') {
+        continue;
+      }
+      if (isolate is! Map || isolate['id'] != id) {
         _reject();
       }
-      final extensions = isolate['extensionRPCs'] as List;
+      final extensions = isolate['extensionRPCs'];
+      if (extensions == null) continue;
+      if (extensions is! List) _reject();
       if (extensions.length > 256 || !extensions.every((e) => e is String)) {
         _reject();
       }
@@ -245,7 +333,7 @@ final class NativeTestHost {
         ),
       };
     } on NativeTestHostFailure catch (failure) {
-      return {'outcome': 'failed', 'category': failure.category.name};
+      return failure.toJson();
     } catch (_) {
       return {
         'outcome': 'failed',
@@ -564,6 +652,8 @@ final class _VmTransport implements NativeTestHostTransport {
   final _pending = <int, Completer<Object?>>{};
   int _nextId = 0;
   bool _closed = false;
+  NativeTestVmMethod? _activeMethod;
+  NativeTestHostFailure? _failure;
 
   static Future<_VmTransport> connect(Uri uri) async {
     if (uri.scheme != 'http' ||
@@ -586,11 +676,12 @@ final class _VmTransport implements NativeTestHostTransport {
   }
 
   Future<Object?> _call(
-    String method, [
+    NativeTestVmMethod method, [
     Map<String, String> params = const {},
   ]) async {
     if (_closed) {
-      _reject(NativeTestHostError.disconnected);
+      throw _failure ??
+          const NativeTestHostFailure(NativeTestHostError.disconnected);
     }
     if (_pending.isNotEmpty) {
       _reject(NativeTestHostError.rpcFailed);
@@ -598,12 +689,13 @@ final class _VmTransport implements NativeTestHostTransport {
     final id = ++_nextId;
     final completer = Completer<Object?>();
     _pending[id] = completer;
+    _activeMethod = method;
     try {
       _socket.add(
         jsonEncode({
           'jsonrpc': '2.0',
           'id': id,
-          'method': method,
+          'method': method.wireName,
           'params': params,
         }),
       );
@@ -617,61 +709,64 @@ final class _VmTransport implements NativeTestHostTransport {
       _reject(NativeTestHostError.rpcFailed);
     } finally {
       _pending.remove(id);
+      _activeMethod = null;
     }
   }
 
   void _receive(Object? message) {
     try {
-      if (message is! String ||
-          message.length > _maxHostBytes ||
-          utf8.encode(message).length > _maxHostBytes) {
-        _reject();
-      }
-      final m = jsonDecode(message);
-      if (m is! Map ||
-          m['jsonrpc'] != '2.0' ||
-          m['id'] is! int ||
-          m.containsKey('error') ||
-          !m.containsKey('result')) {
-        _reject();
-      }
-      final pending = _pending[m['id']];
-      if (pending == null || pending.isCompleted) {
-        _reject();
-      }
-      pending.complete(m['result']);
+      final pending = _pending.length == 1 ? _pending.values.single : null;
+      final result = nativeTestVmResult(
+        message,
+        method: _activeMethod,
+        expectedId: pending == null || pending.isCompleted
+            ? null
+            : _pending.keys.single,
+      );
+      pending!.complete(result);
+    } on NativeTestHostFailure catch (failure) {
+      _disconnect(failure);
     } catch (_) {
       _disconnect();
     }
   }
 
-  void _disconnect() {
+  void _disconnect([NativeTestHostFailure? failure]) {
+    if (_closed) return;
     _closed = true;
+    _failure =
+        failure ??
+        NativeTestHostFailure(
+          NativeTestHostError.disconnected,
+          diagnostic: NativeTestVmDiagnostic(
+            NativeTestVmFailureReason.socketClosed,
+            _activeMethod,
+            0,
+          ),
+        );
     for (final pending in _pending.values) {
       if (!pending.isCompleted) {
-        pending.completeError(
-          const NativeTestHostFailure(NativeTestHostError.disconnected),
-        );
+        pending.completeError(_failure!);
       }
     }
   }
 
   @override
-  Future<Object?> getVm() => _call('getVM');
+  Future<Object?> getVm() => _call(NativeTestVmMethod.getVM);
   @override
   Future<Object?> getIsolate(String id) =>
-      _call('getIsolate', {'isolateId': _isolateId(id)});
+      _call(NativeTestVmMethod.getIsolate, {'isolateId': _isolateId(id)});
   @override
   Future<Object?> info(String id) =>
-      _call('ext.wired_parts.nearbyTest.info', {'isolateId': _isolateId(id)});
+      _call(NativeTestVmMethod.info, {'isolateId': _isolateId(id)});
   @override
   Future<Object?> configure(String id, String data) => _call(
-    'ext.wired_parts.nearbyTest.configure',
+    NativeTestVmMethod.configure,
     {'isolateId': _isolateId(id), 'data': data},
   );
   @override
   Future<Object?> command(String id, String data) => _call(
-    'ext.wired_parts.nearbyTest.command',
+    NativeTestVmMethod.command,
     {'isolateId': _isolateId(id), 'data': data},
   );
   Future<void> close() async {
@@ -754,6 +849,7 @@ Future<void> main(List<String> arguments) async {
         snapshot.path,
         'test',
         '--no-pub',
+        '--no-dds',
         '--verbose',
         '--reporter',
         'expanded',
@@ -816,7 +912,7 @@ Future<void> main(List<String> arguments) async {
     }
     _emit({'outcome': 'hostInputClosed'});
   } on NativeTestHostFailure catch (failure) {
-    _emit({'outcome': 'failed', 'category': failure.category.name});
+    _emit(failure.toJson());
     exitCode = 1;
   } catch (_) {
     _emit({'outcome': 'failed', 'category': 'launcherFailed'});

@@ -55,6 +55,13 @@ authenticated localhost VM service and one actual isolate. It accepts only
 over bounded JSON lines on standard input. It exposes no runtime evaluation,
 arbitrary RPC method, path, executable or VM-service URL argument. Raw runner
 output and exceptions are discarded rather than included in public receipts.
+The fixed runner arguments include --no-dds, so the host does not compete with
+a DDS proxy for the first direct VM-service endpoint. Localhost authentication
+remains enabled. Discovery skips worker isolates with no registered extensions
+and isolates reported collected, while rejecting ambiguous matches and malformed
+identities. Failure diagnostics contain only fixed reason/method values and a
+byte count when known. Frame, isolate and startup limits remain bounded. This
+change does not establish the cause of an earlier native disconnection.
 
 The coordinator must independently acquire the native PID, start time, exact
 image/kernel/source hashes, run, role, device IDs and host/isolate connection.
