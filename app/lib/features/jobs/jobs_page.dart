@@ -49,7 +49,11 @@ class _JobsPageState extends State<JobsPage> {
     final q = _searchController.text.trim().toLowerCase();
     if (q.isEmpty) return _jobsList;
     return _jobsList
-        .where((j) => j.name.toLowerCase().contains(q))
+        .where(
+          (j) =>
+              j.name.toLowerCase().contains(q) ||
+              (j.jobNumber?.toLowerCase().contains(q) ?? false),
+        )
         .toList(growable: false);
   }
 
@@ -109,7 +113,13 @@ class _JobsPageState extends State<JobsPage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : items.isEmpty
-                    ? const Center(child: Text('No active jobs'))
+                    ? Center(
+                        child: Text(
+                          _searchController.text.trim().isEmpty
+                              ? 'No active jobs'
+                              : 'No jobs match your search',
+                        ),
+                      )
                     : ListView.builder(
                         itemCount: items.length,
                         itemBuilder: (context, index) {
