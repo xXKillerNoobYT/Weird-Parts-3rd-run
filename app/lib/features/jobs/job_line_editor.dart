@@ -56,6 +56,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   String? _partId;
   String? _brandVersionId;
+  String? _customNotes;
+  String? _uom;
+  String? _notes;
   String _pickLabel = 'Pick from catalog tree';
   final List<_SplitDraft> _splits = [];
 
@@ -139,6 +142,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
         brandVersionId = line.brandVersionId;
         useCustom = line.partId == null;
         customName = line.customName ?? '';
+        _customNotes = line.customNotes;
+        _uom = line.uom;
+        _notes = line.notes;
         needed = _qtyText(line.neededQty);
         pull = _qtyText(line.shopPullQty);
         final existing = await _jobs.orderSplitsForLine(line.id);
@@ -428,6 +434,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
           partId: partId,
           brandVersionId: brandVersionId,
           customName: customName,
+          customNotes: _customNotes,
+          uom: _uom,
+          notes: _notes,
           neededQty: needed,
           shopPullQty: pull,
         );
