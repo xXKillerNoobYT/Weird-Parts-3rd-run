@@ -66,6 +66,9 @@ void main() {
       partId: null,
       brandVersionId: null,
       customName: 'Custom valve',
+      customNotes: null,
+      uom: null,
+      notes: null,
       neededQty: 10,
       shopPullQty: 4,
     );
@@ -97,6 +100,39 @@ void main() {
     expect(job.revision, 2);
     final after = await jobs.listActiveJobs();
     expect(after.map((j) => j.id), isNot(contains(jobId)));
+  });
+
+  test('update line explicitly clears nullable metadata', () async {
+    final jobId = await jobs.createJob('Synthetic metadata clear');
+    final lineId = await jobs.addLine(
+      jobId: jobId,
+      customName: 'Synthetic line',
+      customNotes: 'Synthetic custom notes',
+      uom: 'box',
+      notes: 'Synthetic line notes',
+      neededQty: 7,
+      shopPullQty: 2,
+    );
+    await jobs.updateLine(
+      lineId: lineId,
+      partId: null,
+      brandVersionId: null,
+      customName: 'Synthetic line',
+      customNotes: null,
+      uom: null,
+      notes: null,
+      neededQty: 9,
+      shopPullQty: 3,
+    );
+    final saved = (await jobs.getJobLine(lineId))!;
+    expect(saved.id, lineId);
+    expect(saved.jobId, jobId);
+    expect(saved.customName, 'Synthetic line');
+    expect(saved.customNotes, isNull);
+    expect(saved.uom, isNull);
+    expect(saved.notes, isNull);
+    expect(saved.neededQty, 9);
+    expect(saved.shopPullQty, 3);
   });
 
   test('promote custom line attaches catalog part and keeps qty', () async {
