@@ -61,11 +61,11 @@ class JobsRepository {
     required String? partId,
     required String? brandVersionId,
     required String? customName,
-    String? customNotes,
+    required String? customNotes,
     required double neededQty,
     required double shopPullQty,
-    String? uom,
-    String? notes,
+    required String? uom,
+    required String? notes,
   }) {
     return _db.jobsDao.updateJobLine(
       id: lineId,
