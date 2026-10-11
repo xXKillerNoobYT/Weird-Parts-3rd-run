@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 const nativeTestDomain = 'wired-parts/native-nearby-test/v1';
 const nativeTestMaxEnvelopeBytes = 4096;
@@ -285,7 +286,10 @@ final class RenderedObservation {
   }) : renderedCode = _code(renderedCode),
        attemptId = nativeTestAttemptId(attemptId),
        localExpiresAtMillis = nativeTestInt(localExpiresAtMillis),
-       remainingMillis = nativeTestInt(remainingMillis, max: 120000),
+       remainingMillis = nativeTestInt(
+         remainingMillis,
+         max: kNearbyPairingWindow.inMilliseconds,
+       ),
        deviceId = nativeTestId(deviceId),
        peerId = nativeTestId(peerId);
   factory RenderedObservation.fromJson(Object? value) {
@@ -301,7 +305,10 @@ final class RenderedObservation {
       renderedCode: nativeTestText(m['renderedCode']),
       attemptId: nativeTestAttemptId(m['attemptId']),
       localExpiresAtMillis: nativeTestInt(m['localExpiresAtMillis']),
-      remainingMillis: nativeTestInt(m['remainingMillis'], max: 120000),
+      remainingMillis: nativeTestInt(
+        m['remainingMillis'],
+        max: kNearbyPairingWindow.inMilliseconds,
+      ),
       deviceId: nativeTestId(m['deviceId']),
       peerId: nativeTestId(m['peerId']),
     );

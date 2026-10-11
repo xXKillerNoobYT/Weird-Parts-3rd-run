@@ -343,22 +343,27 @@ class NearbyController {
       );
       final agreement = await NearbyPendingPair.create(context, guest: true);
       if (generation != _pairGeneration) return;
-      final attempt = _PairAttempt(peer, agreement);
+      final attempt = _PairAttempt(
+        peer,
+        agreement,
+        expiresAt: (now ?? DateTime.now)().toUtc().add(kNearbyPairingWindow),
+      );
       _pending = attempt;
       _armPairExpiry(attempt);
       final start = await _jsonPost(peer, '/v2/pair/start', {
         ...context.toJson(),
         'commitment': agreement.commitment,
       });
-      if (!identical(_pending, attempt)) return;
+      if (!_isCurrentPair(attempt)) return;
       agreement.receiveCommitment(start['commitment']);
       final revealed = await _jsonPost(
         peer,
         '/v2/pair/reveal',
         agreement.reveal(),
       );
+      if (!_isCurrentPair(attempt)) return;
       final match = await agreement.receiveReveal(revealed);
-      if (!identical(_pending, attempt)) return;
+      if (!_isCurrentPair(attempt)) return;
       attempt.match = match;
       _showMatch(attempt);
     } catch (e) {
@@ -370,12 +375,26 @@ class NearbyController {
 
   void _armPairExpiry(_PairAttempt attempt) {
     _pairTimer?.cancel();
-    attempt.expiresAt = (now ?? DateTime.now)().toUtc().add(
-      const Duration(minutes: 2),
-    );
-    _pairTimer = Timer(const Duration(minutes: 2), () {
+    _pairTimer = Timer(kNearbyPairingWindow, () {
       if (identical(_pending, attempt)) _fail('Pair expired. Try again.');
     });
+  }
+
+  bool _isCurrentPair(_PairAttempt attempt) {
+    if (!identical(_pending, attempt)) return false;
+    if (!(now ?? DateTime.now)().toUtc().isBefore(attempt.expiresAt)) {
+      _fail('Pair expired. Try again.');
+      return false;
+    }
+    return true;
+  }
+
+  Duration _pairingRemaining(DateTime deadline) {
+    final remaining = deadline.difference((now ?? DateTime.now)().toUtc());
+    if (remaining <= Duration.zero) {
+      throw const NearbyException('Pair expired. Try again.');
+    }
+    return remaining;
   }
 
   void _showMatch(_PairAttempt attempt) {
@@ -396,10 +415,12 @@ class NearbyController {
   }
 
   void _paired(_PairAttempt attempt, NearbySessionKeys keys) {
+    if (!_isCurrentPair(attempt)) return;
     _pairTimer?.cancel();
     _pairTimer = null;
     _pending = null;
     _hostMatch = null;
+    attempt.ended.complete();
     _session = _Session(attempt.peer, keys);
     _emit(
       NearbyViewState(
@@ -417,8 +438,9 @@ class NearbyController {
 
   Future<void> confirmCode() async {
     final attempt = _pending;
-    final match = attempt?.match;
-    if (attempt == null || match == null || attempt.localConfirmed) return;
+    if (attempt == null || !_isCurrentPair(attempt)) return;
+    final match = attempt.match;
+    if (match == null || attempt.localConfirmed) return;
     attempt.localConfirmed = true;
     final proof = match.confirmLocal();
     _emit(
@@ -431,15 +453,18 @@ class NearbyController {
       return;
     }
     try {
-      final reply = await _jsonPost(attempt.peer, '/v2/pair/confirm', {
-        'id': match.transactionId,
-        'proof': proof,
-      }, timeout: const Duration(minutes: 2));
-      if (!identical(_pending, attempt)) return;
+      final reply = await _jsonPost(
+        attempt.peer,
+        '/v2/pair/confirm',
+        {'id': match.transactionId, 'proof': proof},
+        pairingDeadline: attempt.expiresAt,
+        pairingEnded: attempt.ended.future,
+      );
+      if (!_isCurrentPair(attempt)) return;
       match.confirmRemote(reply['proof']);
       _paired(attempt, match.finish());
     } catch (e) {
-      if (identical(_pending, attempt)) _fail(_crewError(e, 'Pair failed'));
+      if (_isCurrentPair(attempt)) _fail(_crewError(e, 'Pair failed'));
     }
   }
 
@@ -649,9 +674,9 @@ class NearbyController {
         context.hostName != deviceName) {
       throw const NearbyException('Pair does not match this device');
     }
-    final now = DateTime.now();
+    final rateLimitNow = DateTime.now();
     _pairStarts.removeWhere(
-      (time) => now.difference(time) > const Duration(minutes: 1),
+      (time) => rateLimitNow.difference(time) > const Duration(minutes: 1),
     );
     if (_pairStarts.length >= 5) {
       request.response.statusCode = HttpStatus.tooManyRequests;
@@ -660,7 +685,7 @@ class NearbyController {
       });
       return;
     }
-    _pairStarts.add(now);
+    _pairStarts.add(rateLimitNow);
     _failPending(cancel: true);
     final generation = _pairGeneration;
     final agreement = await NearbyPendingPair.create(context, guest: false);
@@ -676,6 +701,7 @@ class NearbyController {
         port: context.guestPort,
       ),
       agreement,
+      expiresAt: (now ?? DateTime.now)().toUtc().add(kNearbyPairingWindow),
     );
     _pending = attempt;
     _hostMatch = Completer<bool>();
@@ -700,6 +726,9 @@ class NearbyController {
         attempt.agreement.context.id != body['id']) {
       throw const NearbyException('Pair expired or was cancelled');
     }
+    if (!_isCurrentPair(attempt)) {
+      throw const NearbyException('Pair expired or was cancelled');
+    }
     return attempt;
   }
 
@@ -708,8 +737,8 @@ class NearbyController {
     final attempt = _hostAttempt(body);
     final reveal = attempt.agreement.reveal();
     final match = await attempt.agreement.receiveReveal(body);
-    if (!identical(_pending, attempt)) {
-      throw const NearbyException('Pair cancelled');
+    if (!_isCurrentPair(attempt)) {
+      throw const NearbyException('Pair expired or was cancelled');
     }
     attempt.match = match;
     _showMatch(attempt);
@@ -722,8 +751,15 @@ class NearbyController {
     final match = attempt.match;
     if (match == null) throw const NearbyException('Pair reveal required');
     match.confirmRemote(body['proof']);
-    final accepted = await _hostMatch!.future;
-    if (!accepted || !identical(_pending, attempt)) {
+    final hostMatch = _hostMatch!;
+    final accepted = await hostMatch.future.timeout(
+      _pairingRemaining(attempt.expiresAt),
+      onTimeout: () {
+        if (identical(_pending, attempt)) _fail('Pair expired. Try again.');
+        return false;
+      },
+    );
+    if (!_isCurrentPair(attempt) || !accepted) {
       throw const NearbyException('Pair cancelled');
     }
     final proof = match.confirmLocal();
@@ -1008,6 +1044,8 @@ class NearbyController {
     Map<String, Object?> body, {
     _Session? session,
     Duration timeout = const Duration(seconds: 20),
+    DateTime? pairingDeadline,
+    Future<void>? pairingEnded,
   }) => _request(
     peer,
     'POST',
@@ -1015,6 +1053,8 @@ class NearbyController {
     Uint8List.fromList(utf8.encode(jsonEncode(body))),
     session: session,
     timeout: timeout,
+    pairingDeadline: pairingDeadline,
+    pairingEnded: pairingEnded,
   );
 
   Future<void> _putBytes(
@@ -1042,12 +1082,22 @@ class NearbyController {
     Uint8List bytes, {
     _Session? session,
     Duration timeout = const Duration(seconds: 20),
+    DateTime? pairingDeadline,
+    Future<void>? pairingEnded,
     void Function(double progress)? onProgress,
   }) async {
     if (!_allowsPeer(peer.host)) {
       throw const NearbyException('Use the same Wi-Fi network');
     }
     final client = HttpClient()..findProxy = (_) => 'DIRECT';
+    HttpClient? activeClient = client;
+    pairingEnded?.then((_) => activeClient?.close(force: true));
+    Duration phaseTimeout({bool humanWait = false}) {
+      if (pairingDeadline == null) return timeout;
+      final remaining = _pairingRemaining(pairingDeadline);
+      return humanWait || remaining < timeout ? remaining : timeout;
+    }
+
     final wifi = _wifi;
     if (wifi != null) {
       client.connectionFactory = (uri, proxyHost, proxyPort) =>
@@ -1056,7 +1106,7 @@ class NearbyController {
     try {
       final req = await client
           .open(method, peer.host, peer.port, path)
-          .timeout(timeout);
+          .timeout(phaseTimeout());
       req.followRedirects = false;
       req.headers.contentLength = bytes.length;
       req.headers.contentType = method == 'PUT'
@@ -1070,11 +1120,12 @@ class NearbyController {
         req.add(bytes.sublist(i, end));
         onProgress?.call(end / bytes.length);
       }
-      final response = await req.close().timeout(timeout);
+      final response = await req.close().timeout(phaseTimeout(humanWait: true));
       final responseBytes = await _readBounded(
         response,
         64 * 1024,
-      ).timeout(timeout);
+      ).timeout(phaseTimeout());
+      if (pairingDeadline != null) _pairingRemaining(pairingDeadline);
       if (session != null && proof != null) {
         session.keys.verifyResponse(
           proof,
@@ -1099,6 +1150,7 @@ class NearbyController {
         'The other device did not answer. Keep Nearby open on both, same Wi-Fi.',
       );
     } finally {
+      activeClient = null;
       client.close(force: true);
     }
   }
@@ -1163,6 +1215,7 @@ class NearbyController {
     _pairTimer?.cancel();
     _pairTimer = null;
     _pairGeneration++;
+    _pending?.ended.complete();
     _pending = null;
     _session = null;
     if (_hostMatch != null && !_hostMatch!.isCompleted) {
@@ -1213,11 +1266,12 @@ class NearbyController {
 }
 
 class _PairAttempt {
-  _PairAttempt(this.peer, this.agreement);
+  _PairAttempt(this.peer, this.agreement, {required this.expiresAt});
   final NearbyPeer peer;
   final NearbyPendingPair agreement;
   NearbyAwaitingMatch? match;
-  DateTime? expiresAt;
+  final DateTime expiresAt;
+  final ended = Completer<void>();
   bool localConfirmed = false;
 }
 
