@@ -1,8 +1,8 @@
 # Five architecture designs for offline mixed-version sync
 
-Date: 2026-10-08. [Issue #45](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/45) extends the existing [issue #33](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/33) plan. Three independent Windows architects and two independent Mac architects produced separate frozen proposals before integration. No library or implementation is selected. All proposed engine behavior and performance remain **UNPROVEN**.
+Date: 2026-10-08. [Issue #45](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/45) extends the existing [issue #33](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/33) plan. Three independent Windows architects and two independent Mac architects produced separate frozen proposals before integration. At that date no library or implementation was selected. The 2026-10-11 [Stage 1 decision](stage1-contract.md) now selects immutable authored operations with typed projections after the bounded storage comparison and independent reviews. No crypto/CRDT library is selected, and production engine behavior and performance remain **UNPROVEN**.
 
-The recommended experiment combines a typed command/entity registry, immutable original operation bytes, bounded authorized carriage, and supported local projections. It draws on A, B and D. It keeps C's finer text merge and E's broader adapter matrix conditional on an actual need and a passing experiment. First complete the exact-candidate native gate in issue #39.
+The recommended experiment combines a typed command/entity registry, immutable original operation bytes, bounded authorized carriage, and supported local projections. It draws on A, B and D. It keeps C's finer text merge and E's broader adapter matrix conditional on an actual need and a passing experiment. The exact c998 native copy/recovery gates have since passed, as linked in the [current plan](foundation-plan.md#current-decision-2026-10-11). The broader three-store application experiment below remains future acceptance, not the completed Stage 1 storage comparison.
 
 ## Five actual designs and their authors' ratings
 
@@ -72,4 +72,4 @@ Full independent proposals remain in approved private evidence on the authors' h
 | D extensible entity registry | `8e52d6f52228c004d20f9404fe7f102972e12bfbd146f2416952e752ded2bb31` |
 | E contract-pinned adapters | `e6484a07e6dfef154e3580801791a7416d525b4b17a15d196bbe90378e9951d8` |
 
-The integration critique found the credential-portability, stage-label, rating-baseline, conflict-routing and recovery-identity gaps above. They are incorporated into the [common plan](foundation-plan.md). No original proposal is rewritten to hide disagreement. The documentation increment still requires its independent final review; that review is distinct from current native acceptance and future engine validation.
+The integration critique found the credential-portability, stage-label, rating-baseline, conflict-routing and recovery-identity gaps above. They are incorporated into the [common plan](foundation-plan.md). No original proposal is rewritten to hide disagreement. The original integrated plan and the later [Stage 1 contract](stage1-contract.md) have separate independent design reviews. Neither is engine validation or a substitute for native security and two-way acceptance.

@@ -4,7 +4,7 @@ Date: 2026-10-08. Governing plan: [issue #33](https://github.com/xXKillerNoobYT/
 
 **Goal:** Give authorized company devices a durable offline database and one manual Sync Now that exchanges changes in both directions. Later features reuse its identity, permissions, history, validation, compatibility, and delivery rules.
 
-**Architecture direction:** Typed domain operations over an immutable, byte-preserving operation store. Derive local views only from supported, authorized operations. Separate custody from semantic application and business acknowledgment. This is a recommendation for a discriminating experiment after the current native gate, not an implemented engine or selected library.
+**Architecture direction:** Typed domain operations over an immutable, byte-preserving operation store. Derive local views only from supported, authorized operations. Separate custody from semantic application and business acknowledgment. The bounded storage comparison and independent Windows/Mac design reviews now admit this choice in the [Stage 1 contract](stage1-contract.md). It remains an unimplemented engine; no crypto, wire encoding, or CRDT library is selected.
 
 **Tech stack:** Existing Flutter and Drift/SQLite. No new dependency, radio implementation, wire encoding, signature suite, or CRDT library is selected.
 
@@ -14,7 +14,13 @@ Date: 2026-10-08. Governing plan: [issue #33](https://github.com/xXKillerNoobYT/
 
 **Review focus:** Lost edits, false acknowledgments, company-data disclosure, unknown-field loss, credential cloning, stale-restore replay, deletion resurrection, and misleading capacity or platform claims.
 
-## Current evidence and its limits
+## Current decision, 2026-10-11
+
+[Stage 1](stage1-contract.md) selects immutable authored operations with typed projections, explicit company/user/device authority, causal conflicts, restore preservation and a first installation-binding increment. The tiny two-database comparison supports authored-history retention only. Independent current-source/code/result review and Mac contract review passed at design scope. This is separate from implemented sync.
+
+The exact `c998590f1f7efe1cca14b8aacffcd3792beab4c2` [one-way native copy gate](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/84#issuecomment-6106016809) and [encrypted recovery gate](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/59#issuecomment-6106348163) passed on isolated Windows and Mac installations. They supersede the pending F0 evidence below for this candidate. Genuine two-way sync, enrollment, portable users, mobile and mesh remain unimplemented or unverified. Windows #89 and CI UNKNOWN remain landing gates; PRs stay draft and unmerged.
+
+## Historical evidence and its limits
 
 Repository main was observed at `a4546d3ae30030bb8884ab31db4167408d1e1ec2`. Feature evidence below refers to draft [PR #36](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/36), candidate `95a06a96994ec03014a37075ce4406f183e3c12e`. Source and pending PR behavior are not assumed merged into main.
 
@@ -35,7 +41,7 @@ Scenario stages describe delivery, not test results. Every newly proposed scenar
 
 | Stage | Work pulled into that stage | Completion signal |
 | --- | --- | --- |
-| F0, current Phase 4 closeout | Finish issue #39. Preserve exact processes and Nearby pages through Mac to Windows, Windows to Mac, then Mac to Windows. Fresh pairing comparison for each leg. Explicit PIN and replacement acceptance. Normal restart after the three legs. | Both operators and an independent reviewer admit complete per-leg domain, relationships, tombstone, full local profile, settings boundary, physical photos and final restart evidence. PR #36 stays draft until its required gates pass. |
+| F0, historical Phase 4 gate; completed at c998 | Former issue #39 acceptance sequence: Preserve exact processes and Nearby pages through Mac to Windows, Windows to Mac, then Mac to Windows. Fresh pairing comparison for each leg. Explicit PIN and replacement acceptance. Normal restart after the three legs. | Both operators and an independent reviewer admit complete per-leg domain, relationships, tombstone, full local profile, settings boundary, physical photos and final restart evidence. PR #36 stays draft until its required gates pass. |
 | F1, Phase 5 foundation | Company/device enrollment and revocation, portable user identity and protected offline authentication, shared validated commands, durable operations/outbox/inbox, typed merge registry, tombstones, receipts, compatibility negotiation, bounded changes-only Sync Now and visible Sync Issues. | A minimal registered catalog/job command path in actual isolated Windows and Mac test builds proves offline edits, both-direction exchange, restart, correct records or visible conflicts, and duplicate-free retry. Minimum enrollment and portable-user sign-in/permission behavior must pass. Unauthorized or revoked peers get no protected data under the chosen freshness policy. Recovery passes. Broad migration of existing editors remains F2. |
 | F2, gradual usage migration | Migrate all existing Parts and Jobs edit paths through the already proven foundation first. Preserve local behavior and rollback. Complete their user-facing integration, then add Notebook through the same registered operations and conflict contract. Baseline local MCP uses those commands and permissions. | Each small increment passes domain/compatibility tests and actual user workflows. Native tests repeat where the increment changes platform, transport, persistence, enrollment or recovery boundaries. |
 | R, later layers | Location inventory and master authority, receiving/returns/restocking, supplier tools, permits, scheduling, fleet and reports. Router-free Bluetooth or direct Wi-Fi, partner sharing and internet peers. Device-native AI and audible assistance. Scripted diagnostic collection and approved submission retain issue #40's own scope. | Separately scoped issues, deliberate permissions and measurable acceptance. None is silently added to F0. |
@@ -128,7 +134,7 @@ Ordinary additions that satisfy this contract can rely on the shared automated c
 
 ## Proof and measured limits
 
-After F0, start with the smallest isolated three-replica experiment. Two replicas author different fields and independent actions offline. An older carrier forwards exact supported envelopes and unknown optional content. A capable recipient applies supported changes, preserves conflicts and returns distinct receipts. Include bad authorization, unknown required semantics, duplicate IDs with differing hashes, missing parents, stale deletion, restore and crashes around each commit boundary. Stop a candidate on a hard safety failure.
+Stage 1's two-database storage comparison is complete within the limits in the [decision receipt](stage1-contract.md#evidence-and-review). After the installation-binding and one-command implementation increments, use the planned isolated three-replica acceptance experiment. Two replicas author different fields and independent actions offline. An older carrier forwards exact supported envelopes and unknown optional content. A capable recipient applies supported changes, preserves conflicts and returns distinct receipts. Include bad authorization, unknown required semantics, duplicate IDs with differing hashes, missing parents, stale deletion, restore and crashes around each commit boundary. Stop a candidate on a hard safety failure.
 
 Then exercise one actual authorized Windows and Mac pair plus an unauthorized synthetic peer. Use a minimal registered catalog/job command path in isolated native test builds, with minimum enrollment, portable-user sign-in and permission checks. This proves the foundation lane; F2 must separately migrate and validate the complete existing Parts and Jobs editors. Test both offline edits, concurrent same-field edits, edit/delete, delete followed by stale restore, restart, dropped acknowledgment, interrupted batch and repeated Sync Now. Compare complete records/relationships, operation IDs, tombstones, conflict alternatives, full local identity and asset hashes. Admit unresolved conflicts only when visible and durable. Android and iOS each need their own actual acceptance before being called supported.
 
