@@ -8,6 +8,7 @@ const kNearbyUdpPort = 41000;
 const kNearbyMulticastGroup = '239.55.12.42';
 const kNearbyProto = 'wiredpart-link';
 const kNearbyProtoVersion = 2;
+const kNearbyPairingWindow = Duration(minutes: 5);
 const kNearbyTransferMagic = [0x57, 0x50, 0x4c, 0x32]; // WPL2
 const kMaxNearbyTransferBytes = 512 * 1024 * 1024;
 const kLastNearbyAtKey = 'last_nearby_at';

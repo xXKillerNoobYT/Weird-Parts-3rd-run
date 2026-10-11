@@ -74,6 +74,7 @@ class NearbyController {
     this.codec,
     this.peerAllowed,
     this.readNetwork = readNearbyWifiNetwork,
+    this.now,
   });
 
   final String deviceId;
@@ -87,6 +88,7 @@ class NearbyController {
   final NearbyCodec? codec;
   final bool Function(String host)? peerAllowed;
   final Future<NearbyWifiNetwork> Function() readNetwork;
+  final DateTime Function()? now;
 
   NearbyCodec get _codec => codec ?? NearbyCodec();
 
@@ -368,7 +370,9 @@ class NearbyController {
 
   void _armPairExpiry(_PairAttempt attempt) {
     _pairTimer?.cancel();
-    attempt.expiresAt = DateTime.now().toUtc().add(const Duration(minutes: 2));
+    attempt.expiresAt = (now ?? DateTime.now)().toUtc().add(
+      const Duration(minutes: 2),
+    );
     _pairTimer = Timer(const Duration(minutes: 2), () {
       if (identical(_pending, attempt)) _fail('Pair expired. Try again.');
     });
