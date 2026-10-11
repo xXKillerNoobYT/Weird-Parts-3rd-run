@@ -52,6 +52,108 @@ class MainFlutterWindow: NSWindow {
       result(records)
     }
 
+    let installationSecurity = InstallationSecurityChannel()
+    let installationSecurityChannel = FlutterMethodChannel(
+      name: "wired_parts/installation_security",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
+    installationSecurityChannel.setMethodCallHandler { call, result in
+      installationSecurity.handle(call, result: result)
+    }
+
     super.awakeFromNib()
+  }
+}
+
+private enum InstallationSecurityRequest {
+  case read(InstallationSecurityNamespace)
+  case compareAndSwap(InstallationSecurityNamespace, InstallationSecurityRevision?, ProtectedInstallationState)
+
+  init(_ call: FlutterMethodCall) throws {
+    guard let arguments = call.arguments as? [String: Any],
+      let rawNamespace = arguments["namespace"] as? String else {
+      throw StoreError.invalidArgument
+    }
+    let namespace = try InstallationSecurityNamespace(rawNamespace)
+    if call.method == "readState" {
+      guard Set(arguments.keys) == ["namespace"] else { throw StoreError.invalidArgument }
+      self = .read(namespace)
+      return
+    }
+    guard Set(arguments.keys).isSubset(of: ["namespace", "expectedRevision", "nextRevision", "bytes"]),
+      let rawNextRevision = arguments["nextRevision"] as? String,
+      let bytes = arguments["bytes"] as? FlutterStandardTypedData,
+      bytes.type == .uInt8 else {
+      throw StoreError.invalidArgument
+    }
+    let expectedRevision: InstallationSecurityRevision?
+    if let value = arguments["expectedRevision"], !(value is NSNull) {
+      guard let rawExpectedRevision = value as? String else { throw StoreError.invalidArgument }
+      expectedRevision = try InstallationSecurityRevision(rawExpectedRevision)
+    } else {
+      expectedRevision = nil
+    }
+    let nextState = try ProtectedInstallationState(
+      revision: InstallationSecurityRevision(rawNextRevision), bytes: bytes.data)
+    self = .compareAndSwap(namespace, expectedRevision, nextState)
+  }
+}
+
+private final class InstallationSecurityChannel {
+  private let store: Result<InstallationSecurityStore, StoreError>
+
+  init() {
+    do {
+      store = .success(try InstallationSecurityStore())
+    } catch let error as StoreError {
+      store = .failure(error)
+    } catch {
+      store = .failure(.unavailable)
+    }
+  }
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard call.method == "readState" || call.method == "compareAndSwapState" else {
+      result(FlutterMethodNotImplemented)
+      return
+    }
+    do {
+      let request = try InstallationSecurityRequest(call)
+      let storage = try store.get()
+      switch request {
+      case .read(let namespace):
+        storage.readState(namespace: namespace) { outcome in
+          switch outcome {
+          case .success(let state):
+            guard let state = state else {
+              result(nil)
+              return
+            }
+            result([
+              "revision": state.revision.rawValue,
+              "bytes": FlutterStandardTypedData(bytes: state.bytes),
+            ])
+          case .failure(let error):
+            result(Self.flutterError(error))
+          }
+        }
+      case .compareAndSwap(let namespace, let expectedRevision, let nextState):
+        storage.compareAndSwapState(
+          namespace: namespace, expectedRevision: expectedRevision, nextState: nextState
+        ) { outcome in
+          switch outcome {
+          case .success(let revision): result(["revision": revision.rawValue])
+          case .failure(let error): result(Self.flutterError(error))
+          }
+        }
+      }
+    } catch let error as StoreError {
+      result(Self.flutterError(error))
+    } catch {
+      result(Self.flutterError(.unavailable))
+    }
+  }
+
+  private static func flutterError(_ error: StoreError) -> FlutterError {
+    FlutterError(code: error.code, message: error.message, details: error.details)
   }
 }
