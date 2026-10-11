@@ -1104,9 +1104,10 @@ class NearbyController {
           wifi.connect(uri);
     }
     try {
+      final connectTimeout = phaseTimeout();
       final req = await client
           .open(method, peer.host, peer.port, path)
-          .timeout(phaseTimeout());
+          .timeout(connectTimeout);
       req.followRedirects = false;
       req.headers.contentLength = bytes.length;
       req.headers.contentType = method == 'PUT'
@@ -1120,11 +1121,13 @@ class NearbyController {
         req.add(bytes.sublist(i, end));
         onProgress?.call(end / bytes.length);
       }
-      final response = await req.close().timeout(phaseTimeout(humanWait: true));
+      final responseTimeout = phaseTimeout(humanWait: true);
+      final response = await req.close().timeout(responseTimeout);
+      final bodyTimeout = phaseTimeout();
       final responseBytes = await _readBounded(
         response,
         64 * 1024,
-      ).timeout(phaseTimeout());
+      ).timeout(bodyTimeout);
       if (pairingDeadline != null) _pairingRemaining(pairingDeadline);
       if (session != null && proof != null) {
         session.keys.verifyResponse(

@@ -39,8 +39,12 @@ class _Clock {
   final origin = DateTime.utc(2026, 10, 10);
   Duration elapsed = Duration.zero;
   final timers = <_ScheduledTimer>[];
+  void Function()? beforeRead;
 
-  DateTime now() => origin.add(elapsed);
+  DateTime now() {
+    beforeRead?.call();
+    return origin.add(elapsed);
+  }
 
   Future<void> run(Future<void> Function() body) => runZoned(
     body,
@@ -256,6 +260,39 @@ class _RemoteAttempt {
   final confirmed = Completer<void>();
   final headersSent = Completer<void>();
   final release = Completer<void>();
+}
+
+class _CancelledOpenClient implements HttpClient {
+  Completer<HttpClientRequest>? _connecting;
+  int opened = 0;
+  bool closed = false;
+
+  @override
+  set findProxy(String Function(Uri)? findProxy) {}
+
+  @override
+  Future<HttpClientRequest> open(
+    String method,
+    String host,
+    int port,
+    String path,
+  ) {
+    opened++;
+    _connecting = Completer<HttpClientRequest>();
+    return _connecting!.future;
+  }
+
+  @override
+  void close({bool force = false}) {
+    closed = true;
+    _connecting?.completeError(
+      const HttpException('Connection closed before request opened'),
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('Unexpected ${invocation.memberName}');
 }
 
 class _RemoteHost {
@@ -659,6 +696,44 @@ void main() {
       expect(h.guest.state.error, 'Pair expired. Try again.');
       expect(h.guest.state.pairedPeer, isNull);
       expect(h.applied, 0);
+    }),
+  );
+
+  test(
+    'deadline crossing after Match admission does not abandon a connection Future',
+    () => _run((h) async {
+      await h.pair();
+      var clockReads = 0;
+      h.clock.beforeRead = () {
+        if (++clockReads == 2) {
+          h.clock.elapsed = const Duration(minutes: 5);
+        }
+      };
+      late _CancelledOpenClient client;
+      final unhandled = <Object>[];
+      final settled = Completer<void>();
+      runZonedGuarded(() async {
+        try {
+          await HttpOverrides.runZoned(
+            h.guest.confirmCode,
+            createHttpClient: (_) => client = _CancelledOpenClient(),
+          );
+          settled.complete();
+        } catch (error, stack) {
+          settled.completeError(error, stack);
+        }
+      }, (error, _) => unhandled.add(error));
+      await settled.future;
+      h.clock.beforeRead = null;
+      await _pump();
+      expect(h.guest.state.phase, NearbyPhase.failed);
+      expect(h.guest.state.error, 'Pair expired. Try again.');
+      expect(h.guest.state.pairedPeer, isNull);
+      expect(client.closed, isTrue);
+      expect(unhandled, isEmpty);
+      expect(client.opened, 0);
+      expect(h.applied, 0);
+      expect(h.collected, 0);
     }),
   );
 
