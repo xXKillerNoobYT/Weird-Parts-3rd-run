@@ -37,6 +37,7 @@ Future<void> main() async {
   final receiver = security('receiver');
   Map<String, Object?>? sourceReceipt;
   Map<String, Object?>? senderIdentity;
+  String? senderBindingSha256;
   if (action == RecoveryAction.exercise) {
     await scenario.seed();
     final senderDb = scenario.openDatabase(scenario.source);
@@ -44,6 +45,7 @@ Future<void> main() async {
       final sender = security('sender');
       await sender.start(senderDb);
       senderIdentity = identityReceipt(sender);
+      senderBindingSha256 = await bindingSha256(senderDb);
       await checkpointWalForExport(senderDb);
     } finally {
       await senderDb.close();
@@ -86,6 +88,62 @@ Future<void> main() async {
         before['publicKeySha256'] != senderIdentity['publicKeySha256'],
         'Installations share a key',
       );
+      final localStore = BackupStore(
+        supportDir: scenario.receiver.support,
+        photosDir: scenario.receiver.photos,
+      );
+      await checkpointWalForExport(scope().db);
+      final localPayload = await localStore.collect(
+        sourceDeviceId: scenario.receiver.deviceId,
+        createdAt: DateTime.utc(2026, 10, 7),
+        sqliteBytes: await (await localStore.sqliteFile()).readAsBytes(),
+      );
+      const localPassword = 'synthetic identity same-install backup';
+      final localArchive = await scenario.codec.encrypt(
+        localPayload,
+        localPassword,
+      );
+      await seedSyntheticSecurityFloors(store, receiver, scope().db);
+      final localBefore = await scenario.receipt(scope().db, scenario.receiver);
+      await scope().restoreFromBackup(localArchive, localPassword);
+      await WidgetsBinding.instance.endOfFrame;
+      final localAfter = await scenario.receipt(scope().db, scenario.receiver);
+      RecoveryScenario.compareShop(
+        withoutRestoreMetadata(localBefore),
+        withoutRestoreMetadata(localAfter),
+      );
+      require(
+        jsonEncode(before) == jsonEncode(identityReceipt(receiver)),
+        'Same-install restore replaced the installation identity',
+      );
+      final localBinding = await scope().db.settingsDao.getSetting(
+        kInstallationBindingKey,
+      );
+      require(
+        localBinding != beforeBinding,
+        'Same-install restore reused a receiving-store generation',
+      );
+      final localFloors = await readSecurityFloors(store, receiver.namespace);
+      require(
+        jsonEncode(localFloors) == jsonEncode(syntheticSecurityFloors),
+        'Same-install restore rolled back protected security floors',
+      );
+      File(
+        p.join(scenario.receiver.receipts.path, 'identity-same-install.json'),
+      ).writeAsStringSync(
+        jsonEncode({
+          'format': 1,
+          'run': run,
+          'passed': true,
+          'identity': identityReceipt(receiver),
+          'fixtureSeededFloors': localFloors,
+          'archiveSha256': sha256.convert(localArchive).toString(),
+          'receivingStoreChanged': true,
+          'before': localBefore,
+          'after': localAfter,
+        }),
+        flush: true,
+      );
       await scenario.exercise(
         scope: scope,
         settle: () => WidgetsBinding.instance.endOfFrame,
@@ -100,29 +158,41 @@ Future<void> main() async {
         kInstallationBindingKey,
       );
       require(
-        beforeBinding != afterBinding,
+        localBinding != afterBinding,
         'Restore reused a receiving-store generation',
+      );
+      final restoredFloors = await readSecurityFloors(
+        store,
+        receiver.namespace,
+      );
+      require(
+        jsonEncode(restoredFloors) == jsonEncode(syntheticSecurityFloors),
+        'Foreign restore replaced protected security floors',
       );
       manifest.writeAsStringSync(
         jsonEncode({
-          'format': 1,
+          'format': 2,
           'run': run,
           'state': 'restored',
           'sender': senderIdentity,
+          'senderBindingSha256': senderBindingSha256,
           'receiver': after,
+          'fixtureSeededFloors': restoredFloors,
           'bindingSha256': sha256
               .convert(utf8.encode(afterBinding!))
               .toString(),
           'nativeCas': 'passed',
+          'sameInstallRestore': 'passed',
         }),
         flush: true,
       );
     } else {
       final saved = jsonDecode(manifest.readAsStringSync()) as Map;
       require(
-        saved['format'] == 1 &&
+        saved['format'] == 2 &&
             saved['run'] == run &&
-            saved['state'] == 'restored',
+            saved['state'] == 'restored' &&
+            saved['sameInstallRestore'] == 'passed',
         'Identity receipt is invalid',
       );
       require(
@@ -134,6 +204,33 @@ Future<void> main() async {
             sha256.convert(utf8.encode(beforeBinding!)).toString(),
         'Receiving-store binding changed across restart',
       );
+      final restartedFloors = await readSecurityFloors(
+        store,
+        receiver.namespace,
+      );
+      require(
+        jsonEncode(saved['fixtureSeededFloors']) ==
+                jsonEncode(restartedFloors) &&
+            jsonEncode(restartedFloors) == jsonEncode(syntheticSecurityFloors),
+        'Protected security floors changed across restart',
+      );
+      final senderDb = scenario.openDatabase(scenario.source);
+      try {
+        final sender = security('sender');
+        await sender.start(senderDb);
+        senderIdentity = identityReceipt(sender);
+        senderBindingSha256 = await bindingSha256(senderDb);
+        require(
+          jsonEncode(saved['sender']) == jsonEncode(senderIdentity),
+          'Sender identity changed across process restart',
+        );
+        require(
+          saved['senderBindingSha256'] == senderBindingSha256,
+          'Sender store binding changed across process restart',
+        );
+      } finally {
+        await senderDb.close();
+      }
       await scenario.restart(scope().db);
       File(p.join(scenario.receiver.receipts.path, 'identity-restart.json'))
           .writeAsStringSync(
@@ -142,6 +239,9 @@ Future<void> main() async {
               'run': run,
               'passed': true,
               'receiver': before,
+              'sender': senderIdentity,
+              'senderBindingSha256': senderBindingSha256,
+              'fixtureSeededFloors': restartedFloors,
             }),
             flush: true,
           );
@@ -152,6 +252,69 @@ Future<void> main() async {
     debugPrint('IDENTITY ${action.name} FAIL');
     rethrow;
   }
+}
+
+const syntheticSecurityFloors = {
+  'authority.test-company': 7,
+  'revocation.test-device': 11,
+};
+
+Future<void> seedSyntheticSecurityFloors(
+  NativeInstallationSecureStore store,
+  InstallationSecurity installation,
+  AppDatabase db,
+) async {
+  require(
+    installation.namespace.startsWith('synthetic.identity.'),
+    'Security-floor fixture requires a synthetic namespace',
+  );
+  final current = await store.readState(installation.namespace);
+  require(current != null, 'Synthetic protected state is missing');
+  final record =
+      jsonDecode(utf8.decode(current!.bytes)) as Map<String, dynamic>;
+  require(
+    (record['floors'] as Map).isEmpty,
+    'Security-floor fixture requires fresh protected state',
+  );
+  // Fixture-only CAS matches the focused tests; enrollment is outside this slice.
+  record['floors'] = syntheticSecurityFloors;
+  await store.compareAndSwapState(
+    installation.namespace,
+    expectedRevision: current.revision,
+    nextRevision: const Uuid().v4(),
+    bytes: Uint8List.fromList(utf8.encode(jsonEncode(record))),
+  );
+  await installation.reconcile(db);
+  identityReceipt(installation);
+  require(
+    jsonEncode(await readSecurityFloors(store, installation.namespace)) ==
+        jsonEncode(syntheticSecurityFloors),
+    'Synthetic security-floor CAS readback differs',
+  );
+}
+
+Future<Map<String, int>> readSecurityFloors(
+  NativeInstallationSecureStore store,
+  String namespace,
+) async {
+  final state = await store.readState(namespace);
+  require(state != null, 'Protected security floors are missing');
+  final record = jsonDecode(utf8.decode(state!.bytes)) as Map<String, dynamic>;
+  return Map<String, int>.from(record['floors'] as Map);
+}
+
+Future<String> bindingSha256(AppDatabase db) async {
+  final binding = await db.settingsDao.getSetting(kInstallationBindingKey);
+  require(binding != null, 'Installation binding is missing');
+  return sha256.convert(utf8.encode(binding!)).toString();
+}
+
+Map<String, Object?> withoutRestoreMetadata(Map<String, Object?> receipt) {
+  final settings = Map<String, Object?>.from(receipt['settings'] as Map)
+    ..remove(kInstallationBindingKey)
+    ..remove(kLastBackupSourceKey)
+    ..remove(kLastBackupAtKey);
+  return {...receipt, 'settings': settings};
 }
 
 Map<String, Object?> identityReceipt(InstallationSecurity installation) {
