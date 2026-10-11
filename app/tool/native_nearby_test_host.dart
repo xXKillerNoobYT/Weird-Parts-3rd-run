@@ -196,6 +196,7 @@ final class NativeTestHost {
     required this.run,
     required this.platform,
     this.observeContextBudget = const Duration(seconds: 3),
+    this.observeContextElapsed,
   }) {
     if (observeContextBudget <= Duration.zero ||
         observeContextBudget > const Duration(seconds: 3)) {
@@ -210,6 +211,10 @@ final class NativeTestHost {
   final NativeTestHostTransport transport;
   final String run, platform;
   final Duration observeContextBudget;
+
+  /// Test-only monotonic elapsed time since the current observation began.
+  /// When omitted, each observation uses a fresh real Stopwatch.
+  final Duration Function()? observeContextElapsed;
   String? _isolate;
   TestSession? _session;
   bool _configureAttempted = false;
@@ -393,11 +398,13 @@ final class NativeTestHost {
     Map<String, Object>? last;
     int? nativeRemainingAtStart;
     Duration remaining() {
-      var micros =
-          observeContextBudget.inMicroseconds - clock.elapsedMicroseconds;
+      final elapsed =
+          observeContextElapsed?.call().inMicroseconds ??
+          clock.elapsedMicroseconds;
+      var micros = observeContextBudget.inMicroseconds - elapsed;
       final native = nativeRemainingAtStart;
       if (native != null) {
-        final nativeMicros = native * 1000 - clock.elapsedMicroseconds;
+        final nativeMicros = native * 1000 - elapsed;
         if (nativeMicros < micros) micros = nativeMicros;
       }
       if (micros <= 0) _reject(NativeTestHostError.rpcTimeout);
