@@ -200,6 +200,44 @@ void main() {
     expect(find.byType(FloatingActionButton), findsOneWidget);
   });
 
+  testWidgets('Jobs search matches job number and explains no matches',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    final riversideId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Riverside Apartments',
+      deviceId: deviceId,
+    );
+    final mountainId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Mountain Shop',
+      deviceId: deviceId,
+    );
+    await db.customStatement(
+      'UPDATE jobs SET job_number = ? WHERE id = ?',
+      ['WP-2048', riversideId],
+    );
+    await db.customStatement(
+      'UPDATE jobs SET job_number = ? WHERE id = ?',
+      ['WP-4096', mountainId],
+    );
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+
+    await tester.enterText(find.byType(TextField).first, '2048');
+    await tester.pump();
+    expect(find.text('Riverside Apartments'), findsOneWidget);
+    expect(find.text('Mountain Shop'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).first, 'missing');
+    await tester.pump();
+    expect(find.text('No jobs match your search'), findsOneWidget);
+    expect(find.text('No active jobs'), findsNothing);
+  });
+
   testWidgets('PIN unlock from catalog edit does not crash with folders',
       (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
