@@ -10,6 +10,7 @@ import 'features/nearby/nearby_protocol.dart';
 import 'features/pin/pin_service.dart';
 import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
+import 'features/installation/installation_security.dart';
 
 class AppScope extends InheritedWidget {
   const AppScope({
@@ -19,6 +20,7 @@ class AppScope extends InheritedWidget {
     required this.wipeLocalData,
     required this.restoreFromBackup,
     this.restoreFromPayload,
+    this.installation,
     required super.child,
     super.key,
   });
@@ -30,6 +32,7 @@ class AppScope extends InheritedWidget {
   final Future<void> Function(List<int> fileBytes, String password)
   restoreFromBackup;
   final Future<void> Function(BackupPayload payload)? restoreFromPayload;
+  final InstallationSecurity? installation;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;
@@ -54,6 +57,7 @@ class WiredPartsApp extends StatefulWidget {
     this.reset = const LocalDataReset(),
     this.failDeviceProfileWrite = false,
     this.beforeRestore,
+    this.installation,
     super.key,
   });
 
@@ -67,6 +71,7 @@ class WiredPartsApp extends StatefulWidget {
 
   /// Test hook: after `_wiping` is set, before decrypt. Production is a no-op.
   final Future<void> Function()? beforeRestore;
+  final InstallationSecurity? installation;
 
   @override
   State<WiredPartsApp> createState() => _WiredPartsAppState();
@@ -144,10 +149,16 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       throw const RestoreBusyException();
     }
     _wiping = true;
+    var closed = false;
     try {
+      await widget.installation?.prepareReset();
       await _db.close();
+      closed = true;
       await widget.reset.wipeFiles();
-      await _reopen();
+      await _reopen(resetIdentity: true);
+    } catch (_) {
+      if (closed) await _reopen();
+      rethrow;
     } finally {
       _wiping = false;
       BackupIo.end();
@@ -199,6 +210,8 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     final keepDeviceId = _deviceId;
     var closed = false;
     AppDatabase? next;
+    InstallationRestoreIntent? intent;
+    var replacementReturned = false;
     try {
       await widget.beforeRestore?.call();
       final payload = await load();
@@ -211,6 +224,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
           'Local device profile does not match this installation',
         );
       }
+      intent = await widget.installation?.prepareBusinessRestore(_db);
       await _db.close();
       closed = true;
       await BackupStore(
@@ -220,9 +234,19 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       ).replaceWithPayload(
         payload: payload,
         localDeviceProfile: localDeviceProfile,
+        localInstallationBinding: intent?.binding,
         reset: widget.reset,
       );
+      replacementReturned = true;
       next = widget.reopenDatabase?.call() ?? AppDatabase();
+      if (widget.installation case final installation?) {
+        if (installation.readiness != InstallationReadiness.unsupported) {
+          await installation.reconcile(next);
+          if (installation.readiness != InstallationReadiness.ready) {
+            throw StateError('Restored installation binding needs recovery');
+          }
+        }
+      }
       try {
         await next.partsDao.relativizeAbsolutePhotoPaths();
         await afterOpen(next, payload);
@@ -232,6 +256,17 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     } catch (e) {
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
+        if (!replacementReturned && intent != null) {
+          try {
+            if (!await BackupStore(supportDir: widget.reset.supportDir)
+                .hasInterruptedRestore()) {
+              await widget.installation!.abortBusinessRestore(next, intent);
+            }
+          } catch (_) {
+            // An uncertain replacement keeps its pending security intent.
+          }
+        }
+        await widget.installation?.start(next);
         if (mounted) {
           setState(() => _bindLive(next!, keepDeviceId));
         }
@@ -253,10 +288,15 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     _generation++;
   }
 
-  Future<void> _reopen() async {
+  Future<void> _reopen({bool resetIdentity = false}) async {
     final next = widget.reopenDatabase?.call() ?? AppDatabase();
     var bound = false;
     try {
+      if (resetIdentity) {
+        await widget.installation?.completeReset(next);
+      } else {
+        await widget.installation?.start(next);
+      }
       final deviceId = await next.settingsDao.ensureDeviceId();
       if (!mounted) return;
       setState(() => _bindLive(next, deviceId));
@@ -275,6 +315,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       wipeLocalData: _wipeLocalData,
       restoreFromBackup: _restoreFromBackup,
       restoreFromPayload: _restoreFromPayload,
+      installation: widget.installation,
       child: MaterialApp(
         title: 'Wired Parts',
         scaffoldMessengerKey: _messenger,
@@ -286,7 +327,30 @@ class _WiredPartsAppState extends State<WiredPartsApp>
           absorbing: _exiting,
           child: ExcludeFocus(
             excluding: _exiting,
-            child: navigator ?? const SizedBox.shrink(),
+            child: Column(
+              children: [
+                if (widget.installation?.readiness ==
+                        InstallationReadiness.needsRecovery ||
+                    widget.installation?.readiness ==
+                        InstallationReadiness.unavailable)
+                  Material(
+                    color: Colors.amber,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          widget.installation?.readiness ==
+                                  InstallationReadiness.unavailable
+                              ? 'Installation security is unavailable. Company operations, restore and reset are paused.'
+                              : 'Installation identity needs recovery. Company operations are unavailable.',
+                        ),
+                      ),
+                    ),
+                  ),
+                Expanded(child: navigator ?? const SizedBox.shrink()),
+              ],
+            ),
           ),
         ),
         home: HomeShell(key: ValueKey(_generation)),
