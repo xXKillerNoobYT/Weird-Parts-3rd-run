@@ -14,6 +14,7 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 import 'backup_recovery_scenario.dart';
+import 'identity_nearby_receipts.dart';
 
 // Uses the existing guarded synthetic recovery workspaces. It never opens the
 // default business directories or writes private key material into receipts.
@@ -24,6 +25,12 @@ Future<void> main() async {
     throw ArgumentError('A fresh 1-32 character synthetic run is required');
   }
   final action = RecoveryScenario.actionForRun(run);
+  const nearbyRole = String.fromEnvironment('IDENTITY_NEARBY_ROLE');
+  if (nearbyRole.isNotEmpty &&
+      nearbyRole != 'source' &&
+      nearbyRole != 'receiver') {
+    throw ArgumentError('IDENTITY_NEARBY_ROLE must be source or receiver');
+  }
   final scenario = RecoveryScenario.open(run: run, action: action);
   PathProviderPlatform.instance = scenario.receiver;
   const store = NativeInstallationSecureStore();
@@ -79,6 +86,46 @@ Future<void> main() async {
   }
 
   try {
+    Future<void> nearbyValidation() async {
+      final nearby = IdentityNearbyReceipts(scenario, nearbyRole);
+      Future<Map<String, Object?>> observe() async {
+        final pin = scope().pin;
+        late bool syntheticPinUnlocks;
+        late bool wrongPinRejected;
+        try {
+          syntheticPinUnlocks = await pin.unlock('1234');
+          pin.lock();
+          wrongPinRejected = !await pin.unlock('9999');
+        } finally {
+          pin.lock();
+        }
+        return {
+          'syntheticPinUnlocks': syntheticPinUnlocks,
+          'wrongPinRejected': wrongPinRejected,
+          'identity': identityReceipt(receiver),
+          'floors': await readSecurityFloors(store, receiver.namespace),
+          'bindingSha256': await bindingSha256(scope().db),
+          'pinSha256': sha256
+              .convert(
+                utf8.encode(
+                  (await scope().db.settingsDao.getSetting(
+                        'editor_pin_hash',
+                      )) ??
+                      '',
+                ),
+              )
+              .toString(),
+          'shop': await scenario.receipt(scope().db, scenario.receiver),
+        };
+      }
+
+      await nearby.captureOrRestart(observe);
+    }
+
+    if (nearbyRole.isNotEmpty && action == RecoveryAction.restart) {
+      await nearbyValidation();
+      return;
+    }
     if (action == RecoveryAction.exercise) {
       require(
         before['id'] != senderIdentity!['id'],
@@ -247,6 +294,7 @@ Future<void> main() async {
           );
     }
     debugPrint('IDENTITY ${action.name} PASS: ${scenario.receiver.root.path}');
+    if (nearbyRole.isNotEmpty) await nearbyValidation();
   } catch (_) {
     exitCode = 1;
     debugPrint('IDENTITY ${action.name} FAIL');
