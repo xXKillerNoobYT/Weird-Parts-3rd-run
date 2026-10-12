@@ -149,16 +149,16 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       throw const RestoreBusyException();
     }
     _wiping = true;
-    var closed = false;
     try {
       await widget.installation?.prepareReset();
       await _db.close();
-      closed = true;
-      await widget.reset.wipeFiles();
+      try {
+        await widget.reset.wipeFiles();
+      } catch (_) {
+        await _reopen();
+        rethrow;
+      }
       await _reopen(resetIdentity: true);
-    } catch (_) {
-      if (closed) await _reopen();
-      rethrow;
     } finally {
       _wiping = false;
       BackupIo.end();
