@@ -14,12 +14,14 @@ import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/jobs/jobs_repository.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 
 class FakeSecureStore implements InstallationSecureStore {
   final states = <String, ProtectedInstallationState>{};
   bool failNextWrite = false;
   bool failReads = false;
+  int writeCalls = 0;
   @override
   Future<ProtectedInstallationState?> readState(String namespace) async {
     if (failReads) throw PlatformException(code: 'installation_unavailable');
@@ -33,6 +35,7 @@ class FakeSecureStore implements InstallationSecureStore {
     required String nextRevision,
     required Uint8List bytes,
   }) async {
+    writeCalls++;
     if (failNextWrite) {
       failNextWrite = false;
       throw PlatformException(code: 'installation_unavailable');
@@ -446,6 +449,52 @@ void main() {
       expect(store.states, isEmpty);
     },
   );
+
+  test('malformed and unsupported protected state refuses replacement while local jobs remain usable', () async {
+    final store = FakeSecureStore();
+    final db = open(temporary());
+    addTearDown(db.close);
+    final initial = security(store);
+    await initial.start(db);
+    final binding = await db.settingsDao.getSetting(kInstallationBindingKey);
+    final original = store.states[initial.namespace]!;
+    final record =
+        jsonDecode(utf8.decode(original.bytes)) as Map<String, dynamic>;
+    final jobs = JobsRepository(db, await db.settingsDao.ensureDeviceId());
+    final originalJob = await jobs.createJob('Existing offline job');
+
+    for (final invalid in {
+      'malformed JSON': '{',
+      'unsupported version': jsonEncode({...record, 'v': 2}),
+    }.entries) {
+      final corrupted = ProtectedInstallationState(
+        original.revision,
+        Uint8List.fromList(utf8.encode(invalid.value)),
+      );
+      store.states[initial.namespace] = corrupted;
+      final writesBefore = store.writeCalls;
+      final restarted = security(store);
+      await restarted.start(db);
+
+      expect(
+        restarted.readiness,
+        InstallationReadiness.needsRecovery,
+        reason: invalid.key,
+      );
+      expect(restarted.identity, isNull, reason: invalid.key);
+      expect(restarted.canUseCompanyOperations, isFalse);
+      expect(store.writeCalls, writesBefore);
+      expect(store.states[initial.namespace], same(corrupted));
+      expect(await db.settingsDao.getSetting(kInstallationBindingKey), binding);
+      expect((await jobs.getJob(originalJob))!.name, 'Existing offline job');
+      final added = await jobs.createJob('Local job after ${invalid.key}');
+      expect(
+        (await jobs.getJob(added))!.name,
+        'Local job after ${invalid.key}',
+      );
+      expect(store.writeCalls, writesBefore);
+    }
+  });
 
   test('reset rotates identity, retains floors and requires the new database binding', () async {
     final store = FakeSecureStore();
