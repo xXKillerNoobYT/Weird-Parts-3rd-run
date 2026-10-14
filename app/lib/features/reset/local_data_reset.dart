@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../data/sqlite_file.dart';
+import '../backup/backup_store.dart' show requireLegacyBusinessFile;
 
 /// Deletes the on-disk sqlite file (plus WAL/SHM), part photos, and restore
 /// leftovers (marker, staging, `.restore-bak`) so reopen cannot promote a
@@ -49,6 +50,11 @@ class LocalDataReset {
 
   Future<void> wipeFiles() async {
     final dir = await _support();
+    requireLegacyBusinessFile(File(p.join(dir.path, kSqliteFileName)));
+    final documents = await _documents();
+    if (documents != null) {
+      requireLegacyBusinessFile(File(p.join(documents.path, kSqliteFileName)));
+    }
     final marker = File(p.join(dir.path, kRestoreSwapMarkerName));
     if (await marker.exists()) {
       await marker.delete();
@@ -69,8 +75,7 @@ class LocalDataReset {
     }
     await _deleteSqliteIn(dir);
     await clearDocumentsLeftover();
-    final photos =
-        photosDir ?? Directory(p.join(dir.path, 'part_photos'));
+    final photos = photosDir ?? Directory(p.join(dir.path, 'part_photos'));
     if (await photos.exists()) {
       await photos.delete(recursive: true);
     }

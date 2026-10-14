@@ -15,6 +15,7 @@ import 'package:wired_parts/features/pin/pin_service.dart';
 
 import 'backup_recovery_scenario.dart';
 import 'identity_nearby_receipts.dart';
+import 'job_line_native_validation.dart';
 
 // Uses the existing guarded synthetic recovery workspaces. It never opens the
 // default business directories or writes private key material into receipts.
@@ -23,6 +24,11 @@ Future<void> main() async {
   const run = String.fromEnvironment('RECOVERY_RUN');
   if (!RegExp(r'^[a-z0-9][a-z0-9-]{0,31}$').hasMatch(run)) {
     throw ArgumentError('A fresh 1-32 character synthetic run is required');
+  }
+  const jobLine = bool.fromEnvironment('IDENTITY_JOB_LINE');
+  if (jobLine) {
+    await runJobLineNativeValidation(run);
+    return;
   }
   final action = RecoveryScenario.actionForRun(run);
   const nearbyRole = String.fromEnvironment('IDENTITY_NEARBY_ROLE');
