@@ -758,33 +758,58 @@ void main() {
 
   test('failed recover rename keeps staging and marker', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-keep-stage-');
-    addTearDown(() {
-      try {
-        dest.statSync();
-        Process.runSync('chmod', ['u+w', dest.path]);
-      } catch (_) {}
-      dest.deleteSync(recursive: true);
-    });
+    addTearDown(() => dest.deleteSync(recursive: true));
 
     final restored = await sqliteBytesWithSetting(key: 'marker', value: 'new');
     final staging = Directory(p.join(dest.path, kRestoreStagingName))
       ..createSync();
-    File(p.join(staging.path, kSqliteFileName)).writeAsBytesSync(restored);
-    File(p.join(dest.path, kRestoreSwapMarkerName))
-        .writeAsStringSync('in-progress');
-    Process.runSync('chmod', ['a-w', dest.path]);
+    final stagedSqlite = File(p.join(staging.path, kSqliteFileName))
+      ..writeAsBytesSync(restored);
+    final photoBytes = [5, 8, 13, 21];
+    final stagedPhotos = Directory(p.join(staging.path, 'part_photos'))
+      ..createSync();
+    final stagedPhoto = File(p.join(stagedPhotos.path, 'recover.jpg'))
+      ..writeAsBytesSync(photoBytes);
+    final marker = File(p.join(dest.path, kRestoreSwapMarkerName))
+      ..writeAsStringSync(kRestoreSwapMarkerInProgress);
+    final markerBytes = marker.readAsBytesSync();
+    final liveSqlite = File(p.join(dest.path, kSqliteFileName));
+    // A file cannot be renamed over a directory on any supported platform.
+    // This produces a real filesystem failure without chmod or a fake File.
+    final blocker = Directory(liveSqlite.path)..createSync();
+    expect(
+      FileSystemEntity.typeSync(blocker.path, followLinks: false),
+      FileSystemEntityType.directory,
+    );
+    expect(liveSqlite.existsSync(), isFalse);
 
     expect(
       () => recoverInterruptedRestore(supportDir: dest),
       throwsA(isA<FileSystemException>()),
     );
-    Process.runSync('chmod', ['u+w', dest.path]);
-    expect(
-      File(p.join(dest.path, kRestoreSwapMarkerName)).existsSync(),
-      isTrue,
-    );
-    expect(File(p.join(staging.path, kSqliteFileName)).existsSync(), isTrue);
-    expect(File(p.join(dest.path, kSqliteFileName)).existsSync(), isFalse);
+    expect(marker.readAsBytesSync(), markerBytes);
+    expect(stagedSqlite.readAsBytesSync(), restored);
+    expect(stagedPhoto.readAsBytesSync(), photoBytes);
+    expect(blocker.existsSync(), isTrue);
+    expect(liveSqlite.existsSync(), isFalse);
+
+    // Remove only the empty obstruction, then retry the real recovery path.
+    blocker.deleteSync();
+    expect(() => recoverInterruptedRestore(supportDir: dest), returnsNormally);
+    expect(liveSqlite.readAsBytesSync(), restored);
+    final livePhoto = File(p.join(dest.path, 'part_photos', 'recover.jpg'));
+    expect(livePhoto.readAsBytesSync(), photoBytes);
+    expect(marker.existsSync(), isFalse);
+    expect(staging.existsSync(), isFalse);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+
+    final recoveredSqlite = liveSqlite.readAsBytesSync();
+    expect(() => recoverInterruptedRestore(supportDir: dest), returnsNormally);
+    expect(liveSqlite.readAsBytesSync(), recoveredSqlite);
+    expect(livePhoto.readAsBytesSync(), photoBytes);
+    expect(await readSqliteSetting(dest, 'marker'), 'new');
+    expect(marker.existsSync(), isFalse);
+    expect(staging.existsSync(), isFalse);
   });
 
   test(

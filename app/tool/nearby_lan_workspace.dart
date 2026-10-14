@@ -25,6 +25,7 @@ class ValidationWorkspace extends PathProviderPlatform {
     required String run,
     required ValidationRole role,
     Directory? temporaryDirectory,
+    bool requireExisting = false,
   }) {
     if (!RegExp(r'^[a-z0-9][a-z0-9-]{0,47}$').hasMatch(run)) {
       throw ArgumentError(
@@ -77,6 +78,9 @@ class ValidationWorkspace extends PathProviderPlatform {
           }
         }
       } else {
+        if (requireExisting) {
+          throw StateError('Refusing missing initialized validation directory');
+        }
         root.createSync();
         marker.writeAsStringSync(
           jsonEncode({
@@ -88,6 +92,14 @@ class ValidationWorkspace extends PathProviderPlatform {
           }),
           flush: true,
         );
+      }
+      if (requireExisting &&
+          FileSystemEntity.typeSync(
+                p.join(root.path, 'support', 'wired_parts.sqlite'),
+                followLinks: false,
+              ) !=
+              FileSystemEntityType.file) {
+        throw StateError('Refusing missing initialized validation database');
       }
       final workspace = ValidationWorkspace._(root, run, role, initialized);
       workspace._heldLock = heldLock;
