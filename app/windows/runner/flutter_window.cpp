@@ -16,6 +16,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "utils.h"
+#include "installation_security.h"
 
 namespace {
 
@@ -124,6 +125,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterInstallationSecurity(flutter_controller_->engine()->messenger());
 
   flutter::MethodChannel<flutter::EncodableValue> nearby_wifi_channel(
       flutter_controller_->engine()->messenger(), "wired_parts/nearby_wifi",

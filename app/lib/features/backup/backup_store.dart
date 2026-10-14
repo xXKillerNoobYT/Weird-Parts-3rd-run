@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../data/app_database.dart';
 import '../../data/sqlite_file.dart';
 import '../reset/local_data_reset.dart';
+import '../installation/installation_security.dart';
 import 'backup_codec.dart';
 
 const kLastBackupAtKey = 'last_backup_at';
@@ -324,6 +325,9 @@ class BackupStore {
   Future<Directory> _support() async =>
       supportDir ?? await getApplicationSupportDirectory();
 
+  Future<bool> hasInterruptedRestore() async =>
+      File(p.join((await _support()).path, kRestoreSwapMarkerName)).exists();
+
   Future<Directory> _photos() async {
     if (photosDir != null) return photosDir!;
     final dir = await _support();
@@ -342,6 +346,7 @@ class BackupStore {
     required DateTime createdAt,
     required Uint8List sqliteBytes,
   }) async {
+    final businessBytes = await _businessSnapshot(sqliteBytes);
     final photos = <String, Uint8List>{};
     final dir = await _photos();
     if (await dir.exists()) {
@@ -355,9 +360,33 @@ class BackupStore {
     return BackupPayload(
       createdAt: createdAt.toUtc(),
       sourceDeviceId: sourceDeviceId,
-      sqliteBytes: sqliteBytes,
+      sqliteBytes: businessBytes,
       photos: photos,
     );
+  }
+
+  Future<Uint8List> _businessSnapshot(Uint8List bytes) async {
+    backupSqliteSchemaVersion(bytes);
+    final staging = await Directory.systemTemp.createTemp(
+      'wired-parts-business-export-',
+    );
+    final file = File(p.join(staging.path, kSqliteFileName));
+    AppDatabase? copy;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      copy = AppDatabase.forTesting(NativeDatabase(file));
+      await copy.customStatement('DELETE FROM app_settings WHERE key = ?', [
+        kInstallationBindingKey,
+      ]);
+      await copy.customStatement('VACUUM');
+      await checkpointWalForExport(copy);
+      await copy.close();
+      copy = null;
+      return await file.readAsBytes();
+    } finally {
+      await copy?.close();
+      await staging.delete(recursive: true);
+    }
   }
 
   Future<void> writePayload(BackupPayload payload) async {
@@ -390,6 +419,7 @@ class BackupStore {
   Future<void> replaceWithPayload({
     required BackupPayload payload,
     DeviceProfile? localDeviceProfile,
+    String? localInstallationBinding,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
     backupSqliteSchemaVersion(payload.sqliteBytes);
@@ -437,6 +467,7 @@ class BackupStore {
       await _validateStagedSqlite(
         File(p.join(staging.path, kSqliteFileName)),
         localDeviceProfile: localDeviceProfile,
+        localInstallationBinding: localInstallationBinding,
       );
       await _swapStagingIntoLive(live: live, staging: staging);
     } finally {
@@ -462,6 +493,7 @@ class BackupStore {
   Future<void> _validateStagedSqlite(
     File sqlite, {
     DeviceProfile? localDeviceProfile,
+    String? localInstallationBinding,
   }) async {
     if (!await sqlite.exists()) {
       throw const BackupFormatException('Backup database is missing');
@@ -517,6 +549,15 @@ class BackupStore {
           );
         }
       }
+      await db.customStatement('DELETE FROM app_settings WHERE key = ?', [
+        kInstallationBindingKey,
+      ]);
+      if (localInstallationBinding != null) {
+        await db.settingsDao.setSetting(
+          kInstallationBindingKey,
+          localInstallationBinding,
+        );
+      }
       if (localDeviceProfile != null) {
         await db.settingsDao.restoreLocalDeviceProfile(
           localDeviceProfile,
@@ -528,8 +569,8 @@ class BackupStore {
             'Staged local device profile differs',
           );
         }
-        await checkpointWalForExport(db);
       }
+      await checkpointWalForExport(db);
     } on BackupFormatException {
       rethrow;
     } catch (e) {
