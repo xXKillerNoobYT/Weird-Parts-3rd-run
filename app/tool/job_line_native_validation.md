@@ -33,5 +33,13 @@ bytes. Preserve both files and binary/source hashes as the acceptance record.
 Logical hashes cover the declared Jobs and job-line command tables. They do not
 claim catalog, photo, or whole-shop restore acceptance.
 
+Bootstrap failure closes every database acquired before fixture creation
+returns. The tool shows a redacted FAIL status and writes a unique
+`job-line-failure-<pid>-<timestamp>.json`, preserving earlier evidence. Its
+stage, readiness and cleanup outcome describe observed startup state. Native
+cause remains `unknown`; raw exceptions, native messages and credential bytes
+are excluded. A failure writes neither an exercise nor restart PASS receipt.
+Only the actual native store can produce native acceptance PASS evidence.
+
 Without `IDENTITY_JOB_LINE=true`, the existing recovery and Nearby validation
 behavior remains in its history-free synthetic stores.

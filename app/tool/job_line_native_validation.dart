@@ -17,11 +17,16 @@ import 'nearby_lan_workspace.dart';
 
 /// An opt-in phase of the existing installation validation entry point. Every
 /// signed fixture and protected pin is confined to fresh owned synthetic stores.
-Future<void> runJobLineNativeValidation(String run) async {
+Future<void> runJobLineNativeValidation(
+  String run, {
+  InstallationSecureStore validationStore =
+      const NativeInstallationSecureStore(),
+  Directory? temporaryDirectory,
+}) async {
   final fixtureRun = 'jobline-$run';
   final marker = File(
     p.join(
-      Directory.systemTemp.resolveSymbolicLinksSync(),
+      (temporaryDirectory ?? Directory.systemTemp).resolveSymbolicLinksSync(),
       'wired-parts-lan-$fixtureRun-sender',
       'receipts',
       'job-line-exercise.json',
@@ -32,20 +37,23 @@ Future<void> runJobLineNativeValidation(String run) async {
     run: fixtureRun,
     role: ValidationRole.sender,
     requireExisting: restart,
+    temporaryDirectory: temporaryDirectory,
   );
   ValidationWorkspace? receiver;
   final databases = <AppDatabase>[];
+  var phase = 'bootstrap';
   try {
     receiver = ValidationWorkspace.open(
       run: fixtureRun,
       role: ValidationRole.receiver,
       requireExisting: restart,
+      temporaryDirectory: temporaryDirectory,
     );
     final files = [
       File(p.join(source.support.path, kSqliteFileName)),
       File(p.join(receiver.support.path, kSqliteFileName)),
     ];
-    const store = NativeInstallationSecureStore();
+    final store = validationStore;
     String namespace(int i) => 'synthetic.jobline.$run.${i == 0 ? 's' : 'r'}';
     validateInstallationNamespace(namespace(0));
     validateInstallationNamespace(namespace(1));
@@ -67,6 +75,7 @@ Future<void> runJobLineNativeValidation(String run) async {
         namespaceForStore: namespace,
       );
       databases.addAll(fixture.databases);
+      phase = 'commands';
       final command = fixture.command(
         const JobLinePatch(
           quantities: JobLineQuantities(needed: 9, shopPull: 15, unit: 'ea'),
@@ -157,6 +166,7 @@ Future<void> runJobLineNativeValidation(String run) async {
       source.markInitialized();
       receiver.markInitialized();
     } else {
+      phase = 'restart';
       _require(
         !receiptFile.existsSync(),
         'Native recovery receipt is already sealed',
@@ -263,6 +273,10 @@ Future<void> runJobLineNativeValidation(String run) async {
     for (final db in databases) {
       await db.close();
     }
+    _require(
+      validationStore.runtimeType == NativeInstallationSecureStore,
+      'Native acceptance requires the actual native secure store',
+    );
     receiptFile.writeAsStringSync(jsonEncode(evidence), flush: true);
     debugPrint(
       'JOB_LINE_NATIVE ${restart ? 'restart' : 'exercise'} PASS pid=$pid',
@@ -273,15 +287,59 @@ Future<void> runJobLineNativeValidation(String run) async {
         message: restart ? 'Native job-line restart PASS' : 'Native job-line exercise PASS. Quit normally, then reopen the same run.',
       ),
     );
-  } catch (_) {
+  } catch (error) {
+    var databasesClosed =
+        error is! FixtureBootstrapFailure || error.databasesClosed;
     for (final db in databases) {
-      await db.close();
+      try {
+        await db.close();
+      } catch (_) {
+        databasesClosed = false;
+      }
+    }
+    final failure = {
+      'format': 1,
+      'run': run,
+      'stage': phase,
+      'passed': false,
+      'pid': pid,
+      'nativeStore': validationStore is NativeInstallationSecureStore,
+      'databasesClosed': databasesClosed,
+      'nativeCause': 'unknown',
+      if (error is FixtureBootstrapFailure) ...{
+        'bootstrapStage': error.stage.name,
+        'storeIndex': error.storeIndex,
+        'readiness': error.readiness?.name,
+      },
+    };
+    var diagnosticWritten = false;
+    try {
+      File(
+        p.join(
+          source.receipts.path,
+          'job-line-failure-$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}.json',
+        ),
+      ).writeAsStringSync(jsonEncode(failure), flush: true);
+      diagnosticWritten = true;
+    } catch (_) {
+      // A failed evidence write must still show failure without raw exceptions.
     }
     source.close();
     receiver?.close();
     exitCode = 1;
-    debugPrint('JOB_LINE_NATIVE FAIL pid=$pid');
-    rethrow;
+    debugPrint(
+      'JOB_LINE_NATIVE FAIL ${jsonEncode(failure)} diagnosticWritten=$diagnosticWritten',
+    );
+    runApp(
+      _NativeValidationWindow(
+        workspaces: const [],
+        message:
+            'Native job-line FAIL ($phase). '
+            'Readiness ${error is FixtureBootstrapFailure ? error.readiness?.name ?? 'unknown' : 'unknown'}. '
+            'Native cause unknown. Databases closed $databasesClosed. '
+            'Diagnostic written $diagnosticWritten.',
+      ),
+    );
   }
 }
 

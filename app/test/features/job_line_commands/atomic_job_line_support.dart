@@ -137,6 +137,23 @@ class FixtureQueryInterceptor extends QueryInterceptor {
   }
 }
 
+enum FixtureBootstrapStage { seed, installation, facts }
+
+final class FixtureBootstrapFailure implements Exception {
+  const FixtureBootstrapFailure({
+    required this.stage,
+    required this.databasesClosed,
+    this.storeIndex,
+    this.readiness,
+  });
+  final FixtureBootstrapStage stage;
+  final int? storeIndex;
+  final InstallationReadiness? readiness;
+  final bool databasesClosed;
+  @override
+  String toString() => 'Synthetic fixture bootstrap failed (${stage.name})';
+}
+
 class AtomicFixture {
   AtomicFixture._(
     this.directory,
@@ -164,6 +181,7 @@ class AtomicFixture {
     List<File>? databaseFiles,
     InstallationSecureStore? nativeStore,
     String Function(int)? namespaceForStore,
+    QueryExecutor Function(File)? databaseExecutor,
   }) async {
     final directory =
         ownedDirectory ??
@@ -190,144 +208,184 @@ class AtomicFixture {
         throw StateError('fixture namespace is not fresh synthetic state');
       }
     }
-    AppDatabase open(int i) => AppDatabase.forTesting(NativeDatabase(files[i]));
-    final a = open(0);
-    final now = DateTime.utc(2026, 1, 1);
-    await a
-        .into(a.jobs)
-        .insert(
-          JobsCompanion.insert(
-            id: job,
-            name: 'Synthetic job',
-            originDeviceId: legacyDevice,
-            createdAt: now,
-            modifiedAt: now,
-          ),
-        );
-    await a
-        .into(a.jobLines)
-        .insert(
-          JobLinesCompanion.insert(
-            id: line,
-            jobId: job,
-            customName: const Value('Synthetic line'),
-            customNotes: const Value('Old custom note'),
-            neededQty: 5,
-            shopPullQty: const Value(1),
-            uom: const Value('ea'),
-            notes: const Value('Old note'),
-            originDeviceId: legacyDevice,
-            createdAt: now,
-            modifiedAt: now,
-          ),
-        );
-    await a
-        .into(a.parts)
-        .insert(
-          PartsCompanion.insert(
-            id: part,
-            name: 'Synthetic part',
-            originDeviceId: legacyDevice,
-            createdAt: now,
-            modifiedAt: now,
-          ),
-        );
-    await a
-        .into(a.brands)
-        .insert(
-          BrandsCompanion.insert(
-            id: brand,
-            name: 'Synthetic brand',
-            originDeviceId: legacyDevice,
-            createdAt: now,
-            modifiedAt: now,
-          ),
-        );
-    await a
-        .into(a.brandVersions)
-        .insert(
-          BrandVersionsCompanion.insert(
-            id: version,
-            partId: part,
-            brandId: brand,
-            mpn: 'Synthetic variance',
-            originDeviceId: legacyDevice,
-            createdAt: now,
-            modifiedAt: now,
-          ),
-        );
-    await a.close();
-    await files[0].copy(files[1].path);
-    final databases = [open(0), open(1)];
-    final stores = [
-      FixtureSecureStore(delegate: nativeStore),
-      FixtureSecureStore(delegate: nativeStore),
-    ];
-    final installs = List.generate(
-      2,
-      (i) => InstallationSecurity(store: stores[i], namespace: namespaces[i]),
-    );
-    for (var i = 0; i < 2; i++) {
-      await installs[i].start(databases[i]);
+    final acquired = <AppDatabase>[];
+    var stage = FixtureBootstrapStage.seed;
+    int? storeIndex;
+    InstallationReadiness? readiness;
+    AppDatabase open(int i) {
+      final db = AppDatabase.forTesting(
+        databaseExecutor?.call(files[i]) ?? NativeDatabase(files[i]),
+      );
+      acquired.add(db);
+      return db;
     }
-    final devices = List.generate(2, (_) => const Uuid().v4());
-    final grants = List.generate(2, (_) => const Uuid().v4());
-    final rootPair = await Ed25519().newKeyPair();
-    final baseline = jobLineLegacyBaselineCommitment(
-      companyId: company,
-      shopId: shop,
-      row: await databases[0].select(databases[0].jobLines).getSingle(),
-    );
-    final facts = <String, Object?>{
-      'v': 1,
-      'company': company,
-      'authority': 1,
-      'policy': 'localContinuity',
-      'devices': [
-        for (var i = 0; i < 2; i++)
-          {
-            'id': devices[i],
-            'installation': installs[i].identity!.id.value,
-            'generation': installs[i].identity!.generation.value,
-            'key': base64Encode(installs[i].identity!.publicKey),
-            'grant': grants[i],
-            'version': 1,
-            'revoked': false,
-            'shops': [shop],
-            'capabilities': ['patchJobLine', 'deleteJobLine'],
-          },
-      ],
-      'users': [
-        for (final id in [user, secondUser])
-          {
-            'id': id,
-            'credential': 1,
-            'permission': 1,
-            'revoked': false,
-            'shops': [shop],
-            'capabilities': ['patchJobLine', 'deleteJobLine'],
-          },
-      ],
-      'entities': [
-        {'kind': 'jobLine', 'id': line, 'shop': shop, 'baseline': baseline},
-        {'kind': 'job', 'id': job, 'shop': shop},
-        {'kind': 'part', 'id': part},
-        {'kind': 'brandVersion', 'id': version},
-      ],
-    };
-    final fixture = AtomicFixture._(
-      directory,
-      databases,
-      stores,
-      installs,
-      devices,
-      grants,
-      facts,
-      rootPair,
-      files,
-    );
-    await fixture.publishFacts();
-    return fixture;
+
+    try {
+      final a = open(0);
+      final now = DateTime.utc(2026, 1, 1);
+      await a
+          .into(a.jobs)
+          .insert(
+            JobsCompanion.insert(
+              id: job,
+              name: 'Synthetic job',
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      await a
+          .into(a.jobLines)
+          .insert(
+            JobLinesCompanion.insert(
+              id: line,
+              jobId: job,
+              customName: const Value('Synthetic line'),
+              customNotes: const Value('Old custom note'),
+              neededQty: 5,
+              shopPullQty: const Value(1),
+              uom: const Value('ea'),
+              notes: const Value('Old note'),
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      await a
+          .into(a.parts)
+          .insert(
+            PartsCompanion.insert(
+              id: part,
+              name: 'Synthetic part',
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      await a
+          .into(a.brands)
+          .insert(
+            BrandsCompanion.insert(
+              id: brand,
+              name: 'Synthetic brand',
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      await a
+          .into(a.brandVersions)
+          .insert(
+            BrandVersionsCompanion.insert(
+              id: version,
+              partId: part,
+              brandId: brand,
+              mpn: 'Synthetic variance',
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      await a.close();
+      acquired.remove(a);
+      await files[0].copy(files[1].path);
+      final databases = [open(0), open(1)];
+      final stores = [
+        FixtureSecureStore(delegate: nativeStore),
+        FixtureSecureStore(delegate: nativeStore),
+      ];
+      final installs = List.generate(
+        2,
+        (i) => InstallationSecurity(store: stores[i], namespace: namespaces[i]),
+      );
+      for (var i = 0; i < 2; i++) {
+        stage = FixtureBootstrapStage.installation;
+        storeIndex = i;
+        await installs[i].start(databases[i]);
+        readiness = installs[i].readiness;
+        if (readiness != InstallationReadiness.ready ||
+            installs[i].identity == null ||
+            stores[i].states[namespaces[i]] == null) {
+          throw StateError('Synthetic installation did not become ready');
+        }
+      }
+      stage = FixtureBootstrapStage.facts;
+      storeIndex = null;
+      readiness = null;
+      final devices = List.generate(2, (_) => const Uuid().v4());
+      final grants = List.generate(2, (_) => const Uuid().v4());
+      final rootPair = await Ed25519().newKeyPair();
+      final baseline = jobLineLegacyBaselineCommitment(
+        companyId: company,
+        shopId: shop,
+        row: await databases[0].select(databases[0].jobLines).getSingle(),
+      );
+      final facts = <String, Object?>{
+        'v': 1,
+        'company': company,
+        'authority': 1,
+        'policy': 'localContinuity',
+        'devices': [
+          for (var i = 0; i < 2; i++)
+            {
+              'id': devices[i],
+              'installation': installs[i].identity!.id.value,
+              'generation': installs[i].identity!.generation.value,
+              'key': base64Encode(installs[i].identity!.publicKey),
+              'grant': grants[i],
+              'version': 1,
+              'revoked': false,
+              'shops': [shop],
+              'capabilities': ['patchJobLine', 'deleteJobLine'],
+            },
+        ],
+        'users': [
+          for (final id in [user, secondUser])
+            {
+              'id': id,
+              'credential': 1,
+              'permission': 1,
+              'revoked': false,
+              'shops': [shop],
+              'capabilities': ['patchJobLine', 'deleteJobLine'],
+            },
+        ],
+        'entities': [
+          {'kind': 'jobLine', 'id': line, 'shop': shop, 'baseline': baseline},
+          {'kind': 'job', 'id': job, 'shop': shop},
+          {'kind': 'part', 'id': part},
+          {'kind': 'brandVersion', 'id': version},
+        ],
+      };
+      final fixture = AtomicFixture._(
+        directory,
+        databases,
+        stores,
+        installs,
+        devices,
+        grants,
+        facts,
+        rootPair,
+        files,
+      );
+      await fixture.publishFacts();
+      return fixture;
+    } catch (_) {
+      var closed = true;
+      for (final db in acquired.reversed) {
+        try {
+          await db.close();
+        } catch (_) {
+          closed = false;
+        }
+      }
+      throw FixtureBootstrapFailure(
+        stage: stage,
+        storeIndex: storeIndex,
+        readiness: readiness,
+        databasesClosed: closed,
+      );
+    }
   }
 
   Future<void> publishFacts({Map<String, int>? floors}) async {
