@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
@@ -13,14 +14,18 @@ import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
+import 'package:wired_parts/features/shell/home_shell.dart';
 
 final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
   final states = <String, ProtectedInstallationState>{};
   Future<void> Function(String namespace, Uint8List bytes)? beforeCas;
+  bool unavailable = false;
 
   @override
-  Future<ProtectedInstallationState?> readState(String namespace) async =>
-      states[namespace];
+  Future<ProtectedInstallationState?> readState(String namespace) async {
+    if (unavailable) throw PlatformException(code: 'installation_unavailable');
+    return states[namespace];
+  }
 
   @override
   Future<String> compareAndSwapState(
@@ -50,6 +55,158 @@ final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
 }
 
 void main() {
+  testWidgets('unavailable desktop security never enters legacy routes', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final installation = InstallationSecurity(
+      store: _Store()..unavailable = true,
+      namespace: 'synthetic.unavailable-gate',
+    );
+    await installation.start(db);
+    expect(installation.readiness, InstallationReadiness.unavailable);
+    final support = Directory.systemTemp.createTempSync('unavailable-gate-');
+    addTearDown(() => support.deleteSync(recursive: true));
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: await db.settingsDao.ensureDeviceId(),
+        installation: installation,
+        enableCompanyBootstrap: true,
+        reset: LocalDataReset(supportDir: support),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Company recovery needed'), findsOneWidget);
+    expect(find.byType(HomeShell), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    for (final marker in [
+      'empty',
+      'legacy',
+      'facts',
+      'witness',
+      'history',
+      'binding',
+    ]) {
+      testWidgets('$platform $marker routes only clean legacy to HomeShell', (
+        tester,
+      ) async {
+        debugDefaultTargetPlatformOverride = platform;
+        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        addTearDown(db.close);
+        if (marker == 'legacy') {
+          await db.customStatement(
+            "INSERT INTO categories (id, origin_device_id, created_at, modified_at, revision, name) "
+            "VALUES ('legacy-category', 'old-device', 1, 1, 1, 'Electrical')",
+          );
+        } else if (marker == 'facts') {
+          await db.customStatement(
+            "INSERT INTO company_authority_facts (company_id, commitment, signed_bytes) "
+            "VALUES ('company', 'digest', 'bytes')",
+          );
+        } else if (marker == 'witness') {
+          await db.customStatement(
+            "INSERT INTO company_bootstrap_witnesses "
+            "(company_id, bootstrap_id, facts_commitment, package_id, package_digest, status) "
+            "VALUES ('company', 'intent', 'facts', 'package', NULL, 'pending')",
+          );
+        } else if (marker == 'history') {
+          await db.customStatement(
+            "INSERT INTO job_line_audits (receipt_key, audit_bytes) "
+            "VALUES ('receipt', 'bytes')",
+          );
+        } else if (marker == 'binding') {
+          await db.settingsDao.setSetting(
+            kInstallationBindingKey,
+            'copied-installation-binding',
+          );
+        }
+        final installation = InstallationSecurity(
+          store: const NativeInstallationSecureStore(),
+          namespace: 'synthetic.unsupported-$marker',
+        );
+        await installation.start(db);
+        debugDefaultTargetPlatformOverride = null;
+        expect(installation.readiness, InstallationReadiness.unsupported);
+        final support = Directory.systemTemp.createTempSync('mobile-gate-');
+        addTearDown(() => support.deleteSync(recursive: true));
+        await tester.pumpWidget(
+          WiredPartsApp(
+            db: db,
+            pin: PinService(db.settingsDao),
+            deviceId: await db.settingsDao.ensureDeviceId(),
+            installation: installation,
+            enableCompanyBootstrap: true,
+            reset: LocalDataReset(supportDir: support),
+          ),
+        );
+        await tester.pumpAndSettle();
+        if (marker == 'empty' || marker == 'legacy') {
+          expect(find.byType(HomeShell), findsOneWidget);
+          expect(find.text('Jobs'), findsWidgets);
+          expect(find.text('Catalog'), findsWidgets);
+        } else {
+          expect(find.text('Company recovery needed'), findsOneWidget);
+          expect(find.byType(HomeShell), findsNothing);
+          expect(find.text('Jobs'), findsNothing);
+          expect(find.text('Catalog'), findsNothing);
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+    }
+  }
+
+  for (final marker in ['facts', 'witness', 'query failure']) {
+    testWidgets('ready desktop $marker never opens legacy routes', (
+      tester,
+    ) async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      final installation = InstallationSecurity(
+        store: _Store(),
+        namespace: 'synthetic.ready-${marker.replaceAll(' ', '-')}',
+      );
+      await installation.start(db);
+      if (marker == 'facts') {
+        await db.customStatement(
+          "INSERT INTO company_authority_facts (company_id, commitment, signed_bytes) "
+          "VALUES ('company', 'digest', 'bytes')",
+        );
+      } else if (marker == 'witness') {
+        await db.customStatement(
+          "INSERT INTO company_bootstrap_witnesses "
+          "(company_id, bootstrap_id, facts_commitment, package_id, package_digest, status) "
+          "VALUES ('company', 'intent', 'facts', 'package', NULL, 'pending')",
+        );
+      } else {
+        await db.customStatement('DROP TABLE company_bootstrap_witnesses');
+      }
+      final support = Directory.systemTemp.createTempSync('ready-gate-');
+      addTearDown(() => support.deleteSync(recursive: true));
+      await tester.pumpWidget(
+        WiredPartsApp(
+          db: db,
+          pin: PinService(db.settingsDao),
+          deviceId: await db.settingsDao.ensureDeviceId(),
+          installation: installation,
+          enableCompanyBootstrap: true,
+          reset: LocalDataReset(supportDir: support),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Company recovery needed'), findsOneWidget);
+      expect(find.byType(HomeShell), findsNothing);
+      expect(find.text('Jobs'), findsNothing);
+      expect(find.text('Catalog'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   testWidgets(
     'Create Company uses its own locked shell and never exposes legacy tabs after sign-out',
     (tester) async {

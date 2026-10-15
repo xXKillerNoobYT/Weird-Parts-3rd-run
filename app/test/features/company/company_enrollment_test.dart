@@ -69,6 +69,109 @@ final class _MemoryStore
 
 void main() {
   test(
+    'cold restart after facts commit and lost custody needs recovery',
+    () async {
+      final directory = Directory.systemTemp.createTempSync('lost-custody-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final file = File(p.join(directory.path, kSqliteFileName));
+      AppDatabase open() => AppDatabase.forTesting(NativeDatabase(file));
+      final db = open();
+      addTearDown(db.close);
+      final store = _MemoryStore();
+      const namespace = 'synthetic.lost-custody';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await installation.start(db);
+      store.beforeCas = (name, bytes) async {
+        if (name != companyCustodyNamespace(namespace)) return;
+        final state = jsonDecode(utf8.decode(bytes)) as Map;
+        if (state['facts'] != null && state['digest'] != null) {
+          throw StateError('injected after_writeFacts interruption');
+        }
+      };
+      final enrollment = CompanyEnrollment(installation: installation, db: db);
+      await expectLater(
+        enrollment.create(
+          companyName: 'Interrupted Crew',
+          policy: CompanyContinuityPolicy.localContinuity,
+          pin: '1234',
+          recoveryPassphrase: 'separate recovery phrase 123',
+          recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(await db.select(db.companyAuthorityFacts).get(), hasLength(1));
+      expect(await db.select(db.companyBootstrapWitnesses).get(), hasLength(1));
+      expect(
+        store.states.remove(companyCustodyNamespace(namespace)),
+        isNotNull,
+      );
+      await db.close();
+
+      final reopened = open();
+      addTearDown(reopened.close);
+      final restarted = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await restarted.start(reopened);
+      expect(restarted.readiness, InstallationReadiness.ready);
+      expect(
+        await CompanyEnrollment(
+          installation: restarted,
+          db: reopened,
+        ).readStatus(),
+        CompanyBootstrapStatus.needsRecovery,
+      );
+    },
+  );
+
+  for (final marker in ['facts', 'witness', 'history', 'query failure']) {
+    test(
+      'missing custody with $marker needs recovery, never unjoined',
+      () async {
+        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        addTearDown(db.close);
+        final store = _MemoryStore();
+        final installation = InstallationSecurity(
+          store: store,
+          namespace: 'synthetic.missing-custody-${marker.replaceAll(' ', '-')}',
+        );
+        await installation.start(db);
+        if (marker == 'facts') {
+          await db.customStatement(
+            "INSERT INTO company_authority_facts (company_id, commitment, signed_bytes) "
+            "VALUES ('company', 'digest', 'bytes')",
+          );
+        } else if (marker == 'witness') {
+          await db.customStatement(
+            "INSERT INTO company_bootstrap_witnesses "
+            "(company_id, bootstrap_id, facts_commitment, package_id, package_digest, status) "
+            "VALUES ('company', 'intent', 'facts', 'package', NULL, 'pending')",
+          );
+        } else if (marker == 'history') {
+          await db.customStatement(
+            "INSERT INTO job_line_audits (receipt_key, audit_bytes) "
+            "VALUES ('receipt', 'bytes')",
+          );
+        } else {
+          await db.customStatement('DROP TABLE company_bootstrap_witnesses');
+        }
+        final enrollment = CompanyEnrollment(
+          installation: installation,
+          db: db,
+        );
+        expect(
+          await enrollment.readStatus(),
+          CompanyBootstrapStatus.needsRecovery,
+        );
+      },
+    );
+  }
+
+  test(
     'production namespace creates and reopens a signed-in local company',
     () async {
       final directory = Directory.systemTemp.createTempSync(

@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../data/app_database.dart';
 import '../company/company_bootstrap.dart';
+import '../company/company_store_markers.dart';
 import '../job_line_commands/job_line_commands.dart'
     show
         JobLineCommand,

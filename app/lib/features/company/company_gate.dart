@@ -124,6 +124,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
 
   Future<void> _load() async {
     var status = await _enrollment.readStatus();
+    var legacy = status == CompanyBootstrapStatus.legacyUnsupported;
     if (status == CompanyBootstrapStatus.unjoined) {
       try {
         await CompanyBootstrap.preflightFreshShop(
@@ -131,14 +132,29 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
           photosDirectory: await _photos(),
         );
       } on CompanyBootstrapRefusal {
-        // A populated legacy shop remains entirely on its existing routes.
-        if (mounted) setState(() => _legacy = true);
+        // Recheck after preflight: a company marker may have caused refusal.
+        status = await _enrollment.readStatus();
+        legacy = status == CompanyBootstrapStatus.unjoined;
+      } catch (_) {
+        status = CompanyBootstrapStatus.needsRecovery;
       }
     }
     if (!mounted) return;
     setState(() {
       _status = status;
+      _legacy = legacy;
       _recovering = status == CompanyBootstrapStatus.pendingRecovery;
+    });
+  }
+
+  Future<void> _continueLocalShop() async {
+    final status = await _enrollment.readStatus();
+    if (!mounted) return;
+    setState(() {
+      _status = status;
+      _legacy =
+          status == CompanyBootstrapStatus.unjoined ||
+          status == CompanyBootstrapStatus.legacyUnsupported;
     });
   }
 
@@ -359,7 +375,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         ),
       ]);
     }
-    if (_status == CompanyBootstrapStatus.unjoined && _legacy) {
+    if ((_status == CompanyBootstrapStatus.unjoined ||
+            _status == CompanyBootstrapStatus.legacyUnsupported) &&
+        _legacy) {
       return const HomeShell();
     }
     if (_status == CompanyBootstrapStatus.unjoined ||
@@ -488,7 +506,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
           ),
           if (_status == CompanyBootstrapStatus.unjoined)
             TextButton(
-              onPressed: _busy ? null : () => setState(() => _legacy = true),
+              onPressed: _busy ? null : _continueLocalShop,
               child: const Text('Continue local shop'),
             ),
         ],

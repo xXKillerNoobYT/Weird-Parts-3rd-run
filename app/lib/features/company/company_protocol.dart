@@ -194,6 +194,7 @@ final class CompanyIdentity {
 
 enum CompanyBootstrapStatus {
   unjoined,
+  legacyUnsupported,
   pending,
   pendingRecovery,
   active,
@@ -462,12 +463,25 @@ final class CompanyEnrollment {
 
   Future<CompanyBootstrapStatus> readStatus() async {
     try {
+      if (installation.readiness == InstallationReadiness.unsupported) {
+        if (await hasCompanyStoreMarkers(db) ||
+            await db.settingsDao.getSetting(kInstallationBindingKey) != null) {
+          return CompanyBootstrapStatus.needsRecovery;
+        }
+        return CompanyBootstrapStatus.legacyUnsupported;
+      }
       final custody = await _readCustody();
       if (custody == null) {
-        return installation.readiness == InstallationReadiness.ready &&
-                installation._record?.companyTrust == null
-            ? CompanyBootstrapStatus.unjoined
-            : CompanyBootstrapStatus.needsRecovery;
+        if (await hasCompanyStoreMarkers(db) ||
+            installation._record?.companyTrust != null) {
+          return CompanyBootstrapStatus.needsRecovery;
+        }
+        return switch (installation.readiness) {
+          InstallationReadiness.ready => CompanyBootstrapStatus.unjoined,
+          InstallationReadiness.unsupported =>
+            CompanyBootstrapStatus.legacyUnsupported,
+          _ => CompanyBootstrapStatus.needsRecovery,
+        };
       }
       await _checkBinding(custody, requireActive: custody.status == 'active');
       return custody.status == 'active'
