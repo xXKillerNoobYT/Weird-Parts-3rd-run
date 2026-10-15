@@ -14,6 +14,7 @@ const priorCompanyMarkerTables = [
 const companyMarkerTables = [
   ...priorCompanyMarkerTables,
   'company_bootstrap_witnesses',
+  'company_jobs',
 ];
 
 /// Query failures are deliberately propagated: only a complete empty scan

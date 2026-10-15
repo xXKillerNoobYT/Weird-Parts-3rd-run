@@ -158,6 +158,98 @@ final class _PausedReset extends LocalDataReset {
 }
 
 void main() {
+  test('old first-owner package recovery preserves old capabilities without Create Job', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'old-profile-recovery-',
+    );
+    final sourceDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+    );
+    final targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    addTearDown(() async {
+      await sourceDb.close();
+      await targetDb.close();
+      directory.deleteSync(recursive: true);
+    });
+    final store = _MemoryStore();
+    const sourceNamespace = 'synthetic.old-profile-source';
+    final source = InstallationSecurity(
+      store: store,
+      namespace: sourceNamespace,
+    );
+    await source.start(sourceDb);
+    final originalFile = File(p.join(directory.path, 'original.wpca'));
+    await CompanyEnrollment(installation: source, db: sourceDb).create(
+      companyName: 'Old Profile Crew',
+      policy: CompanyContinuityPolicy.localContinuity,
+      pin: '1234',
+      recoveryPassphrase: 'old profile authority phrase',
+      recoveryFile: originalFile,
+    );
+    final oldBytes = await _resignEncryptedFirstOwnerPackage(
+      original: Uint8List.fromList(originalFile.readAsBytesSync()),
+      passphrase: 'old profile authority phrase',
+      store: store,
+      namespace: sourceNamespace,
+      mutate: (body, payload) {
+        for (final key in ['users', 'devices']) {
+          ((body[key] as List).single['capabilities'] as List).remove(
+            'createJob',
+          );
+        }
+      },
+    );
+    final oldPackage = File(p.join(directory.path, 'old-profile.wpca'))
+      ..writeAsBytesSync(oldBytes);
+    final target = InstallationSecurity(
+      store: _MemoryStore(),
+      namespace: 'synthetic.old-profile-target',
+    );
+    await target.start(targetDb);
+    final enrollment = CompanyEnrollment(installation: target, db: targetDb);
+    final identity = await enrollment.recover(
+      policy: CompanyContinuityPolicy.localContinuity,
+      sourceFile: oldPackage,
+      sourcePassphrase: 'old profile authority phrase',
+      newPin: '5678',
+      newRecoveryPassphrase: 'replacement old profile phrase',
+      newRecoveryFile: File(p.join(directory.path, 'replacement.wpca')),
+    );
+    final owner = await enrollment.signIn('5678');
+    final trust = (await target.readCompanyTrust(targetDb))!;
+    final fact = await (targetDb.select(
+      targetDb.companyAuthorityFacts,
+    )..where((t) => t.commitment.equals(trust.factsCommitment))).getSingle();
+    final body = jsonDecode(fact.signedBytes)['body'];
+    for (final key in ['users', 'devices']) {
+      expect((body[key] as List).single['capabilities'], [
+        'patchJobLine',
+        'deleteJobLine',
+        'enrollDevice',
+      ]);
+    }
+    final command = CreateJob(
+      companyId: identity.companyId,
+      shopId: identity.shopId,
+      jobId: const Uuid().v4(),
+      requestId: const Uuid().v4(),
+      name: 'Unavailable',
+    );
+    final commands = CompanyJobCommands(enrollment: enrollment);
+    await expectLater(
+      commands.createJob(command, ownerSession: owner),
+      throwsA(isA<JobLineRefusal>()),
+    );
+    await expectLater(
+      commands.listJobs(ownerSession: owner),
+      throwsA(isA<JobLineRefusal>()),
+    );
+    expect(await targetDb.select(targetDb.jobs).get(), isEmpty);
+    expect(await targetDb.select(targetDb.companyJobs).get(), isEmpty);
+  });
+
   testWidgets(
     'wipe paused after legacy preflight cannot rotate a newly active company',
     (tester) async {

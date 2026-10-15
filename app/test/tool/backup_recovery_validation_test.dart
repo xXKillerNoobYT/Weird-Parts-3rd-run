@@ -94,6 +94,7 @@ void main() {
         'jobs',
         'job_lines',
         'order_splits',
+        'company_jobs',
         'company_bootstrap_witnesses',
         'company_authority_facts',
         'job_line_baselines',
@@ -104,6 +105,7 @@ void main() {
         'job_line_conflicts',
       });
       for (final table in [
+        'company_jobs',
         'company_bootstrap_witnesses',
         'company_authority_facts',
         'job_line_baselines',

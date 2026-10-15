@@ -7080,6 +7080,805 @@ class JobsCompanion extends UpdateCompanion<Job> {
   }
 }
 
+class $CompanyJobsTable extends CompanyJobs
+    with TableInfo<$CompanyJobsTable, CompanyJob> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyJobsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _jobIdMeta = const VerificationMeta('jobId');
+  @override
+  late final GeneratedColumn<String> jobId = GeneratedColumn<String>(
+    'job_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shopIdMeta = const VerificationMeta('shopId');
+  @override
+  late final GeneratedColumn<String> shopId = GeneratedColumn<String>(
+    'shop_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originGenerationMeta = const VerificationMeta(
+    'originGeneration',
+  );
+  @override
+  late final GeneratedColumn<String> originGeneration = GeneratedColumn<String>(
+    'origin_generation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationCommitmentMeta =
+      const VerificationMeta('operationCommitment');
+  @override
+  late final GeneratedColumn<String> operationCommitment =
+      GeneratedColumn<String>(
+        'operation_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _commandCommitmentMeta = const VerificationMeta(
+    'commandCommitment',
+  );
+  @override
+  late final GeneratedColumn<String> commandCommitment =
+      GeneratedColumn<String>(
+        'command_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _operationBytesMeta = const VerificationMeta(
+    'operationBytes',
+  );
+  @override
+  late final GeneratedColumn<String> operationBytes = GeneratedColumn<String>(
+    'operation_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectionBytesMeta = const VerificationMeta(
+    'projectionBytes',
+  );
+  @override
+  late final GeneratedColumn<String> projectionBytes = GeneratedColumn<String>(
+    'projection_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _receiptKeyMeta = const VerificationMeta(
+    'receiptKey',
+  );
+  @override
+  late final GeneratedColumn<String> receiptKey = GeneratedColumn<String>(
+    'receipt_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _receiptBytesMeta = const VerificationMeta(
+    'receiptBytes',
+  );
+  @override
+  late final GeneratedColumn<String> receiptBytes = GeneratedColumn<String>(
+    'receipt_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _auditBytesMeta = const VerificationMeta(
+    'auditBytes',
+  );
+  @override
+  late final GeneratedColumn<String> auditBytes = GeneratedColumn<String>(
+    'audit_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _outgoingMeta = const VerificationMeta(
+    'outgoing',
+  );
+  @override
+  late final GeneratedColumn<bool> outgoing = GeneratedColumn<bool>(
+    'outgoing',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("outgoing" IN (0, 1))',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    jobId,
+    companyId,
+    shopId,
+    originGeneration,
+    requestId,
+    operationCommitment,
+    commandCommitment,
+    operationBytes,
+    projectionBytes,
+    receiptKey,
+    receiptBytes,
+    auditBytes,
+    outgoing,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_jobs';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyJob> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('job_id')) {
+      context.handle(
+        _jobIdMeta,
+        jobId.isAcceptableOrUnknown(data['job_id']!, _jobIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jobIdMeta);
+    }
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('shop_id')) {
+      context.handle(
+        _shopIdMeta,
+        shopId.isAcceptableOrUnknown(data['shop_id']!, _shopIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shopIdMeta);
+    }
+    if (data.containsKey('origin_generation')) {
+      context.handle(
+        _originGenerationMeta,
+        originGeneration.isAcceptableOrUnknown(
+          data['origin_generation']!,
+          _originGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originGenerationMeta);
+    }
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('operation_commitment')) {
+      context.handle(
+        _operationCommitmentMeta,
+        operationCommitment.isAcceptableOrUnknown(
+          data['operation_commitment']!,
+          _operationCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationCommitmentMeta);
+    }
+    if (data.containsKey('command_commitment')) {
+      context.handle(
+        _commandCommitmentMeta,
+        commandCommitment.isAcceptableOrUnknown(
+          data['command_commitment']!,
+          _commandCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_commandCommitmentMeta);
+    }
+    if (data.containsKey('operation_bytes')) {
+      context.handle(
+        _operationBytesMeta,
+        operationBytes.isAcceptableOrUnknown(
+          data['operation_bytes']!,
+          _operationBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationBytesMeta);
+    }
+    if (data.containsKey('projection_bytes')) {
+      context.handle(
+        _projectionBytesMeta,
+        projectionBytes.isAcceptableOrUnknown(
+          data['projection_bytes']!,
+          _projectionBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_projectionBytesMeta);
+    }
+    if (data.containsKey('receipt_key')) {
+      context.handle(
+        _receiptKeyMeta,
+        receiptKey.isAcceptableOrUnknown(data['receipt_key']!, _receiptKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptKeyMeta);
+    }
+    if (data.containsKey('receipt_bytes')) {
+      context.handle(
+        _receiptBytesMeta,
+        receiptBytes.isAcceptableOrUnknown(
+          data['receipt_bytes']!,
+          _receiptBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptBytesMeta);
+    }
+    if (data.containsKey('audit_bytes')) {
+      context.handle(
+        _auditBytesMeta,
+        auditBytes.isAcceptableOrUnknown(data['audit_bytes']!, _auditBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_auditBytesMeta);
+    }
+    if (data.containsKey('outgoing')) {
+      context.handle(
+        _outgoingMeta,
+        outgoing.isAcceptableOrUnknown(data['outgoing']!, _outgoingMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_outgoingMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {jobId};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {companyId, originGeneration, requestId},
+  ];
+  @override
+  CompanyJob map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyJob(
+      jobId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_id'],
+      )!,
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      shopId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shop_id'],
+      )!,
+      originGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_generation'],
+      )!,
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      operationCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_commitment'],
+      )!,
+      commandCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}command_commitment'],
+      )!,
+      operationBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_bytes'],
+      )!,
+      projectionBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}projection_bytes'],
+      )!,
+      receiptKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_key'],
+      )!,
+      receiptBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_bytes'],
+      )!,
+      auditBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}audit_bytes'],
+      )!,
+      outgoing: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}outgoing'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyJobsTable createAlias(String alias) {
+    return $CompanyJobsTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyJob extends DataClass implements Insertable<CompanyJob> {
+  final String jobId;
+  final String companyId;
+  final String shopId;
+  final String originGeneration;
+  final String requestId;
+  final String operationCommitment;
+  final String commandCommitment;
+  final String operationBytes;
+  final String projectionBytes;
+  final String receiptKey;
+  final String receiptBytes;
+  final String auditBytes;
+  final bool outgoing;
+  const CompanyJob({
+    required this.jobId,
+    required this.companyId,
+    required this.shopId,
+    required this.originGeneration,
+    required this.requestId,
+    required this.operationCommitment,
+    required this.commandCommitment,
+    required this.operationBytes,
+    required this.projectionBytes,
+    required this.receiptKey,
+    required this.receiptBytes,
+    required this.auditBytes,
+    required this.outgoing,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['job_id'] = Variable<String>(jobId);
+    map['company_id'] = Variable<String>(companyId);
+    map['shop_id'] = Variable<String>(shopId);
+    map['origin_generation'] = Variable<String>(originGeneration);
+    map['request_id'] = Variable<String>(requestId);
+    map['operation_commitment'] = Variable<String>(operationCommitment);
+    map['command_commitment'] = Variable<String>(commandCommitment);
+    map['operation_bytes'] = Variable<String>(operationBytes);
+    map['projection_bytes'] = Variable<String>(projectionBytes);
+    map['receipt_key'] = Variable<String>(receiptKey);
+    map['receipt_bytes'] = Variable<String>(receiptBytes);
+    map['audit_bytes'] = Variable<String>(auditBytes);
+    map['outgoing'] = Variable<bool>(outgoing);
+    return map;
+  }
+
+  CompanyJobsCompanion toCompanion(bool nullToAbsent) {
+    return CompanyJobsCompanion(
+      jobId: Value(jobId),
+      companyId: Value(companyId),
+      shopId: Value(shopId),
+      originGeneration: Value(originGeneration),
+      requestId: Value(requestId),
+      operationCommitment: Value(operationCommitment),
+      commandCommitment: Value(commandCommitment),
+      operationBytes: Value(operationBytes),
+      projectionBytes: Value(projectionBytes),
+      receiptKey: Value(receiptKey),
+      receiptBytes: Value(receiptBytes),
+      auditBytes: Value(auditBytes),
+      outgoing: Value(outgoing),
+    );
+  }
+
+  factory CompanyJob.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyJob(
+      jobId: serializer.fromJson<String>(json['jobId']),
+      companyId: serializer.fromJson<String>(json['companyId']),
+      shopId: serializer.fromJson<String>(json['shopId']),
+      originGeneration: serializer.fromJson<String>(json['originGeneration']),
+      requestId: serializer.fromJson<String>(json['requestId']),
+      operationCommitment: serializer.fromJson<String>(
+        json['operationCommitment'],
+      ),
+      commandCommitment: serializer.fromJson<String>(json['commandCommitment']),
+      operationBytes: serializer.fromJson<String>(json['operationBytes']),
+      projectionBytes: serializer.fromJson<String>(json['projectionBytes']),
+      receiptKey: serializer.fromJson<String>(json['receiptKey']),
+      receiptBytes: serializer.fromJson<String>(json['receiptBytes']),
+      auditBytes: serializer.fromJson<String>(json['auditBytes']),
+      outgoing: serializer.fromJson<bool>(json['outgoing']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'jobId': serializer.toJson<String>(jobId),
+      'companyId': serializer.toJson<String>(companyId),
+      'shopId': serializer.toJson<String>(shopId),
+      'originGeneration': serializer.toJson<String>(originGeneration),
+      'requestId': serializer.toJson<String>(requestId),
+      'operationCommitment': serializer.toJson<String>(operationCommitment),
+      'commandCommitment': serializer.toJson<String>(commandCommitment),
+      'operationBytes': serializer.toJson<String>(operationBytes),
+      'projectionBytes': serializer.toJson<String>(projectionBytes),
+      'receiptKey': serializer.toJson<String>(receiptKey),
+      'receiptBytes': serializer.toJson<String>(receiptBytes),
+      'auditBytes': serializer.toJson<String>(auditBytes),
+      'outgoing': serializer.toJson<bool>(outgoing),
+    };
+  }
+
+  CompanyJob copyWith({
+    String? jobId,
+    String? companyId,
+    String? shopId,
+    String? originGeneration,
+    String? requestId,
+    String? operationCommitment,
+    String? commandCommitment,
+    String? operationBytes,
+    String? projectionBytes,
+    String? receiptKey,
+    String? receiptBytes,
+    String? auditBytes,
+    bool? outgoing,
+  }) => CompanyJob(
+    jobId: jobId ?? this.jobId,
+    companyId: companyId ?? this.companyId,
+    shopId: shopId ?? this.shopId,
+    originGeneration: originGeneration ?? this.originGeneration,
+    requestId: requestId ?? this.requestId,
+    operationCommitment: operationCommitment ?? this.operationCommitment,
+    commandCommitment: commandCommitment ?? this.commandCommitment,
+    operationBytes: operationBytes ?? this.operationBytes,
+    projectionBytes: projectionBytes ?? this.projectionBytes,
+    receiptKey: receiptKey ?? this.receiptKey,
+    receiptBytes: receiptBytes ?? this.receiptBytes,
+    auditBytes: auditBytes ?? this.auditBytes,
+    outgoing: outgoing ?? this.outgoing,
+  );
+  CompanyJob copyWithCompanion(CompanyJobsCompanion data) {
+    return CompanyJob(
+      jobId: data.jobId.present ? data.jobId.value : this.jobId,
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      shopId: data.shopId.present ? data.shopId.value : this.shopId,
+      originGeneration: data.originGeneration.present
+          ? data.originGeneration.value
+          : this.originGeneration,
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      operationCommitment: data.operationCommitment.present
+          ? data.operationCommitment.value
+          : this.operationCommitment,
+      commandCommitment: data.commandCommitment.present
+          ? data.commandCommitment.value
+          : this.commandCommitment,
+      operationBytes: data.operationBytes.present
+          ? data.operationBytes.value
+          : this.operationBytes,
+      projectionBytes: data.projectionBytes.present
+          ? data.projectionBytes.value
+          : this.projectionBytes,
+      receiptKey: data.receiptKey.present
+          ? data.receiptKey.value
+          : this.receiptKey,
+      receiptBytes: data.receiptBytes.present
+          ? data.receiptBytes.value
+          : this.receiptBytes,
+      auditBytes: data.auditBytes.present
+          ? data.auditBytes.value
+          : this.auditBytes,
+      outgoing: data.outgoing.present ? data.outgoing.value : this.outgoing,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJob(')
+          ..write('jobId: $jobId, ')
+          ..write('companyId: $companyId, ')
+          ..write('shopId: $shopId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('commandCommitment: $commandCommitment, ')
+          ..write('operationBytes: $operationBytes, ')
+          ..write('projectionBytes: $projectionBytes, ')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('receiptBytes: $receiptBytes, ')
+          ..write('auditBytes: $auditBytes, ')
+          ..write('outgoing: $outgoing')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    jobId,
+    companyId,
+    shopId,
+    originGeneration,
+    requestId,
+    operationCommitment,
+    commandCommitment,
+    operationBytes,
+    projectionBytes,
+    receiptKey,
+    receiptBytes,
+    auditBytes,
+    outgoing,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyJob &&
+          other.jobId == this.jobId &&
+          other.companyId == this.companyId &&
+          other.shopId == this.shopId &&
+          other.originGeneration == this.originGeneration &&
+          other.requestId == this.requestId &&
+          other.operationCommitment == this.operationCommitment &&
+          other.commandCommitment == this.commandCommitment &&
+          other.operationBytes == this.operationBytes &&
+          other.projectionBytes == this.projectionBytes &&
+          other.receiptKey == this.receiptKey &&
+          other.receiptBytes == this.receiptBytes &&
+          other.auditBytes == this.auditBytes &&
+          other.outgoing == this.outgoing);
+}
+
+class CompanyJobsCompanion extends UpdateCompanion<CompanyJob> {
+  final Value<String> jobId;
+  final Value<String> companyId;
+  final Value<String> shopId;
+  final Value<String> originGeneration;
+  final Value<String> requestId;
+  final Value<String> operationCommitment;
+  final Value<String> commandCommitment;
+  final Value<String> operationBytes;
+  final Value<String> projectionBytes;
+  final Value<String> receiptKey;
+  final Value<String> receiptBytes;
+  final Value<String> auditBytes;
+  final Value<bool> outgoing;
+  final Value<int> rowid;
+  const CompanyJobsCompanion({
+    this.jobId = const Value.absent(),
+    this.companyId = const Value.absent(),
+    this.shopId = const Value.absent(),
+    this.originGeneration = const Value.absent(),
+    this.requestId = const Value.absent(),
+    this.operationCommitment = const Value.absent(),
+    this.commandCommitment = const Value.absent(),
+    this.operationBytes = const Value.absent(),
+    this.projectionBytes = const Value.absent(),
+    this.receiptKey = const Value.absent(),
+    this.receiptBytes = const Value.absent(),
+    this.auditBytes = const Value.absent(),
+    this.outgoing = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyJobsCompanion.insert({
+    required String jobId,
+    required String companyId,
+    required String shopId,
+    required String originGeneration,
+    required String requestId,
+    required String operationCommitment,
+    required String commandCommitment,
+    required String operationBytes,
+    required String projectionBytes,
+    required String receiptKey,
+    required String receiptBytes,
+    required String auditBytes,
+    required bool outgoing,
+    this.rowid = const Value.absent(),
+  }) : jobId = Value(jobId),
+       companyId = Value(companyId),
+       shopId = Value(shopId),
+       originGeneration = Value(originGeneration),
+       requestId = Value(requestId),
+       operationCommitment = Value(operationCommitment),
+       commandCommitment = Value(commandCommitment),
+       operationBytes = Value(operationBytes),
+       projectionBytes = Value(projectionBytes),
+       receiptKey = Value(receiptKey),
+       receiptBytes = Value(receiptBytes),
+       auditBytes = Value(auditBytes),
+       outgoing = Value(outgoing);
+  static Insertable<CompanyJob> custom({
+    Expression<String>? jobId,
+    Expression<String>? companyId,
+    Expression<String>? shopId,
+    Expression<String>? originGeneration,
+    Expression<String>? requestId,
+    Expression<String>? operationCommitment,
+    Expression<String>? commandCommitment,
+    Expression<String>? operationBytes,
+    Expression<String>? projectionBytes,
+    Expression<String>? receiptKey,
+    Expression<String>? receiptBytes,
+    Expression<String>? auditBytes,
+    Expression<bool>? outgoing,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (jobId != null) 'job_id': jobId,
+      if (companyId != null) 'company_id': companyId,
+      if (shopId != null) 'shop_id': shopId,
+      if (originGeneration != null) 'origin_generation': originGeneration,
+      if (requestId != null) 'request_id': requestId,
+      if (operationCommitment != null)
+        'operation_commitment': operationCommitment,
+      if (commandCommitment != null) 'command_commitment': commandCommitment,
+      if (operationBytes != null) 'operation_bytes': operationBytes,
+      if (projectionBytes != null) 'projection_bytes': projectionBytes,
+      if (receiptKey != null) 'receipt_key': receiptKey,
+      if (receiptBytes != null) 'receipt_bytes': receiptBytes,
+      if (auditBytes != null) 'audit_bytes': auditBytes,
+      if (outgoing != null) 'outgoing': outgoing,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyJobsCompanion copyWith({
+    Value<String>? jobId,
+    Value<String>? companyId,
+    Value<String>? shopId,
+    Value<String>? originGeneration,
+    Value<String>? requestId,
+    Value<String>? operationCommitment,
+    Value<String>? commandCommitment,
+    Value<String>? operationBytes,
+    Value<String>? projectionBytes,
+    Value<String>? receiptKey,
+    Value<String>? receiptBytes,
+    Value<String>? auditBytes,
+    Value<bool>? outgoing,
+    Value<int>? rowid,
+  }) {
+    return CompanyJobsCompanion(
+      jobId: jobId ?? this.jobId,
+      companyId: companyId ?? this.companyId,
+      shopId: shopId ?? this.shopId,
+      originGeneration: originGeneration ?? this.originGeneration,
+      requestId: requestId ?? this.requestId,
+      operationCommitment: operationCommitment ?? this.operationCommitment,
+      commandCommitment: commandCommitment ?? this.commandCommitment,
+      operationBytes: operationBytes ?? this.operationBytes,
+      projectionBytes: projectionBytes ?? this.projectionBytes,
+      receiptKey: receiptKey ?? this.receiptKey,
+      receiptBytes: receiptBytes ?? this.receiptBytes,
+      auditBytes: auditBytes ?? this.auditBytes,
+      outgoing: outgoing ?? this.outgoing,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (jobId.present) {
+      map['job_id'] = Variable<String>(jobId.value);
+    }
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (shopId.present) {
+      map['shop_id'] = Variable<String>(shopId.value);
+    }
+    if (originGeneration.present) {
+      map['origin_generation'] = Variable<String>(originGeneration.value);
+    }
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (operationCommitment.present) {
+      map['operation_commitment'] = Variable<String>(operationCommitment.value);
+    }
+    if (commandCommitment.present) {
+      map['command_commitment'] = Variable<String>(commandCommitment.value);
+    }
+    if (operationBytes.present) {
+      map['operation_bytes'] = Variable<String>(operationBytes.value);
+    }
+    if (projectionBytes.present) {
+      map['projection_bytes'] = Variable<String>(projectionBytes.value);
+    }
+    if (receiptKey.present) {
+      map['receipt_key'] = Variable<String>(receiptKey.value);
+    }
+    if (receiptBytes.present) {
+      map['receipt_bytes'] = Variable<String>(receiptBytes.value);
+    }
+    if (auditBytes.present) {
+      map['audit_bytes'] = Variable<String>(auditBytes.value);
+    }
+    if (outgoing.present) {
+      map['outgoing'] = Variable<bool>(outgoing.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobsCompanion(')
+          ..write('jobId: $jobId, ')
+          ..write('companyId: $companyId, ')
+          ..write('shopId: $shopId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('commandCommitment: $commandCommitment, ')
+          ..write('operationBytes: $operationBytes, ')
+          ..write('projectionBytes: $projectionBytes, ')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('receiptBytes: $receiptBytes, ')
+          ..write('auditBytes: $auditBytes, ')
+          ..write('outgoing: $outgoing, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $JobLinesTable extends JobLines with TableInfo<$JobLinesTable, JobLine> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -11501,6 +12300,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $JobsTable jobs = $JobsTable(this);
+  late final $CompanyJobsTable companyJobs = $CompanyJobsTable(this);
   late final $JobLinesTable jobLines = $JobLinesTable(this);
   late final $OrderSplitsTable orderSplits = $OrderSplitsTable(this);
   late final $CompanyBootstrapWitnessesTable companyBootstrapWitnesses =
@@ -11544,6 +12344,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     brandVersions,
     supplierListings,
     jobs,
+    companyJobs,
     jobLines,
     orderSplits,
     companyBootstrapWitnesses,
@@ -15068,6 +15869,374 @@ typedef $$JobsTableProcessedTableManager =
       Job,
       PrefetchHooks Function()
     >;
+typedef $$CompanyJobsTableCreateCompanionBuilder =
+    CompanyJobsCompanion Function({
+      required String jobId,
+      required String companyId,
+      required String shopId,
+      required String originGeneration,
+      required String requestId,
+      required String operationCommitment,
+      required String commandCommitment,
+      required String operationBytes,
+      required String projectionBytes,
+      required String receiptKey,
+      required String receiptBytes,
+      required String auditBytes,
+      required bool outgoing,
+      Value<int> rowid,
+    });
+typedef $$CompanyJobsTableUpdateCompanionBuilder =
+    CompanyJobsCompanion Function({
+      Value<String> jobId,
+      Value<String> companyId,
+      Value<String> shopId,
+      Value<String> originGeneration,
+      Value<String> requestId,
+      Value<String> operationCommitment,
+      Value<String> commandCommitment,
+      Value<String> operationBytes,
+      Value<String> projectionBytes,
+      Value<String> receiptKey,
+      Value<String> receiptBytes,
+      Value<String> auditBytes,
+      Value<bool> outgoing,
+      Value<int> rowid,
+    });
+
+class $$CompanyJobsTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyJobsTable> {
+  $$CompanyJobsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shopId => $composableBuilder(
+    column: $table.shopId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get projectionBytes => $composableBuilder(
+    column: $table.projectionBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get outgoing => $composableBuilder(
+    column: $table.outgoing,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyJobsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyJobsTable> {
+  $$CompanyJobsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shopId => $composableBuilder(
+    column: $table.shopId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get projectionBytes => $composableBuilder(
+    column: $table.projectionBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get outgoing => $composableBuilder(
+    column: $table.outgoing,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyJobsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyJobsTable> {
+  $$CompanyJobsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get jobId =>
+      $composableBuilder(column: $table.jobId, builder: (column) => column);
+
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get shopId =>
+      $composableBuilder(column: $table.shopId, builder: (column) => column);
+
+  GeneratedColumn<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get projectionBytes => $composableBuilder(
+    column: $table.projectionBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get outgoing =>
+      $composableBuilder(column: $table.outgoing, builder: (column) => column);
+}
+
+class $$CompanyJobsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyJobsTable,
+          CompanyJob,
+          $$CompanyJobsTableFilterComposer,
+          $$CompanyJobsTableOrderingComposer,
+          $$CompanyJobsTableAnnotationComposer,
+          $$CompanyJobsTableCreateCompanionBuilder,
+          $$CompanyJobsTableUpdateCompanionBuilder,
+          (
+            CompanyJob,
+            BaseReferences<_$AppDatabase, $CompanyJobsTable, CompanyJob>,
+          ),
+          CompanyJob,
+          PrefetchHooks Function()
+        > {
+  $$CompanyJobsTableTableManager(_$AppDatabase db, $CompanyJobsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyJobsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CompanyJobsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CompanyJobsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> jobId = const Value.absent(),
+                Value<String> companyId = const Value.absent(),
+                Value<String> shopId = const Value.absent(),
+                Value<String> originGeneration = const Value.absent(),
+                Value<String> requestId = const Value.absent(),
+                Value<String> operationCommitment = const Value.absent(),
+                Value<String> commandCommitment = const Value.absent(),
+                Value<String> operationBytes = const Value.absent(),
+                Value<String> projectionBytes = const Value.absent(),
+                Value<String> receiptKey = const Value.absent(),
+                Value<String> receiptBytes = const Value.absent(),
+                Value<String> auditBytes = const Value.absent(),
+                Value<bool> outgoing = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobsCompanion(
+                jobId: jobId,
+                companyId: companyId,
+                shopId: shopId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                operationCommitment: operationCommitment,
+                commandCommitment: commandCommitment,
+                operationBytes: operationBytes,
+                projectionBytes: projectionBytes,
+                receiptKey: receiptKey,
+                receiptBytes: receiptBytes,
+                auditBytes: auditBytes,
+                outgoing: outgoing,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String jobId,
+                required String companyId,
+                required String shopId,
+                required String originGeneration,
+                required String requestId,
+                required String operationCommitment,
+                required String commandCommitment,
+                required String operationBytes,
+                required String projectionBytes,
+                required String receiptKey,
+                required String receiptBytes,
+                required String auditBytes,
+                required bool outgoing,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobsCompanion.insert(
+                jobId: jobId,
+                companyId: companyId,
+                shopId: shopId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                operationCommitment: operationCommitment,
+                commandCommitment: commandCommitment,
+                operationBytes: operationBytes,
+                projectionBytes: projectionBytes,
+                receiptKey: receiptKey,
+                receiptBytes: receiptBytes,
+                auditBytes: auditBytes,
+                outgoing: outgoing,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyJobsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyJobsTable,
+      CompanyJob,
+      $$CompanyJobsTableFilterComposer,
+      $$CompanyJobsTableOrderingComposer,
+      $$CompanyJobsTableAnnotationComposer,
+      $$CompanyJobsTableCreateCompanionBuilder,
+      $$CompanyJobsTableUpdateCompanionBuilder,
+      (
+        CompanyJob,
+        BaseReferences<_$AppDatabase, $CompanyJobsTable, CompanyJob>,
+      ),
+      CompanyJob,
+      PrefetchHooks Function()
+    >;
 typedef $$JobLinesTableCreateCompanionBuilder =
     JobLinesCompanion Function({
       required String id,
@@ -17458,6 +18627,8 @@ class $AppDatabaseManager {
   $$SupplierListingsTableTableManager get supplierListings =>
       $$SupplierListingsTableTableManager(_db, _db.supplierListings);
   $$JobsTableTableManager get jobs => $$JobsTableTableManager(_db, _db.jobs);
+  $$CompanyJobsTableTableManager get companyJobs =>
+      $$CompanyJobsTableTableManager(_db, _db.companyJobs);
   $$JobLinesTableTableManager get jobLines =>
       $$JobLinesTableTableManager(_db, _db.jobLines);
   $$OrderSplitsTableTableManager get orderSplits =>

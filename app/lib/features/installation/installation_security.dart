@@ -19,8 +19,13 @@ import '../job_line_commands/job_line_commands.dart'
     show
         JobLineCommand,
         JobLineAuthorization,
+        VerifiedCompanyOperation,
+        VerifiedCompanyReceiptAdmission,
         VerifiedJobLineSession,
-        VerifiedJobLineReceiptAdmission,
+        VerifiedCreateJobSession,
+        CreateJob,
+        CreateJobAuthorization,
+        validateCreateJobCommit,
         JobLineCommandReceipt,
         decodeJobLineReceipt;
 
@@ -128,6 +133,33 @@ Future<String> _companyCommandWitness(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
+  if (intent.family == CompanyCommandFamily.jobCreate) {
+    final records =
+        await (db.select(db.companyJobs)..where(
+              (t) =>
+                  t.jobId.equals(intent.lineId) |
+                  (t.companyId.equals(intent.companyId) &
+                      t.originGeneration.equals(intent.originGeneration) &
+                      t.requestId.equals(intent.requestId)),
+            ))
+            .get();
+    if (records.length > 2) {
+      throw StateError('Create command recovery capacity reached');
+    }
+    final jobs = await (db.select(
+      db.jobs,
+    )..where((t) => t.id.equals(intent.lineId))).get();
+    return hashes.sha256
+        .convert(
+          utf8.encode(
+            _securityCanonical({
+              'records': records.map((r) => r.toJson()).toList(),
+              'jobs': jobs.map((r) => r.toJson()).toList(),
+            }),
+          ),
+        )
+        .toString();
+  }
   final evidence = <String, Object?>{};
   for (final table in [
     'job_line_baselines',
@@ -196,6 +228,9 @@ Future<void> _validateCompanyCommit(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
+  if (intent.family == CompanyCommandFamily.jobCreate) {
+    return validateCreateJobCommit(db, intent);
+  }
   final receipt = await (db.select(
     db.jobLineReceipts,
   )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingleOrNull();
@@ -239,7 +274,14 @@ Future<void> _validateCompanyCommit(
   final encodedOperation =
       jsonDecode(operation.operationBytes) as Map<String, dynamic>;
   final encodedAudit = jsonDecode(audit.auditBytes) as Map<String, dynamic>;
-  if (encodedReceipt['key'] != intent.receiptKey ||
+  final operationBody = encodedOperation['body'] as Map;
+  if (operationBody['v'] != 1 ||
+      operationBody['contract'] != 'job.line.patch@1' ||
+      operationBody['company'] != intent.companyId ||
+      operationBody['line'] != intent.lineId ||
+      operationBody['generation'] != intent.originGeneration ||
+      operationBody['request'] != intent.requestId ||
+      encodedReceipt['key'] != intent.receiptKey ||
       encodedReceipt['operation'] != intent.operationCommitment ||
       encodedReceipt['command'] != intent.commandCommitment ||
       encodedReceipt['store'] != intent.storeGeneration ||
@@ -276,6 +318,32 @@ Future<void> _validateCompanyCommit(
   }
 }
 
+Future<JobLineReceipt?> _companyCommandReceipt(
+  AppDatabase db,
+  CompanyCommandIntent intent,
+) async {
+  if (intent.family == CompanyCommandFamily.jobCreate) {
+    final row = await (db.select(
+      db.companyJobs,
+    )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingleOrNull();
+    if (row == null) {
+      return null;
+    }
+    return JobLineReceipt(
+      receiptKey: row.receiptKey,
+      companyId: row.companyId,
+      operationCommitment: row.operationCommitment,
+      commandCommitment: row.commandCommitment,
+      receiptBytes: row.receiptBytes,
+    );
+  }
+  return (db.select(
+    db.jobLineReceipts,
+  )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingleOrNull();
+}
+
+enum CompanyCommandFamily { jobLinePatch, jobCreate }
+
 final class CompanyCommandIntent {
   const CompanyCommandIntent({
     required this.receiptKey,
@@ -288,7 +356,9 @@ final class CompanyCommandIntent {
     required this.requestId,
     this.beforeWitness,
     this.afterWitness,
+    this.family = CompanyCommandFamily.jobLinePatch,
   });
+  final CompanyCommandFamily family;
   final String receiptKey;
   final String operationCommitment;
   final String commandCommitment;
@@ -301,6 +371,7 @@ final class CompanyCommandIntent {
   final String? afterWitness;
   CompanyCommandIntent withWitness({String? before, String? after}) =>
       CompanyCommandIntent(
+        family: family,
         receiptKey: receiptKey,
         operationCommitment: operationCommitment,
         commandCommitment: commandCommitment,
@@ -313,6 +384,7 @@ final class CompanyCommandIntent {
         afterWitness: after ?? afterWitness,
       );
   Map<String, Object?> encode() => {
+    if (family == CompanyCommandFamily.jobCreate) 'family': 'job.create@1',
     'receipt': receiptKey,
     'operation': operationCommitment,
     'command': commandCommitment,
@@ -326,7 +398,8 @@ final class CompanyCommandIntent {
   };
   static CompanyCommandIntent decode(Object? raw) {
     if (raw is! Map<String, dynamic> ||
-        raw.length != 10 ||
+        !((raw.length == 10 && !raw.containsKey('family')) ||
+            (raw.length == 11 && raw['family'] == 'job.create@1')) ||
         [
           'receipt',
           'operation',
@@ -351,6 +424,9 @@ final class CompanyCommandIntent {
       }
     }
     return CompanyCommandIntent(
+      family: raw['family'] == 'job.create@1'
+          ? CompanyCommandFamily.jobCreate
+          : CompanyCommandFamily.jobLinePatch,
       receiptKey: raw['receipt'] as String,
       operationCommitment: raw['operation'] as String,
       commandCommitment: raw['command'] as String,
@@ -681,7 +757,7 @@ class InstallationSecurity {
 
   Future<Signature> signCompanyOperation(
     AppDatabase db,
-    VerifiedJobLineSession session,
+    VerifiedCompanyOperation session,
     Uint8List bytes, {
     OwnerSession? ownerSession,
   }) async {
@@ -693,7 +769,7 @@ class InstallationSecurity {
     session.validateOperationSigningContent(operationBytes, _record!.identity);
     final pair = await Ed25519().newKeyPairFromSeed(_record!.seed);
     final signature = await Ed25519().sign([
-      ...utf8.encode('wiredpart.job.line.operation@1:'),
+      ...utf8.encode(session.operationDomain),
       ...operationBytes,
     ], keyPair: pair);
     final finalTrust = await readCompanyTrust(db);
@@ -707,7 +783,7 @@ class InstallationSecurity {
 
   Future<Signature> signCompanyReceipt(
     AppDatabase db,
-    VerifiedJobLineReceiptAdmission admission,
+    VerifiedCompanyReceiptAdmission admission,
   ) async {
     if (!db.hasCallerTransaction) {
       throw StateError(
@@ -722,6 +798,7 @@ class InstallationSecurity {
     if (record.activation != InstallationActivation.active ||
         pending == null ||
         pending.afterWitness != null ||
+        pending.family != admission.family ||
         trust == null ||
         await db.settingsDao.getSetting(kInstallationBindingKey) !=
             record.binding ||
@@ -749,7 +826,7 @@ class InstallationSecurity {
     }
     final pair = await Ed25519().newKeyPairFromSeed(record.seed);
     return Ed25519().sign([
-      ...utf8.encode('wiredpart.job.line.receipt@2:'),
+      ...utf8.encode(admission.receiptDomain),
       ...bytes,
     ], keyPair: pair);
   }
@@ -797,6 +874,39 @@ class InstallationSecurity {
     return held;
   }
 
+  Future<void> validateHeldCompanyCommand(
+    AppDatabase db,
+    CompanyCommandIntent intent, {
+    required CompanyTrustAnchor expectedTrust,
+    required Map<String, int> expectedFloors,
+  }) async {
+    if (!db.hasCallerTransaction) {
+      throw StateError('Command requires owning transaction');
+    }
+    final current = await store.readState(namespace);
+    if (current == null) throw StateError('Protected identity is missing');
+    final record = _InstallationRecord.decode(current.bytes);
+    if (record.activation != InstallationActivation.active ||
+        _securityCanonical(record.pendingCommand?.encode()) !=
+            _securityCanonical(intent.encode()) ||
+        _securityCanonical(record.companyTrust?.encode()) !=
+            _securityCanonical(expectedTrust.encode()) ||
+        _securityCanonical(record.floors) !=
+            _securityCanonical(expectedFloors) ||
+        record.storeGeneration.value != intent.storeGeneration ||
+        await db.settingsDao.getSetting(kInstallationBindingKey) !=
+            record.binding ||
+        record.storePathFingerprint != await _companyStorePath(db) ||
+        !await _companyCustodyReady(this, db, record)) {
+      throw StateError('Company command authority changed before commit');
+    }
+    if (intent.afterWitness == null ||
+        await _companyCommandWitness(db, intent) != intent.afterWitness) {
+      throw StateError('Company command evidence changed before commit');
+    }
+    await _validateCompanyCommit(db, intent);
+  }
+
   Future<CompanyCommandIntent> sealCompanyCommand(
     AppDatabase db,
     CompanyCommandIntent intent,
@@ -809,13 +919,12 @@ class InstallationSecurity {
         jsonEncode(intent.encode())) {
       throw StateError('Pending command changed before commit');
     }
-    final receipt = await (db.select(
-      db.jobLineReceipts,
-    )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingle();
+    final receipt = (await _companyCommandReceipt(db, intent))!;
     await JobLineCommandReceipt.verifyAdmissionSeal(
       receipt.receiptBytes,
       record.identity,
       record.storeGeneration.value,
+      expectedFamily: intent.family,
     );
     final sealed = intent.withWitness(
       after: await _companyCommandWitness(db, intent),
@@ -983,10 +1092,7 @@ class InstallationSecurity {
                 jsonEncode(intent.encode())) {
           throw StateError('Pending company command changed');
         }
-        final receipt =
-            await (db.select(db.jobLineReceipts)
-                  ..where((t) => t.receiptKey.equals(intent.receiptKey)))
-                .getSingleOrNull();
+        final receipt = await _companyCommandReceipt(db, intent);
         if (intent.storeGeneration != next.storeGeneration.value ||
             (receipt != null &&
                 (receipt.operationCommitment != intent.operationCommitment ||
@@ -1004,6 +1110,7 @@ class InstallationSecurity {
             receipt.receiptBytes,
             next.identity,
             next.storeGeneration.value,
+            expectedFamily: intent.family,
           );
           final value = decodeJobLineReceipt(receipt.receiptBytes);
           if (value['parent'] case final String parentKey) {
@@ -1014,6 +1121,7 @@ class InstallationSecurity {
               parent.receiptBytes,
               next.identity,
               next.storeGeneration.value,
+              expectedFamily: CompanyCommandFamily.jobLinePatch,
             );
             final parentValue = decodeJobLineReceipt(parent.receiptBytes);
             if (parentValue['parent'] != null ||

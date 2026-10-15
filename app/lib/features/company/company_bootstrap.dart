@@ -32,6 +32,7 @@ final class CompanyBootstrap {
       'brand_versions',
       'supplier_listings',
       'jobs',
+      'company_jobs',
       'job_lines',
       'order_splits',
       'company_bootstrap_witnesses',

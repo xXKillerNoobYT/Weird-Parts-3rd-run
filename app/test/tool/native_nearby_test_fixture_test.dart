@@ -115,7 +115,7 @@ void main() {
       await seedValidationShop(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       expect(baseline.schemaVersion, kAppSchemaVersion);
-      expect(baseline.domain.length, 21);
+      expect(baseline.domain.length, 22);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
       expect(baseline.referencesValid, true);
@@ -150,6 +150,8 @@ void main() {
     'wrong-profile',
     'missing-table',
     'missing-history-table',
+    'missing-company-jobs',
+    'unknown-schema7',
     'missing-column',
   ]) {
     test(
@@ -182,6 +184,10 @@ void main() {
               corrupt.execute('DROP TABLE styles');
             } else if (mutation == 'missing-history-table') {
               corrupt.execute('DROP TABLE job_line_operations');
+            } else if (mutation == 'missing-company-jobs') {
+              corrupt.execute('DROP TABLE company_jobs');
+            } else if (mutation == 'unknown-schema7') {
+              corrupt.execute('PRAGMA user_version = 7');
             } else if (mutation == 'missing-column') {
               corrupt.execute('ALTER TABLE job_lines DROP COLUMN notes');
             } else {
@@ -238,52 +244,65 @@ void main() {
     },
   );
 
-  test('frozen schema2 capture and preflight preserve old declared proof and bytes', () async {
-    workspace = ValidationWorkspace.open(
-      run: 'unit',
-      role: ValidationRole.sender,
-      temporaryDirectory: temp,
+  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22}.entries) {
+    test(
+      'frozen schema${entry.key} capture and preflight preserve declared proof and bytes',
+      () async {
+        workspace = ValidationWorkspace.open(
+          run: 'unit',
+          role: ValidationRole.sender,
+          temporaryDirectory: temp,
+        );
+        final file = File(
+          p.join(workspace!.support.path, 'wired_parts.sqlite'),
+        );
+        final db = AppDatabase.forTesting(NativeDatabase(file));
+        await seedValidationShop(db, workspace!);
+        for (final table in db.allTables) {
+          final name = table.actualTableName;
+          if ((entry.key < 6 && name == 'company_jobs') ||
+              (entry.key < 5 && name == 'company_bootstrap_witnesses') ||
+              (entry.key < 3 &&
+                  (name.startsWith('job_line_') ||
+                      name == 'company_authority_facts'))) {
+            await db.customStatement('DROP TABLE "$name"');
+          }
+        }
+        await db.customStatement('PRAGMA user_version = ${entry.key}');
+        workspace!.markInitialized();
+        await db.close();
+        final before = file.readAsBytesSync();
+        final frozen = AppDatabase.forTesting(
+          NativeDatabase.opened(
+            raw.sqlite3.open(file.path, mode: raw.OpenMode.readOnly),
+            enableMigrations: false,
+          ),
+        );
+        try {
+          final captured = await NativeFixtureSnapshot.capture(
+            frozen,
+            workspace!,
+          );
+          expect(captured.schemaVersion, entry.key);
+          expect(captured.domain.length, entry.value);
+          expect(captured.rowCount, 14);
+          expect(captured.referencesValid, isTrue);
+        } finally {
+          await frozen.close();
+        }
+        workspace!.close();
+        workspace = openExistingNativeFixture(
+          run: 'unit',
+          role: ValidationRole.sender,
+          temporaryDirectory: temp,
+        );
+        expect(file.readAsBytesSync(), before);
+      },
     );
-    final file = File(p.join(workspace!.support.path, 'wired_parts.sqlite'));
-    final db = AppDatabase.forTesting(NativeDatabase(file));
-    await seedValidationShop(db, workspace!);
-    final companyTables = db.allTables
-        .where(
-          (table) =>
-              table.actualTableName.startsWith('job_line_') ||
-              table.actualTableName == 'company_authority_facts' ||
-              table.actualTableName == 'company_bootstrap_witnesses',
-        )
-        .toList();
-    for (final table in companyTables) {
-      await db.customStatement('DROP TABLE "${table.actualTableName}"');
-    }
-    await db.customStatement('PRAGMA user_version = 2');
-    workspace!.markInitialized();
-    await db.close();
-    final before = file.readAsBytesSync();
-    final frozen = AppDatabase.forTesting(
-      NativeDatabase.opened(
-        raw.sqlite3.open(file.path, mode: raw.OpenMode.readOnly),
-        enableMigrations: false,
-      ),
-    );
-    final captured = await NativeFixtureSnapshot.capture(frozen, workspace!);
-    expect(captured.schemaVersion, 2);
-    expect(captured.domain.length, 13);
-    expect(captured.rowCount, 14);
-    expect(captured.referencesValid, isTrue);
-    await frozen.close();
-    workspace!.close();
-    workspace = openExistingNativeFixture(
-      run: 'unit',
-      role: ValidationRole.sender,
-      temporaryDirectory: temp,
-    );
-    expect(file.readAsBytesSync(), before);
-  });
+  }
 
   for (final history in [
+    'company_jobs',
     'company_bootstrap_witnesses',
     'company_authority_facts',
     'job_line_baselines',
@@ -311,7 +330,7 @@ void main() {
         'VALUES (${columns.map((_) => '?').join(',')})',
         [
           for (final name in columns)
-            name == 'admitted' ? 0 : 'synthetic-history',
+            name == 'admitted' || name == 'outgoing' ? 0 : 'synthetic-history',
         ],
       );
       await expectLater(
@@ -345,6 +364,49 @@ void main() {
     });
   }
 
+  for (final mutation in ['missing-company-jobs', 'unknown-schema7']) {
+    test('capture rejects $mutation without altering the source', () async {
+      workspace = ValidationWorkspace.open(
+        run: 'unit',
+        role: ValidationRole.sender,
+        temporaryDirectory: temp,
+      );
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await seedValidationShop(db, workspace!);
+      if (mutation == 'missing-company-jobs') {
+        await db.customStatement('DROP TABLE company_jobs');
+      } else {
+        await db.customStatement('PRAGMA user_version = 7');
+      }
+      final version = (await db.customSelect('PRAGMA user_version').getSingle())
+          .read<int>('user_version');
+      final names = await db
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+          )
+          .get();
+      await expectLater(
+        NativeFixtureSnapshot.capture(db, workspace!),
+        throwsA(isA<NativeTestFailure>()),
+      );
+      expect(
+        (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
+          'user_version',
+        ),
+        version,
+      );
+      expect(
+        (await db
+                .customSelect(
+                  "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+                )
+                .get())
+            .map((r) => r.data),
+        names.map((r) => r.data),
+      );
+    });
+  }
   test(
     'public settings digest excludes PIN while private comparisons retain it',
     () async {

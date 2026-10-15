@@ -12,3 +12,5 @@ part 'job_line_domain.dart';
 part 'job_line_authorization.dart';
 part 'job_line_reducer.dart';
 part 'job_line_store.dart';
+
+part 'create_job.dart';

@@ -282,6 +282,7 @@ class JobLineCommands {
       saved.receiptBytes,
       _installation.identity!,
       _installation.receivingStoreGeneration!.value,
+      expectedFamily: CompanyCommandFamily.jobLinePatch,
     );
     if (value['parent'] != null) {
       if (parent == null || parent.receiptKey != value['parent']) {
@@ -778,6 +779,12 @@ class JobLineCommands {
           );
           intent = await _installation.sealCompanyCommand(_db, intent!);
           await beforeCommit?.call();
+          await _installation.validateHeldCompanyCommand(
+            _db,
+            intent!,
+            expectedTrust: verified._trust,
+            expectedFloors: verified._floors,
+          );
           return JobLineCommandReceipt._decode(receiptBytes);
         } finally {
           if (local && localSession?._assertion['v'] == 2) {
