@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,8 @@ import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
 import 'company_job_test_support.dart';
+import '../../../integration_test/company_bootstrap_native_test.dart'
+    show companyJobCreationIsReady;
 
 Future<void> waitForWidget(WidgetTester tester, Finder target) async {
   for (var i = 0; i < 400 && target.evaluate().isEmpty; i++) {
@@ -218,4 +221,109 @@ void main() {
     expect(find.byType(JobDetailPage), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+  testWidgets(
+    'native completion waits for committed list item beyond pending input',
+    (tester) async {
+      final root = Directory.systemTemp.createTempSync(
+        'company-job-native-ready-',
+      );
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File('${root.path}/shop.sqlite')),
+      );
+      addTearDown(() async {
+        await db.close();
+        root.deleteSync(recursive: true);
+      });
+      final installation = InstallationSecurity(
+        store: JobTestStore(),
+        namespace: 'synthetic.native-job-ready',
+      );
+      final enrollment = CompanyEnrollment(installation: installation, db: db);
+      late OwnerSession owner;
+      await tester.runAsync(() async {
+        await installation.start(db);
+        await enrollment.create(
+          companyName: 'Native Readiness Crew',
+          policy: CompanyContinuityPolicy.localContinuity,
+          pin: '1234',
+          recoveryPassphrase: 'native readiness authority phrase',
+          recoveryFile: File('${root.path}/authority.wpca'),
+        );
+        owner = await enrollment.signIn('1234');
+      });
+      final reachedCommit = Completer<void>();
+      final releaseCommit = Completer<void>();
+      var attempts = 0;
+      final commands = CompanyJobCommands(
+        enrollment: enrollment,
+        beforeCommit: () async {
+          attempts++;
+          reachedCommit.complete();
+          await releaseCommit.future;
+        },
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CompanyJobsPanel(commands: commands, owner: owner),
+            ),
+          ),
+        ),
+      );
+      await waitForWidget(tester, find.byKey(const Key('company-job-name')));
+      const jobName = 'Synthetic pending native Job';
+      final renderedJob = find.descendant(
+        of: find.byKey(const Key('company-jobs-list')),
+        matching: find.text(jobName),
+      );
+      try {
+        await tester.enterText(
+          find.byKey(const Key('company-job-name')),
+          jobName,
+        );
+        await tester.tap(find.byKey(const Key('company-create-job')));
+        for (var i = 0; i < 400 && !reachedCommit.isCompleted; i++) {
+          await tester.runAsync(
+            () async => Future<void>.delayed(const Duration(milliseconds: 25)),
+          );
+          await tester.pump(const Duration(milliseconds: 25));
+        }
+        expect(reachedCommit.isCompleted, isTrue);
+        await tester.pump();
+        expect(find.text(jobName), findsOneWidget);
+        expect(renderedJob, findsNothing);
+        expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('company-create-job')))
+              .onPressed,
+          isNull,
+        );
+        expect(companyJobCreationIsReady(tester, jobName), isFalse);
+        releaseCommit.complete();
+        await waitForWidget(tester, renderedJob);
+        expect(companyJobCreationIsReady(tester, jobName), isTrue);
+        expect(attempts, 1);
+        await tester.runAsync(() async {
+          final jobs = await db.select(db.jobs).get();
+          final records = await db.select(db.companyJobs).get();
+          expect(jobs, hasLength(1));
+          expect(records, hasLength(1));
+          expect(jobs.single.id, records.single.jobId);
+          expect(jobs.single.name, jobName);
+          expect(records.single.outgoing, isTrue);
+          await JobLineCommandReceipt.verifyAdmissionSeal(
+            records.single.receiptBytes,
+            installation.identity!,
+            installation.receivingStoreGeneration!.value,
+            expectedFamily: CompanyCommandFamily.jobCreate,
+          );
+        });
+      } finally {
+        if (!releaseCommit.isCompleted) releaseCommit.complete();
+        await waitForWidget(tester, renderedJob);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
 }

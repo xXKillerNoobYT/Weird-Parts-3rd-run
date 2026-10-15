@@ -430,6 +430,26 @@ Future<void> _signIn(WidgetTester tester, {bool wrong = false}) async {
   }
 }
 
+bool companyJobCreationIsReady(WidgetTester tester, String jobName) {
+  final list = find.byKey(const Key('company-jobs-list'));
+  final input = find.byKey(const Key('company-job-name'));
+  final create = find.byKey(const Key('company-create-job'));
+  if (list.evaluate().length != 1 ||
+      input.evaluate().length != 1 ||
+      create.evaluate().length != 1 ||
+      find
+              .descendant(of: list, matching: find.text(jobName))
+              .evaluate()
+              .length !=
+          1) {
+    return false;
+  }
+  final field = tester.widget<TextField>(input);
+  return field.controller?.text.isEmpty == true &&
+      field.enabled == true &&
+      tester.widget<FilledButton>(create).onPressed != null;
+}
+
 Future<void> _signOut(WidgetTester tester) async {
   await _tap(tester, find.byKey(const Key('company-signout')));
   await _waitFor(
@@ -554,6 +574,7 @@ Future<Map<String, Object?>> _snapshot(_Installation installation) async {
     final records = await db.select(db.companyJobs).get();
     final jobs = await db.select(db.jobs).get();
     if (installation.workspace.role == ValidationRole.sender) {
+      _stage = 'sender-snapshot-job-count';
       _require(records.length == 1 && jobs.length == 1);
       final record = records.single;
       final job = jobs.single;
@@ -569,6 +590,7 @@ Future<Map<String, Object?>> _snapshot(_Installation installation) async {
             body['device'] == company.deviceId &&
             body['generation'] == identity!.generation.value,
       );
+      _stage = 'sender-snapshot-job-seal';
       await JobLineCommandReceipt.verifyAdmissionSeal(
         record.receiptBytes,
         identity!,
@@ -812,9 +834,10 @@ void main() {
               installation.workspace.role == ValidationRole.sender) {
             await _waitFor(
               tester,
-              () =>
-                  find.text('Synthetic offline Job $_run').evaluate().length ==
-                  1,
+              () => companyJobCreationIsReady(
+                tester,
+                'Synthetic offline Job $_run',
+              ),
             );
             _require(
               find.byKey(const Key('company-jobs-list')).evaluate().length == 1,
@@ -839,24 +862,33 @@ void main() {
             find.byKey(const Key('company-job-name')),
             'Synthetic offline Job $_run',
           );
+          _stage = 'awaiting-original-committed-job';
           final started = Stopwatch()..start();
           await _tap(tester, find.byKey(const Key('company-create-job')));
           await _waitFor(
             tester,
-            () =>
-                find.text('Synthetic offline Job $_run').evaluate().length == 1,
+            () => companyJobCreationIsReady(
+              tester,
+              'Synthetic offline Job $_run',
+            ),
             measurement: 'create-offline-job',
             started: started,
           );
           _require(find.byType(HomeShell).evaluate().isEmpty);
+          _stage = 'original-job-durable-snapshot-before-signout';
+          await _snapshot(original);
+          _stage = 'original-job-signout-after-verified-create';
           await _signOut(tester);
         }
         lifetime.visible = replacement;
         await _mount(tester, replacement, sourcePackage: sourcePackage);
         await _createOrRecover(tester, replacement, recovery: true);
       }
+      _stage = 'final-original-snapshot';
       final first = await _snapshot(original);
+      _stage = 'final-replacement-snapshot';
       final second = await _snapshot(replacement);
+      _stage = 'final-company-identity-comparison';
       _require(
         ['company', 'shop', 'user'].every((key) => first[key] == second[key]),
       );
@@ -876,12 +908,15 @@ void main() {
             (first['authorityVersion'] as int),
       );
       if (exercise != null) {
+        _stage = 'final-restart-snapshot-comparison';
         _require(
           _canonical(first) == _canonical(exercise['original']) &&
               _canonical(second) == _canonical(exercise['replacement']),
         );
       }
+      _stage = 'final-visible-company-signin';
       await _signIn(tester);
+      _stage = 'writing-company-$phase-receipt';
       _writeOnce(File(p.join(root, 'company-$phase.json')), {
         'phase': phase,
         'passed': true,
