@@ -26,6 +26,9 @@ import '../tool/native_nearby_test_exit.dart';
 const _run = String.fromEnvironment('COMPANY_VALIDATION_RUN');
 const _revision = String.fromEnvironment('COMPANY_VALIDATION_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_VALIDATION_SOURCE_TREE');
+const _readOnlyCustody = bool.fromEnvironment(
+  'COMPANY_VALIDATION_READ_ONLY_CUSTODY',
+);
 const _passphrase = 'Synthetic authority recovery only 123';
 const _replacementPassphrase = 'Synthetic replacement recovery only 456';
 const _store = NativeInstallationSecureStore();
@@ -626,6 +629,31 @@ void main() {
         'wired-parts-lan-company-$_run-sender',
         'receipts',
       );
+      if (_readOnlyCustody) {
+        final namespace = 'synthetic.company.$_run.original';
+        final base = await _store.readState(namespace);
+        final companion = await _store.readState(
+          companyCustodyNamespace(namespace),
+        );
+        _require(base != null && companion != null);
+        final baseFields =
+            jsonDecode(utf8.decode(base!.bytes)) as Map<String, dynamic>;
+        final custodyFields =
+            jsonDecode(utf8.decode(companion!.bytes)) as Map<String, dynamic>;
+        _writeOnce(File(p.join(root, 'company-custody-readonly.json')), {
+          'phase': 'read-only-native-store',
+          'passed': true,
+          'baseBytes': base.bytes.length,
+          'companionBytes': companion.bytes.length,
+          'baseTrustPresent': baseFields['companyTrust'] != null,
+          'custodyStatus': custodyFields['status'],
+          'remainingAttempts': custodyFields['attempts'],
+          'noStartOrCas': true,
+        });
+        // ignore: avoid_print
+        print('COMPANY_NATIVE read-only custody PASS pid=$pid');
+        return;
+      }
       final exerciseFile = File(p.join(root, 'company-exercise.json'));
       final restarting = exerciseFile.existsSync();
       final original = await _open(lifetime, ValidationRole.sender, restarting);
