@@ -640,16 +640,36 @@ void main() {
             jsonDecode(utf8.decode(base!.bytes)) as Map<String, dynamic>;
         final custodyFields =
             jsonDecode(utf8.decode(companion!.bytes)) as Map<String, dynamic>;
-        _writeOnce(File(p.join(root, 'company-custody-readonly.json')), {
-          'phase': 'read-only-native-store',
-          'passed': true,
-          'baseBytes': base.bytes.length,
-          'companionBytes': companion.bytes.length,
-          'baseTrustPresent': baseFields['companyTrust'] != null,
-          'custodyStatus': custodyFields['status'],
-          'remainingAttempts': custodyFields['attempts'],
-          'noStartOrCas': true,
-        });
+        final derived =
+            await Argon2id(
+              parallelism: 1,
+              memory: 19456,
+              iterations: 2,
+              hashLength: 32,
+            ).deriveKey(
+              secretKey: SecretKey(utf8.encode('1234')),
+              nonce: base64Decode(custodyFields['pinSalt'] as String),
+            );
+        final actual = await derived.extractBytes();
+        final expected = base64Decode(custodyFields['pinVerifier'] as String);
+        var mismatch = actual.length ^ expected.length;
+        for (var i = 0; i < expected.length; i++) {
+          mismatch |= actual[i] ^ expected[i];
+        }
+        _writeOnce(
+          File(p.join(root, 'company-custody-verifier-readonly.json')),
+          {
+            'phase': 'read-only-native-store',
+            'passed': true,
+            'baseBytes': base.bytes.length,
+            'companionBytes': companion.bytes.length,
+            'baseTrustPresent': baseFields['companyTrust'] != null,
+            'custodyStatus': custodyFields['status'],
+            'remainingAttempts': custodyFields['attempts'],
+            'syntheticPinMatchesVerifier': mismatch == 0,
+            'noStartOrCas': true,
+          },
+        );
         // ignore: avoid_print
         print('COMPANY_NATIVE read-only custody PASS pid=$pid');
         return;
