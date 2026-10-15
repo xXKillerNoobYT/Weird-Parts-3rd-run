@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../../core/new_id.dart';
 import '../app_database.dart';
+import '../../features/company/company_store_markers.dart';
 import '../tables/jobs.dart';
 
 part 'jobs_dao.g.dart';
@@ -26,17 +27,19 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(jobs).insert(
-      JobsCompanion.insert(
-        id: id,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(jobs).insert(
+        JobsCompanion.insert(
+          id: id,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<List<Job>> listActiveJobs() {
@@ -47,31 +50,33 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
   }
 
   Future<void> archiveJob(String id) async {
-    await transaction(() async {
-      // Take the write lock before testing ownership, as command adoption does.
-      await db.customStatement(
-        'UPDATE jobs SET revision = revision WHERE id = ?',
-        [id],
-      );
-      final managed = await db
-          .customSelect(
-            'SELECT 1 FROM job_line_baselines b JOIN job_lines l ON l.id = b.line_id WHERE l.job_id = ? LIMIT 1',
-            variables: [Variable(id)],
-          )
-          .get();
-      if (managed.isNotEmpty) {
-        throw StateError(
-          'Company-managed jobs require a migrated archive command',
+    await legacyBusinessWrite(db, () async {
+      await transaction(() async {
+        // Take the write lock before testing ownership, as command adoption does.
+        await db.customStatement(
+          'UPDATE jobs SET revision = revision WHERE id = ?',
+          [id],
         );
-      }
-      final now = DateTime.now().toUtc();
-      await (update(jobs)..where((t) => t.id.equals(id))).write(
-        JobsCompanion.custom(
-          status: const Constant('archived'),
-          modifiedAt: Variable(now),
-          revision: jobs.revision + const Constant(1),
-        ),
-      );
+        final managed = await db
+            .customSelect(
+              'SELECT 1 FROM job_line_baselines b JOIN job_lines l ON l.id = b.line_id WHERE l.job_id = ? LIMIT 1',
+              variables: [Variable(id)],
+            )
+            .get();
+        if (managed.isNotEmpty) {
+          throw StateError(
+            'Company-managed jobs require a migrated archive command',
+          );
+        }
+        final now = DateTime.now().toUtc();
+        await (update(jobs)..where((t) => t.id.equals(id))).write(
+          JobsCompanion.custom(
+            status: const Constant('archived'),
+            modifiedAt: Variable(now),
+            revision: jobs.revision + const Constant(1),
+          ),
+        );
+      });
     });
   }
 
@@ -101,25 +106,27 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     String? uom,
     String? notes,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(jobLines).insert(
-      JobLinesCompanion.insert(
-        id: id,
-        jobId: jobId,
-        partId: Value(partId),
-        brandVersionId: Value(brandVersionId),
-        neededQty: neededQty,
-        shopPullQty: Value(shopPullQty),
-        customName: Value(customName),
-        customNotes: Value(customNotes),
-        uom: Value(uom),
-        notes: Value(notes),
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(jobLines).insert(
+        JobLinesCompanion.insert(
+          id: id,
+          jobId: jobId,
+          partId: Value(partId),
+          brandVersionId: Value(brandVersionId),
+          neededQty: neededQty,
+          shopPullQty: Value(shopPullQty),
+          customName: Value(customName),
+          customNotes: Value(customNotes),
+          uom: Value(uom),
+          notes: Value(notes),
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   /// Rewrites identity/qty fields, including clearing nullables with [Variable(null)].
@@ -134,63 +141,69 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     String? uom,
     String? notes,
   }) async {
-    await transaction(() async {
-      await _requireUnmanaged(id);
-      final now = DateTime.now().toUtc();
-      await (update(jobLines)..where((t) => t.id.equals(id))).write(
-        JobLinesCompanion.custom(
-          partId: Variable(partId),
-          brandVersionId: Variable(brandVersionId),
-          customName: Variable(customName),
-          customNotes: Variable(customNotes),
-          neededQty: Variable(neededQty),
-          shopPullQty: Variable(shopPullQty),
-          uom: Variable(uom),
-          notes: Variable(notes),
-          modifiedAt: Variable(now),
-          revision: jobLines.revision + const Constant(1),
-        ),
-      );
+    await legacyBusinessWrite(db, () async {
+      await transaction(() async {
+        await _requireUnmanaged(id);
+        final now = DateTime.now().toUtc();
+        await (update(jobLines)..where((t) => t.id.equals(id))).write(
+          JobLinesCompanion.custom(
+            partId: Variable(partId),
+            brandVersionId: Variable(brandVersionId),
+            customName: Variable(customName),
+            customNotes: Variable(customNotes),
+            neededQty: Variable(neededQty),
+            shopPullQty: Variable(shopPullQty),
+            uom: Variable(uom),
+            notes: Variable(notes),
+            modifiedAt: Variable(now),
+            revision: jobLines.revision + const Constant(1),
+          ),
+        );
+      });
     });
   }
 
   Future<void> setShopPull(String lineId, double qty) async {
-    await transaction(() async {
-      await _requireUnmanaged(lineId);
-      final now = DateTime.now().toUtc();
-      await (update(jobLines)..where((t) => t.id.equals(lineId))).write(
-        JobLinesCompanion.custom(
-          shopPullQty: Variable(qty),
-          modifiedAt: Variable(now),
-          revision: jobLines.revision + const Constant(1),
-        ),
-      );
+    await legacyBusinessWrite(db, () async {
+      await transaction(() async {
+        await _requireUnmanaged(lineId);
+        final now = DateTime.now().toUtc();
+        await (update(jobLines)..where((t) => t.id.equals(lineId))).write(
+          JobLinesCompanion.custom(
+            shopPullQty: Variable(qty),
+            modifiedAt: Variable(now),
+            revision: jobLines.revision + const Constant(1),
+          ),
+        );
+      });
     });
   }
 
   /// Soft-deletes a job line (and its active order splits) with revision bumps.
   Future<void> softDeleteJobLine(String id) async {
-    await transaction(() async {
-      await _requireUnmanaged(id);
-      final now = DateTime.now().toUtc();
-      await (update(
-        orderSplits,
-      )..where((t) => t.jobLineId.equals(id) & t.deletedAt.isNull())).write(
-        OrderSplitsCompanion.custom(
-          deletedAt: Variable(now),
-          modifiedAt: Variable(now),
-          revision: orderSplits.revision + const Constant(1),
-        ),
-      );
-      await (update(
-        jobLines,
-      )..where((t) => t.id.equals(id) & t.deletedAt.isNull())).write(
-        JobLinesCompanion.custom(
-          deletedAt: Variable(now),
-          modifiedAt: Variable(now),
-          revision: jobLines.revision + const Constant(1),
-        ),
-      );
+    await legacyBusinessWrite(db, () async {
+      await transaction(() async {
+        await _requireUnmanaged(id);
+        final now = DateTime.now().toUtc();
+        await (update(
+          orderSplits,
+        )..where((t) => t.jobLineId.equals(id) & t.deletedAt.isNull())).write(
+          OrderSplitsCompanion.custom(
+            deletedAt: Variable(now),
+            modifiedAt: Variable(now),
+            revision: orderSplits.revision + const Constant(1),
+          ),
+        );
+        await (update(
+          jobLines,
+        )..where((t) => t.id.equals(id) & t.deletedAt.isNull())).write(
+          JobLinesCompanion.custom(
+            deletedAt: Variable(now),
+            modifiedAt: Variable(now),
+            revision: jobLines.revision + const Constant(1),
+          ),
+        );
+      });
     });
   }
 
@@ -201,21 +214,23 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     required double qty,
     required String deviceId,
   }) async {
-    return transaction(() async {
-      await _requireUnmanaged(jobLineId);
-      final now = DateTime.now().toUtc();
-      await into(orderSplits).insert(
-        OrderSplitsCompanion.insert(
-          id: id,
-          jobLineId: jobLineId,
-          supplierId: supplierId,
-          quantity: qty,
-          originDeviceId: deviceId,
-          createdAt: now,
-          modifiedAt: now,
-        ),
-      );
-      return id;
+    return legacyBusinessWrite(db, () async {
+      return transaction(() async {
+        await _requireUnmanaged(jobLineId);
+        final now = DateTime.now().toUtc();
+        await into(orderSplits).insert(
+          OrderSplitsCompanion.insert(
+            id: id,
+            jobLineId: jobLineId,
+            supplierId: supplierId,
+            quantity: qty,
+            originDeviceId: deviceId,
+            createdAt: now,
+            modifiedAt: now,
+          ),
+        );
+        return id;
+      });
     });
   }
 
@@ -225,27 +240,29 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
     required List<({String supplierId, double qty})> splits,
     required String deviceId,
   }) async {
-    await transaction(() async {
-      await _requireUnmanaged(lineId);
-      final now = DateTime.now().toUtc();
-      await (update(
-        orderSplits,
-      )..where((t) => t.jobLineId.equals(lineId) & t.deletedAt.isNull())).write(
-        OrderSplitsCompanion.custom(
-          deletedAt: Variable(now),
-          modifiedAt: Variable(now),
-          revision: orderSplits.revision + const Constant(1),
-        ),
-      );
-      for (final split in splits) {
-        await insertOrderSplit(
-          id: newId(),
-          jobLineId: lineId,
-          supplierId: split.supplierId,
-          qty: split.qty,
-          deviceId: deviceId,
-        );
-      }
+    await legacyBusinessWrite(db, () async {
+      await transaction(() async {
+        await _requireUnmanaged(lineId);
+        final now = DateTime.now().toUtc();
+        await (update(orderSplits)
+              ..where((t) => t.jobLineId.equals(lineId) & t.deletedAt.isNull()))
+            .write(
+              OrderSplitsCompanion.custom(
+                deletedAt: Variable(now),
+                modifiedAt: Variable(now),
+                revision: orderSplits.revision + const Constant(1),
+              ),
+            );
+        for (final split in splits) {
+          await insertOrderSplit(
+            id: newId(),
+            jobLineId: lineId,
+            supplierId: split.supplierId,
+            qty: split.qty,
+            deviceId: deviceId,
+          );
+        }
+      });
     });
   }
 

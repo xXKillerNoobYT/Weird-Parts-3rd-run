@@ -1047,64 +1047,80 @@ class InstallationSecurity {
     failure = null;
   }
 
-  Future<InstallationRestoreIntent?> prepareBusinessRestore(
-    AppDatabase db,
-  ) async {
-    if (readiness == InstallationReadiness.unsupported) return null;
-    if (readiness == InstallationReadiness.unavailable) {
-      throw StateError('Installation security is unavailable');
-    }
-    final protected = await store.readState(namespace);
-    if (protected != null &&
-        _InstallationRecord.decode(protected.bytes).pendingCommand != null) {
-      throw StateError('Finish pending company command before restoring');
-    }
-    await reconcile(db);
-    if (readiness != InstallationReadiness.ready) {
-      throw StateError('Recover installation identity before restoring');
-    }
-    final current = await store.readState(namespace);
-    if (current == null) throw StateError('Protected identity is missing');
-    final record = _InstallationRecord.decode(current.bytes);
-    if (record.activation != InstallationActivation.active ||
-        record.pendingCommand != null ||
-        await db.settingsDao.getSetting(kInstallationBindingKey) !=
-            record.binding) {
-      throw StateError('Installation changed before restore admission');
-    }
-    final next = _InstallationRecord(
-      record.identity,
-      record.seed,
-      InstallationActivation.pending,
-      ReceivingStoreGeneration(const Uuid().v4()),
-      record.floors,
-      previousStoreGeneration: record.storeGeneration,
-      companyTrust: record.companyTrust,
-      storePathFingerprint: record.storePathFingerprint,
-    );
-    await _write(next, expectedRevision: current.revision);
-    readiness = InstallationReadiness.needsRecovery;
-    return InstallationRestoreIntent._(next.binding);
-  }
+  Future<InstallationRestoreIntent?> prepareBusinessRestore(AppDatabase db) =>
+      legacyBusinessWrite(db, () async {
+        if (readiness == InstallationReadiness.unsupported) return null;
+        if (readiness == InstallationReadiness.unavailable) {
+          throw StateError('Installation security is unavailable');
+        }
+        final protected = await store.readState(namespace);
+        final protectedRecord = protected == null
+            ? null
+            : _InstallationRecord.decode(protected.bytes);
+        if (protectedRecord?.pendingCommand != null ||
+            protectedRecord?.companyTrust != null) {
+          throw StateError('Finish pending company command before restoring');
+        }
+        if (await store.readState(companyCustodyNamespace(namespace)) != null) {
+          throw StateError('Company custody prevents business restore');
+        }
+        await reconcile(db);
+        if (readiness != InstallationReadiness.ready) {
+          throw StateError('Recover installation identity before restoring');
+        }
+        final current = await store.readState(namespace);
+        if (current == null) throw StateError('Protected identity is missing');
+        final record = _InstallationRecord.decode(current.bytes);
+        if (record.companyTrust != null ||
+            await store.readState(companyCustodyNamespace(namespace)) != null) {
+          throw StateError('Company authority prevents business restore');
+        }
+        if (record.activation != InstallationActivation.active ||
+            record.pendingCommand != null ||
+            await db.settingsDao.getSetting(kInstallationBindingKey) !=
+                record.binding) {
+          throw StateError('Installation changed before restore admission');
+        }
+        final next = _InstallationRecord(
+          record.identity,
+          record.seed,
+          InstallationActivation.pending,
+          ReceivingStoreGeneration(const Uuid().v4()),
+          record.floors,
+          previousStoreGeneration: record.storeGeneration,
+          companyTrust: record.companyTrust,
+          storePathFingerprint: record.storePathFingerprint,
+        );
+        await _write(next, expectedRevision: current.revision);
+        readiness = InstallationReadiness.needsRecovery;
+        return InstallationRestoreIntent._(next.binding);
+      });
 
-  Future<void> prepareReset() async {
-    if (readiness == InstallationReadiness.unsupported) return;
-    if (readiness == InstallationReadiness.unavailable) {
-      throw StateError('Installation security is unavailable');
-    }
-    final persisted = await store.readState(namespace);
-    if (persisted == null) throw StateError('Protected identity is missing');
-    _persisted = persisted;
-    final previous = _InstallationRecord.decode(persisted.bytes);
-    if (previous.pendingCommand != null) {
-      throw StateError('Finish pending company command before resetting');
-    }
-    await _write(
-      await _newRecord(previous.floors),
-      expectedRevision: persisted.revision,
-    );
-    readiness = InstallationReadiness.needsRecovery;
-  }
+  Future<void> prepareReset(AppDatabase db) => legacyBusinessWrite(
+    db,
+    () async {
+      if (readiness == InstallationReadiness.unsupported) return;
+      if (readiness == InstallationReadiness.unavailable) {
+        throw StateError('Installation security is unavailable');
+      }
+      final persisted = await store.readState(namespace);
+      if (persisted == null) throw StateError('Protected identity is missing');
+      _persisted = persisted;
+      final previous = _InstallationRecord.decode(persisted.bytes);
+      if (previous.companyTrust != null ||
+          await store.readState(companyCustodyNamespace(namespace)) != null) {
+        throw StateError('Company authority prevents local reset');
+      }
+      if (previous.pendingCommand != null) {
+        throw StateError('Finish pending company command before resetting');
+      }
+      await _write(
+        await _newRecord(previous.floors),
+        expectedRevision: persisted.revision,
+      );
+      readiness = InstallationReadiness.needsRecovery;
+    },
+  );
 
   Future<void> completeReset(AppDatabase db) async {
     if (readiness == InstallationReadiness.unsupported) return;

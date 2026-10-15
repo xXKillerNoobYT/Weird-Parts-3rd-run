@@ -2,18 +2,24 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math';
 
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
+import 'package:wired_parts/features/pin/pin_service.dart';
+import 'package:wired_parts/features/reset/local_data_reset.dart';
 
 String _canonical(Object? value) {
   Object? sorted(Object? item) {
@@ -28,11 +34,78 @@ String _canonical(Object? value) {
   return jsonEncode(sorted(value));
 }
 
+Future<Uint8List> _resignEncryptedFirstOwnerPackage({
+  required Uint8List original,
+  required String passphrase,
+  required _MemoryStore store,
+  required String namespace,
+  required void Function(Map<String, dynamic>, Map<String, dynamic>) mutate,
+}) async {
+  final wrapper = jsonDecode(utf8.decode(original)) as Map<String, dynamic>;
+  final header = Map<String, dynamic>.from(wrapper['header'] as Map);
+  final salt = base64Decode(header['salt'] as String);
+  final derived = await Argon2id(
+    parallelism: 1,
+    memory: 19456,
+    iterations: 2,
+    hashLength: 32,
+  ).deriveKey(secretKey: SecretKey(utf8.encode(passphrase)), nonce: salt);
+  final key = SecretKey(await derived.extractBytes());
+  final plain = await AesGcm.with256bits().decrypt(
+    SecretBox(
+      base64Decode(wrapper['cipher'] as String),
+      nonce: base64Decode(header['nonce'] as String),
+      mac: Mac(base64Decode(wrapper['mac'] as String)),
+    ),
+    secretKey: key,
+    aad: utf8.encode(_canonical(header)),
+  );
+  final payload = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
+  final signed = jsonDecode(payload['facts'] as String) as Map<String, dynamic>;
+  final body = signed['body'] as Map<String, dynamic>;
+  mutate(body, payload);
+  final custody = jsonDecode(
+    utf8.decode(store.states[companyCustodyNamespace(namespace)]!.bytes),
+  ) as Map<String, dynamic>;
+  final root = await Ed25519().newKeyPairFromSeed(
+    base64Decode(custody['rootSeed'] as String),
+  );
+  final signature = await Ed25519().sign(
+    utf8.encode('wiredpart.company.facts@2:${_canonical(body)}'),
+    keyPair: root,
+  );
+  payload['facts'] = _canonical({
+    'body': body,
+    'signature': base64Encode(signature.bytes),
+  });
+  final random = Random.secure();
+  final nonce = Uint8List.fromList(
+    List<int>.generate(12, (_) => random.nextInt(256)),
+  );
+  header['nonce'] = base64Encode(nonce);
+  final encrypted = await AesGcm.with256bits().encrypt(
+    utf8.encode(_canonical(payload)),
+    secretKey: key,
+    nonce: nonce,
+    aad: utf8.encode(_canonical(header)),
+  );
+  return Uint8List.fromList(
+    utf8.encode(
+      _canonical({
+        'header': header,
+        'cipher': base64Encode(encrypted.cipherText),
+        'mac': base64Encode(encrypted.mac.bytes),
+      }),
+    ),
+  );
+}
+
 final class _MemoryStore
     implements InstallationSecureStore, RecoveryFilePublisher {
   final states = <String, ProtectedInstallationState>{};
   Future<void> Function(String namespace, Uint8List bytes)? beforeCas;
   Future<void> Function(String namespace)? beforeRead;
+  Future<void> Function()? afterPublish;
 
   @override
   Future<ProtectedInstallationState?> readState(String namespace) async {
@@ -64,10 +137,594 @@ final class _MemoryStore
     final file = File(absolutePath);
     await file.create(exclusive: true);
     await file.writeAsBytes(bytes, flush: true);
+    await afterPublish?.call();
+  }
+}
+
+final class _PausedReset extends LocalDataReset {
+  _PausedReset(Directory root) : super(supportDir: root, documentsDir: root);
+
+  final reached = Completer<void>();
+  final resume = Completer<void>();
+
+  @override
+  Future<void> preflight() async {
+    await super.preflight();
+    if (!reached.isCompleted) {
+      reached.complete();
+      await resume.future;
+    }
   }
 }
 
 void main() {
+  testWidgets(
+    'wipe paused after legacy preflight cannot rotate a newly active company',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync(
+        'company-wipe-race-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+      );
+      addTearDown(db.close);
+      final store = _MemoryStore();
+      const namespace = 'synthetic.wipe-race';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      late String deviceId;
+      late _PausedReset reset;
+      await tester.runAsync(() async {
+        await installation.start(db);
+        deviceId = await db.settingsDao.ensureDeviceId();
+        reset = _PausedReset(directory);
+      });
+      await tester.pumpWidget(
+        WiredPartsApp(
+          db: db,
+          pin: PinService(db.settingsDao),
+          deviceId: deviceId,
+          installation: installation,
+          reset: reset,
+          reopenDatabase: () => AppDatabase.forTesting(
+            NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        final wipe = expectLater(
+          tester.widget<AppScope>(find.byType(AppScope)).wipeLocalData(),
+          throwsA(isA<StateError>()),
+        );
+        await reset.reached.future.timeout(const Duration(seconds: 10));
+        await CompanyEnrollment(installation: installation, db: db).create(
+          companyName: 'Wipe Race Crew',
+          policy: CompanyContinuityPolicy.localContinuity,
+          pin: '1234',
+          recoveryPassphrase: 'wipe race recovery phrase',
+          recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+        );
+        final protected = store.states[namespace]!;
+        final installationId = installation.identity!.id.value;
+        final facts = await db.select(db.companyAuthorityFacts).get();
+        final witness = await db.select(db.companyBootstrapWitnesses).get();
+        reset.resume.complete();
+        await wipe;
+        expect(store.states[namespace]!.revision, protected.revision);
+        expect(store.states[namespace]!.bytes, protected.bytes);
+        expect(installation.identity!.id.value, installationId);
+        expect(await db.select(db.companyAuthorityFacts).get(), facts);
+        expect(await db.select(db.companyBootstrapWitnesses).get(), witness);
+        expect(await db.settingsDao.ensureDeviceId(), deviceId);
+      });
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  test(
+    'reset admission first prevents stale Create from writing custody',
+    () async {
+      final directory = Directory.systemTemp.createTempSync('reset-first-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+      );
+      addTearDown(db.close);
+      final store = _MemoryStore();
+      const namespace = 'synthetic.reset-first';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await installation.start(db);
+      await installation.prepareReset(db);
+      final afterReset = store.states[namespace]!;
+      await expectLater(
+        CompanyEnrollment(installation: installation, db: db).create(
+          companyName: 'Reset First Crew',
+          policy: CompanyContinuityPolicy.localContinuity,
+          pin: '1234',
+          recoveryPassphrase: 'reset first recovery phrase',
+          recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+        ),
+        throwsA(isA<CompanyBootstrapRefusal>()),
+      );
+      expect(store.states[namespace]!.revision, afterReset.revision);
+      expect(store.states[namespace]!.bytes, afterReset.bytes);
+      expect(
+        store.states.containsKey(companyCustodyNamespace(namespace)),
+        isFalse,
+      );
+      expect(await db.select(db.companyAuthorityFacts).get(), isEmpty);
+      expect(await db.select(db.companyBootstrapWitnesses).get(), isEmpty);
+    },
+  );
+
+  test('pending company custody blocks legacy reset and restore without SQL markers', () async {
+    final directory = Directory.systemTemp.createTempSync('pending-reset-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final db = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+    );
+    addTearDown(db.close);
+    final store = _MemoryStore();
+    const namespace = 'synthetic.pending-reset';
+    final installation = InstallationSecurity(
+      store: store,
+      namespace: namespace,
+    );
+    await installation.start(db);
+    store.beforeCas = (name, bytes) async {
+      if (name != companyCustodyNamespace(namespace)) return;
+      final next = jsonDecode(utf8.decode(bytes)) as Map;
+      if (next['facts'] != null) throw StateError('facts commit interrupted');
+    };
+    await expectLater(
+      CompanyEnrollment(installation: installation, db: db).create(
+        companyName: 'Pending Reset Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'pending reset recovery phrase',
+        recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(await db.select(db.companyAuthorityFacts).get(), isEmpty);
+    expect(await db.select(db.companyBootstrapWitnesses).get(), isEmpty);
+    final original = store.states[namespace]!;
+    final pending = store.states[companyCustodyNamespace(namespace)]!;
+    store.beforeCas = null;
+    await expectLater(
+      installation.prepareReset(db),
+      throwsA(isA<StateError>()),
+    );
+    await expectLater(
+      installation.prepareBusinessRestore(db),
+      throwsA(isA<StateError>()),
+    );
+    expect(store.states[namespace]!.revision, original.revision);
+    expect(store.states[namespace]!.bytes, original.bytes);
+    expect(
+      store.states[companyCustodyNamespace(namespace)]!.revision,
+      pending.revision,
+    );
+    expect(
+      store.states[companyCustodyNamespace(namespace)]!.bytes,
+      pending.bytes,
+    );
+  });
+
+  test(
+    'company commit fences cached legacy Jobs, Parts, and Taxonomy writers',
+    () async {
+      final directory = Directory.systemTemp.createTempSync('company-fence-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final file = File(p.join(directory.path, kSqliteFileName));
+      final companyDb = AppDatabase.forTesting(NativeDatabase(file));
+      final legacyDb = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(companyDb.close);
+      addTearDown(legacyDb.close);
+      final store = _MemoryStore();
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: 'synthetic.legacy-fence',
+      );
+      await installation.start(companyDb);
+      await CompanyEnrollment(installation: installation, db: companyDb).create(
+        companyName: 'Fenced Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'fenced recovery phrase 123',
+        recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+      );
+      final device = const Uuid().v4();
+      await expectLater(
+        legacyDb.jobsDao.insertJob(
+          id: const Uuid().v4(),
+          name: 'Stale job',
+          deviceId: device,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        legacyDb.partsDao.insertGeneralPart(
+          id: const Uuid().v4(),
+          name: 'Stale part',
+          deviceId: device,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        legacyDb.taxonomyDao.insertCategory(
+          id: const Uuid().v4(),
+          name: 'Stale category',
+          deviceId: device,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(await companyDb.select(companyDb.jobs).get(), isEmpty);
+      expect(await companyDb.select(companyDb.parts).get(), isEmpty);
+      expect(await companyDb.select(companyDb.categories).get(), isEmpty);
+      expect(
+        await companyDb.select(companyDb.companyAuthorityFacts).get(),
+        hasLength(1),
+      );
+      expect(
+        await companyDb.select(companyDb.companyBootstrapWitnesses).get(),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('held legacy write commits before Create admission; Create leaves no custody', () async {
+    final directory = Directory.systemTemp.createTempSync('legacy-first-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File(p.join(directory.path, kSqliteFileName));
+    final legacyDb = AppDatabase.forTesting(NativeDatabase(file));
+    final companyDb = AppDatabase.forTesting(NativeDatabase(file));
+    addTearDown(legacyDb.close);
+    addTearDown(companyDb.close);
+    final store = _MemoryStore();
+    const namespace = 'synthetic.legacy-first';
+    final installation = InstallationSecurity(
+      store: store,
+      namespace: namespace,
+    );
+    await installation.start(companyDb);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final legacyWrite = legacyDb.transaction(() async {
+      await legacyDb.customStatement(
+        'UPDATE app_settings SET value = value WHERE key = ?',
+        [kInstallationBindingKey],
+      );
+      await legacyDb.jobsDao.insertJob(
+        id: const Uuid().v4(),
+        name: 'Earlier job',
+        deviceId: const Uuid().v4(),
+      );
+      entered.complete();
+      await release.future;
+    });
+    await entered.future;
+    final creationCheck = expectLater(
+      CompanyEnrollment(installation: installation, db: companyDb).create(
+        companyName: 'Later Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'later recovery phrase 123',
+        recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+      ),
+      throwsA(isA<Exception>()),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    release.complete();
+    await legacyWrite;
+    await creationCheck;
+    await expectLater(
+      CompanyEnrollment(installation: installation, db: companyDb).create(
+        companyName: 'Later Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'later recovery phrase 123',
+        recoveryFile: File(p.join(directory.path, 'authority.wpca')),
+      ),
+      throwsA(isA<CompanyBootstrapRefusal>()),
+    );
+    expect(await companyDb.select(companyDb.jobs).get(), hasLength(1));
+    expect(
+      await companyDb.select(companyDb.companyAuthorityFacts).get(),
+      isEmpty,
+    );
+    expect(
+      await companyDb.select(companyDb.companyBootstrapWitnesses).get(),
+      isEmpty,
+    );
+    expect(
+      store.states.containsKey(companyCustodyNamespace(namespace)),
+      isFalse,
+    );
+  });
+
+  test(
+    'rolled-back facts plus legacy job prevent pending Create adoption',
+    () async {
+      final directory = Directory.systemTemp.createTempSync('pending-legacy-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+      );
+      addTearDown(db.close);
+      final store = _MemoryStore();
+      const namespace = 'synthetic.pending-legacy';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await installation.start(db);
+      store.beforeCas = (name, bytes) async {
+        if (name != companyCustodyNamespace(namespace)) return;
+        final state = jsonDecode(utf8.decode(bytes)) as Map;
+        if (state['facts'] != null && state['digest'] == null) {
+          throw StateError('injected after_writeFacts rollback');
+        }
+      };
+      final enrollment = CompanyEnrollment(installation: installation, db: db);
+      final destination = File(p.join(directory.path, 'authority.wpca'));
+      Future<CompanyIdentity> create() => enrollment.create(
+        companyName: 'Pending Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'pending recovery phrase 123',
+        recoveryFile: destination,
+      );
+      await expectLater(create(), throwsA(isA<StateError>()));
+      expect(await db.select(db.companyAuthorityFacts).get(), isEmpty);
+      expect(await db.select(db.companyBootstrapWitnesses).get(), isEmpty);
+      final pending = jsonDecode(
+        utf8.decode(store.states[companyCustodyNamespace(namespace)]!.bytes),
+      ) as Map;
+      store.beforeCas = null;
+      await db.jobsDao.insertJob(
+        id: const Uuid().v4(),
+        name: 'Real legacy job',
+        deviceId: const Uuid().v4(),
+      );
+      await expectLater(create(), throwsA(isA<CompanyBootstrapRefusal>()));
+      final after = jsonDecode(
+        utf8.decode(store.states[companyCustodyNamespace(namespace)]!.bytes),
+      ) as Map;
+      expect(after['company'], pending['company']);
+      expect(after['shop'], pending['shop']);
+      expect(after['intent'], pending['intent']);
+      expect(
+        identical(after['rootSeed'], pending['rootSeed']) ||
+            after['rootSeed'] == pending['rootSeed'],
+        isTrue,
+      );
+      expect(await db.select(db.jobs).get(), hasLength(1));
+      expect(await db.select(db.companyAuthorityFacts).get(), isEmpty);
+      expect(await db.select(db.companyBootstrapWitnesses).get(), isEmpty);
+      expect(destination.existsSync(), isFalse);
+    },
+  );
+
+  test('rolled-back recovery facts cannot adopt a later legacy job', () async {
+    final directory = Directory.systemTemp.createTempSync('recovery-adoption-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final sourceDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+    );
+    addTearDown(sourceDb.close);
+    final sourceStore = _MemoryStore();
+    final sourceInstallation = InstallationSecurity(
+      store: sourceStore,
+      namespace: 'synthetic.recovery-adoption-source',
+    );
+    await sourceInstallation.start(sourceDb);
+    final sourceFile = File(p.join(directory.path, 'source.wpca'));
+    await CompanyEnrollment(
+      installation: sourceInstallation,
+      db: sourceDb,
+    ).create(
+      companyName: 'Recovery Adoption Crew',
+      policy: CompanyContinuityPolicy.localContinuity,
+      pin: '1234',
+      recoveryPassphrase: 'recovery adoption source phrase',
+      recoveryFile: sourceFile,
+    );
+    final targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    addTearDown(targetDb.close);
+    final targetStore = _MemoryStore();
+    const targetNamespace = 'synthetic.recovery-adoption-target';
+    final targetInstallation = InstallationSecurity(
+      store: targetStore,
+      namespace: targetNamespace,
+    );
+    await targetInstallation.start(targetDb);
+    final target = CompanyEnrollment(
+      installation: targetInstallation,
+      db: targetDb,
+    );
+    final destination = File(p.join(directory.path, 'target.wpca'));
+    Future<CompanyIdentity> recover() => target.recover(
+      policy: CompanyContinuityPolicy.localContinuity,
+      sourceFile: sourceFile,
+      sourcePassphrase: 'recovery adoption source phrase',
+      newPin: '0123',
+      newRecoveryPassphrase: 'recovery adoption target phrase',
+      newRecoveryFile: destination,
+    );
+    var interrupted = false;
+    targetStore.beforeCas = (name, bytes) async {
+      if (interrupted || name != companyCustodyNamespace(targetNamespace)) {
+        return;
+      }
+      final next = jsonDecode(utf8.decode(bytes)) as Map;
+      if (next['facts'] != null) {
+        interrupted = true;
+        throw StateError('simulated recovery facts CAS interruption');
+      }
+    };
+    await expectLater(recover(), throwsA(isA<StateError>()));
+    expect(interrupted, isTrue);
+    expect(
+      await targetDb.select(targetDb.companyAuthorityFacts).get(),
+      isEmpty,
+    );
+    final pending =
+        targetStore.states[companyCustodyNamespace(targetNamespace)]!;
+    targetStore.beforeCas = null;
+    await targetDb.jobsDao.insertJob(
+      id: const Uuid().v4(),
+      name: 'Later legacy job',
+      deviceId: const Uuid().v4(),
+    );
+    await expectLater(recover(), throwsA(isA<CompanyBootstrapRefusal>()));
+    expect(
+      targetStore.states[companyCustodyNamespace(targetNamespace)]!.bytes,
+      pending.bytes,
+    );
+    expect(
+      await targetDb.select(targetDb.companyAuthorityFacts).get(),
+      isEmpty,
+    );
+    expect(
+      await targetDb.select(targetDb.companyBootstrapWitnesses).get(),
+      isEmpty,
+    );
+    expect(await targetDb.select(targetDb.jobs).get(), hasLength(1));
+    expect(destination.existsSync(), isFalse);
+  });
+
+  test('authenticated revoked admin is refused before recovery mutation', () async {
+    final directory = Directory.systemTemp.createTempSync('revoked-source-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final sourceDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+    );
+    addTearDown(sourceDb.close);
+    final sourceStore = _MemoryStore();
+    const sourceNamespace = 'synthetic.revoked-source';
+    final sourceInstallation = InstallationSecurity(
+      store: sourceStore,
+      namespace: sourceNamespace,
+    );
+    await sourceInstallation.start(sourceDb);
+    final originalFile = File(p.join(directory.path, 'original.wpca'));
+    final originalCompany =
+        await CompanyEnrollment(
+          installation: sourceInstallation,
+          db: sourceDb,
+        ).create(
+          companyName: 'Revoked Source',
+          policy: CompanyContinuityPolicy.localContinuity,
+          pin: '1234',
+          recoveryPassphrase: 'revoked source phrase 123',
+          recoveryFile: originalFile,
+        );
+    final original = await originalFile.readAsBytes();
+    await sourceDb.close();
+    final targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    addTearDown(targetDb.close);
+    final targetStore = _MemoryStore();
+    final targetInstallation = InstallationSecurity(
+      store: targetStore,
+      namespace: 'synthetic.revoked-target',
+    );
+    await targetInstallation.start(targetDb);
+    final baseRevision =
+        targetStore.states['synthetic.revoked-target']!.revision;
+    final target = CompanyEnrollment(
+      installation: targetInstallation,
+      db: targetDb,
+    );
+    for (final profile in ['revoked user', 'reduced user capability']) {
+      final forged = await _resignEncryptedFirstOwnerPackage(
+        original: original,
+        passphrase: 'revoked source phrase 123',
+        store: sourceStore,
+        namespace: sourceNamespace,
+        mutate: (body, _) {
+          final user = (body['users'] as List).single as Map<String, dynamic>;
+          if (profile == 'revoked user') {
+            user['revoked'] = true;
+          } else {
+            user['capabilities'] = ['patchJobLine', 'deleteJobLine'];
+          }
+        },
+      );
+      final forgedFile = File(p.join(directory.path, '$profile.wpca'));
+      await forgedFile.writeAsBytes(forged);
+      final nextFile = File(p.join(directory.path, '$profile.next.wpca'));
+      await expectLater(
+        target.recover(
+          policy: CompanyContinuityPolicy.localContinuity,
+          sourceFile: forgedFile,
+          sourcePassphrase: 'revoked source phrase 123',
+          newPin: '0123',
+          newRecoveryPassphrase: 'fresh recovery phrase 123',
+          newRecoveryFile: nextFile,
+        ),
+        throwsA(isA<CompanyBootstrapRefusal>()),
+      );
+      expect(targetStore.states.keys, contains('synthetic.revoked-target'));
+      expect(targetStore.states.length, 1);
+      expect(
+        targetStore.states['synthetic.revoked-target']!.revision,
+        baseRevision,
+      );
+      expect(
+        await targetDb.select(targetDb.companyAuthorityFacts).get(),
+        isEmpty,
+      );
+      expect(
+        await targetDb.select(targetDb.companyBootstrapWitnesses).get(),
+        isEmpty,
+      );
+      expect(nextFile.existsSync(), isFalse);
+    }
+    final revokedDevice = await _resignEncryptedFirstOwnerPackage(
+      original: original,
+      passphrase: 'revoked source phrase 123',
+      store: sourceStore,
+      namespace: sourceNamespace,
+      mutate: (body, payload) {
+        final device = (body['devices'] as List).single as Map<String, dynamic>;
+        device['revoked'] = true;
+        (payload['floors']
+                as Map<String, dynamic>)['revocation.device.${device['id']}'] =
+            1;
+      },
+    );
+    final revokedDeviceFile = File(
+      p.join(directory.path, 'revoked-device.wpca'),
+    );
+    await revokedDeviceFile.writeAsBytes(revokedDevice);
+    final recovered = await target.recover(
+      policy: CompanyContinuityPolicy.localContinuity,
+      sourceFile: revokedDeviceFile,
+      sourcePassphrase: 'revoked source phrase 123',
+      newPin: '0123',
+      newRecoveryPassphrase: 'fresh recovery phrase 123',
+      newRecoveryFile: File(p.join(directory.path, 'valid-next.wpca')),
+    );
+    expect(recovered.companyId, isNotEmpty);
+    expect(
+      targetInstallation
+          .knownSecurityFloors['revocation.device.${originalCompany.deviceId}'],
+      1,
+    );
+  });
+
   test(
     'cold restart after facts commit and lost custody needs recovery',
     () async {
@@ -398,6 +1055,132 @@ void main() {
     expect(await db.select(db.companyAuthorityFacts).get(), hasLength(1));
     expect(await enrollment.readStatus(), CompanyBootstrapStatus.active);
   });
+
+  test(
+    'unconfirmed complete export requires a fresh destination on retry',
+    () async {
+      final directory = Directory.systemTemp.createTempSync('company-publish-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+      );
+      addTearDown(db.close);
+      final store = _MemoryStore();
+      const namespace = 'synthetic.publish-interruption';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await installation.start(db);
+      final enrollment = CompanyEnrollment(installation: installation, db: db);
+      final first = File(p.join(directory.path, 'first.wpca'));
+      final second = File(p.join(directory.path, 'second.wpca'));
+      Future<CompanyIdentity> create(File destination) => enrollment.create(
+        companyName: 'Publisher Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'publisher recovery phrase 123',
+        recoveryFile: destination,
+      );
+      store.afterPublish = () async {
+        throw StateError('simulated reply loss after complete write');
+      };
+      await expectLater(create(first), throwsA(isA<StateError>()));
+      final firstBytes = await first.readAsBytes();
+      final pending = jsonDecode(
+        utf8.decode(store.states[companyCustodyNamespace(namespace)]!.bytes),
+      ) as Map<String, dynamic>;
+      expect(pending['status'], 'pending');
+      store.afterPublish = null;
+      await expectLater(
+        create(first),
+        throwsA(
+          isA<CompanyBootstrapRefusal>().having(
+            (e) => e.message,
+            'message',
+            contains('fresh destination'),
+          ),
+        ),
+      );
+      expect(await enrollment.readStatus(), CompanyBootstrapStatus.pending);
+      expect(await first.readAsBytes(), firstBytes);
+      final identity = await create(second);
+      expect(identity.companyId, pending['company']);
+      expect(identity.userId, pending['user']);
+      expect(await second.readAsBytes(), firstBytes);
+      expect(await enrollment.readStatus(), CompanyBootstrapStatus.active);
+      store.afterPublish = () async {
+        throw StateError('active retry must not republish');
+      };
+      final repeated = await create(second);
+      expect(repeated.companyId, identity.companyId);
+      expect(repeated.packageId, identity.packageId);
+      expect(await second.readAsBytes(), firstBytes);
+    },
+  );
+
+  test(
+    'activation CAS interruption retries only at a fresh destination',
+    () async {
+      final directory = Directory.systemTemp.createTempSync(
+        'company-activate-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File(p.join(directory.path, kSqliteFileName))),
+      );
+      addTearDown(db.close);
+      final store = _MemoryStore();
+      const namespace = 'synthetic.activation-retry';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await installation.start(db);
+      final enrollment = CompanyEnrollment(installation: installation, db: db);
+      final first = File(p.join(directory.path, 'first.wpca'));
+      final second = File(p.join(directory.path, 'second.wpca'));
+      Future<CompanyIdentity> create(File destination) => enrollment.create(
+        companyName: 'Activation Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '1234',
+        recoveryPassphrase: 'activation retry recovery phrase',
+        recoveryFile: destination,
+      );
+      var interrupted = false;
+      store.beforeCas = (name, bytes) async {
+        if (interrupted || name != namespace) return;
+        final next = jsonDecode(utf8.decode(bytes)) as Map;
+        if (next['companyTrust'] != null) {
+          interrupted = true;
+          throw StateError('simulated activation CAS interruption');
+        }
+      };
+      await expectLater(create(first), throwsA(isA<StateError>()));
+      expect(interrupted, isTrue);
+      final original = await first.readAsBytes();
+      final pending = jsonDecode(
+        utf8.decode(store.states[companyCustodyNamespace(namespace)]!.bytes),
+      ) as Map<String, dynamic>;
+      expect(pending['status'], 'pending');
+      store.beforeCas = null;
+      await expectLater(
+        create(first),
+        throwsA(
+          isA<CompanyBootstrapRefusal>().having(
+            (e) => e.message,
+            'message',
+            contains('fresh destination'),
+          ),
+        ),
+      );
+      final identity = await create(second);
+      expect(identity.companyId, pending['company']);
+      expect(identity.packageId, pending['package']);
+      expect(await second.readAsBytes(), original);
+      expect(await enrollment.readStatus(), CompanyBootstrapStatus.active);
+    },
+  );
 
   test(
     'sign-out during an in-flight correct PIN never publishes a session',

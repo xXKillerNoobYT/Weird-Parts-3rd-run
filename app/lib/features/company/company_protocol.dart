@@ -636,8 +636,15 @@ final class CompanyEnrollment {
           db,
           photosDirectory: photosDirectory,
         );
+        await _checkBinding(custody!, requireActive: false);
+        if (installation.readiness != InstallationReadiness.ready ||
+            installation._record?.companyTrust != null) {
+          throw const CompanyBootstrapRefusal(
+            'Installation changed before company admission',
+          );
+        }
         custody = await _writeCustody(custody!);
-        await _writeFacts(custody!);
+        await _writeFacts(custody!, photosDirectory: photosDirectory);
       });
     } else {
       await _checkBinding(custody, requireActive: false);
@@ -649,7 +656,7 @@ final class CompanyEnrollment {
       }
       custody = (await _readCustody())!;
       if (custody.status == 'active') return _identity(custody);
-      await _writeFacts(custody);
+      await _writeFacts(custody, photosDirectory: photosDirectory);
     }
     custody = (await _readCustody())!;
     custody = await _writeRecoveryPackage(
@@ -772,8 +779,19 @@ final class CompanyEnrollment {
           db,
           photosDirectory: photosDirectory,
         );
+        await _checkBinding(custody!, requireActive: false);
+        if (installation.readiness != InstallationReadiness.ready ||
+            installation._record?.companyTrust != null) {
+          throw const CompanyBootstrapRefusal(
+            'Installation changed before recovery admission',
+          );
+        }
         custody = await _writeCustody(custody!);
-        await _writeRecoveryFacts(custody!, source);
+        await _writeRecoveryFacts(
+          custody!,
+          source,
+          photosDirectory: photosDirectory,
+        );
       });
     } else {
       await _checkBinding(custody, requireActive: custody.status == 'active');
@@ -790,7 +808,11 @@ final class CompanyEnrollment {
       }
       custody = (await _readCustody())!;
       if (custody.status == 'active') return _identity(custody);
-      await _writeRecoveryFacts(custody, source);
+      await _writeRecoveryFacts(
+        custody,
+        source,
+        photosDirectory: photosDirectory,
+      );
     }
     custody = (await _readCustody())!;
     custody = await _writeRecoveryPackage(
@@ -814,8 +836,9 @@ final class CompanyEnrollment {
 
   Future<void> _writeRecoveryFacts(
     _CompanyCustody custody,
-    _VerifiedRecovery source,
-  ) async {
+    _VerifiedRecovery source, {
+    Directory? photosDirectory,
+  }) async {
     final existing = await (db.select(
       db.companyBootstrapWitnesses,
     )..where((t) => t.companyId.equals(custody.company))).getSingleOrNull();
@@ -937,6 +960,14 @@ final class CompanyEnrollment {
       oldSigned,
     ];
     await db.transaction(() async {
+      await db.customStatement(
+        'UPDATE app_settings SET value = value WHERE key = ?',
+        [kInstallationBindingKey],
+      );
+      await CompanyBootstrap.preflightFreshShop(
+        db,
+        photosDirectory: photosDirectory,
+      );
       for (final item in lineage) {
         final prior = (jsonDecode(item)['body'] as Map<String, dynamic>);
         final priorCommitment = hashes.sha256
@@ -979,7 +1010,10 @@ final class CompanyEnrollment {
     await _writeCustody(custody.change({'facts': commitment}));
   }
 
-  Future<void> _writeFacts(_CompanyCustody custody) async {
+  Future<void> _writeFacts(
+    _CompanyCustody custody, {
+    Directory? photosDirectory,
+  }) async {
     final existing = await (db.select(
       db.companyBootstrapWitnesses,
     )..where((t) => t.companyId.equals(custody.company))).getSingleOrNull();
@@ -1051,6 +1085,14 @@ final class CompanyEnrollment {
       'signature': base64Encode(signature.bytes),
     });
     await db.transaction(() async {
+      await db.customStatement(
+        'UPDATE app_settings SET value = value WHERE key = ?',
+        [kInstallationBindingKey],
+      );
+      await CompanyBootstrap.preflightFreshShop(
+        db,
+        photosDirectory: photosDirectory,
+      );
       await db
           .into(db.companyAuthorityFacts)
           .insert(
@@ -1212,37 +1254,28 @@ final class CompanyEnrollment {
       throw const CompanyBootstrapRefusal('Recovery destination is unsafe');
     }
     if (destination.existsSync()) {
-      if (await destination.length() > 65536) {
-        throw const CompanyBootstrapRefusal(
-          'Recovery destination exceeds capacity',
-        );
-      }
-      if (hashes.sha256.convert(await destination.readAsBytes()).toString() !=
-          digest) {
-        throw const CompanyBootstrapRefusal(
-          'Recovery destination already exists',
-        );
-      }
-    } else {
-      if (custody.packageDigest == null) {
-        custody = await _writeCustody(custody.change({'digest': digest}));
-      }
-      if (installation.store is! RecoveryFilePublisher) {
-        throw const CompanyBootstrapRefusal(
-          'Secure recovery file publication is unavailable',
-        );
-      }
-      final publisher = installation.store as RecoveryFilePublisher;
-      try {
-        await publisher.writeRecoveryFileExclusive(destination.path, fileBytes);
-      } on FileSystemException {
-        throw const CompanyBootstrapRefusal(
-          'Recovery destination appeared during export',
-        );
-      }
-      // A partial interrupted write stays visible and is never overwritten.
-      // Retrying may choose a new destination for the same pinned ciphertext.
+      throw const CompanyBootstrapRefusal(
+        'Recovery destination already exists; choose a fresh destination',
+      );
     }
+    if (custody.packageDigest == null) {
+      custody = await _writeCustody(custody.change({'digest': digest}));
+    }
+    if (installation.store is! RecoveryFilePublisher) {
+      throw const CompanyBootstrapRefusal(
+        'Secure recovery file publication is unavailable',
+      );
+    }
+    final publisher = installation.store as RecoveryFilePublisher;
+    try {
+      await publisher.writeRecoveryFileExclusive(destination.path, fileBytes);
+    } on FileSystemException {
+      throw const CompanyBootstrapRefusal(
+        'Recovery destination appeared during export; choose a fresh destination',
+      );
+    }
+    // A complete but unconfirmed write also remains pending. Retrying with a
+    // fresh destination repeats the native durability barrier for this payload.
     final written = await destination.readAsBytes();
     if (hashes.sha256.convert(written).toString() != digest) {
       throw const CompanyBootstrapRefusal('Recovery package write differs');
@@ -1507,6 +1540,7 @@ Future<_VerifiedRecovery> _verifyRecoverySource(
     currentRoot: root,
     lineage: rawLineage.cast<String>(),
   );
+  _requireRecoverableFirstOwner(body);
   final recovery = body['recovery'] as Map;
   final recoveryPublic = await (await Ed25519().newKeyPairFromSeed(
     recoverySeed,
@@ -1523,6 +1557,13 @@ Future<_VerifiedRecovery> _verifyRecoverySource(
   final company = body['company'] as String;
   final user = (body['users'] as List).single as Map;
   final device = (body['devices'] as List).single as Map;
+  if (device['revoked'] == true &&
+      (floors['revocation.device.${device['id']}'] ?? 0) == 0 &&
+      (floors['revocation.grant.${device['grant']}'] ?? 0) == 0) {
+    throw const CompanyBootstrapRefusal(
+      'Revoked source device lacks a signed revocation floor',
+    );
+  }
   if ((floors['authority.$company'] ?? 0) != (body['authority'] as int) ||
       (floors['credential.${user['id']}'] ?? 0) !=
           (user['credential'] as int) ||
@@ -1552,6 +1593,116 @@ Future<_VerifiedRecovery> _verifyRecoverySource(
     Map.unmodifiable(floors),
     hashes.sha256.convert(bytes).toString(),
   );
+}
+
+/// Recovery currently supports the exact first-owner profile issued by
+/// Create. In particular, it must never turn a signed revoked or reduced
+/// administrator into the full administrator issued by rotation.
+void _requireRecoverableFirstOwner(Map<String, dynamic> body) {
+  bool keys(Map value, Set<String> expected) =>
+      value.keys.toSet().containsAll(expected) &&
+      expected.containsAll(value.keys);
+  bool id(Object? value) =>
+      value is String && Uuid.isValidUUID(fromString: value);
+  bool key(Object? value) {
+    if (value is! String) return false;
+    try {
+      return base64Decode(value).length == 32;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  bool scope(Object? value, Object? shop) =>
+      value is List && value.length == 1 && value.single == shop;
+  const capabilities = {'patchJobLine', 'deleteJobLine', 'enrollDevice'};
+  bool grants(Object? value) =>
+      value is List &&
+      value.length == capabilities.length &&
+      value.toSet().length == capabilities.length &&
+      value.toSet().containsAll(capabilities);
+  bool entities(Object? value) {
+    if (value is! List || value.length > 128) return false;
+    final seen = <String>{};
+    for (final item in value) {
+      if (item is! Map || !id(item['id']) || item['shop'] != body['shop']) {
+        return false;
+      }
+      final kind = item['kind'];
+      if (kind == 'job') {
+        if (!keys(item, {'kind', 'id', 'shop'})) return false;
+      } else if (kind == 'jobLine') {
+        if (!keys(item, {'kind', 'id', 'shop', 'baseline'}) ||
+            item['baseline'] is! String ||
+            !RegExp(r'^[a-f0-9]{64}$').hasMatch(item['baseline'] as String)) {
+          return false;
+        }
+      } else {
+        return false;
+      }
+      if (!seen.add('$kind:${item['id']}')) return false;
+    }
+    return true;
+  }
+
+  final recovery = body['recovery'];
+  final users = body['users'];
+  final devices = body['devices'];
+  if (recovery is! Map ||
+      !keys(recovery, {'v', 'key', 'package'}) ||
+      recovery['v'] != 1 ||
+      !key(recovery['key']) ||
+      !id(recovery['package']) ||
+      !entities(body['entities']) ||
+      users is! List ||
+      users.length != 1 ||
+      users.single is! Map ||
+      devices is! List ||
+      devices.length != 1 ||
+      devices.single is! Map) {
+    throw const CompanyBootstrapRefusal('Unsupported recovery actor semantics');
+  }
+  final user = users.single as Map;
+  final device = devices.single as Map;
+  if (!keys(user, {
+        'id',
+        'credential',
+        'permission',
+        'revoked',
+        'shops',
+        'capabilities',
+      }) ||
+      !id(user['id']) ||
+      user['credential'] is! int ||
+      (user['credential'] as int) < 1 ||
+      user['permission'] is! int ||
+      (user['permission'] as int) < 1 ||
+      user['revoked'] != false ||
+      !scope(user['shops'], body['shop']) ||
+      !grants(user['capabilities']) ||
+      !keys(device, {
+        'id',
+        'installation',
+        'generation',
+        'key',
+        'grant',
+        'version',
+        'revoked',
+        'shops',
+        'capabilities',
+      }) ||
+      !id(device['id']) ||
+      !id(device['installation']) ||
+      !id(device['generation']) ||
+      !key(device['key']) ||
+      !id(device['grant']) ||
+      device['version'] is! int ||
+      (device['version'] as int) < 1 ||
+      device['revoked'] is! bool ||
+      !scope(device['shops'], body['shop']) ||
+      !grants(device['capabilities'])) {
+    throw const CompanyBootstrapRefusal('Unsupported recovery actor semantics');
+  }
 }
 
 Future<Map<String, dynamic>> _verifyFactLineage({
@@ -1650,6 +1801,7 @@ Future<Map<String, dynamic>> _verifyFactLineage({
         )) {
       throw const CompanyBootstrapRefusal('Company authority signature failed');
     }
+    _requireRecoverableFirstOwner(body);
     if (authority == 1) {
       return body;
     }

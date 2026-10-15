@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../app_database.dart';
+import '../../features/company/company_store_markers.dart';
 import '../tables/taxonomy.dart';
 
 part 'taxonomy_dao.g.dart';
@@ -15,17 +16,19 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(categories).insert(
-      CategoriesCompanion.insert(
-        id: id,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(categories).insert(
+        CategoriesCompanion.insert(
+          id: id,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<String> insertStyle({
@@ -34,18 +37,20 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(styles).insert(
-      StylesCompanion.insert(
-        id: id,
-        categoryId: categoryId,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(styles).insert(
+        StylesCompanion.insert(
+          id: id,
+          categoryId: categoryId,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<String> insertType({
@@ -54,18 +59,20 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(types).insert(
-      TypesCompanion.insert(
-        id: id,
-        styleId: styleId,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(types).insert(
+        TypesCompanion.insert(
+          id: id,
+          styleId: styleId,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<String> insertDevice({
@@ -73,17 +80,19 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(devices).insert(
-      DevicesCompanion.insert(
-        id: id,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(devices).insert(
+        DevicesCompanion.insert(
+          id: id,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<String> insertSupplier({
@@ -91,17 +100,19 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(suppliers).insert(
-      SuppliersCompanion.insert(
-        id: id,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(suppliers).insert(
+        SuppliersCompanion.insert(
+          id: id,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<String> insertBrand({
@@ -109,17 +120,19 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
     required String name,
     required String deviceId,
   }) async {
-    final now = DateTime.now().toUtc();
-    await into(brands).insert(
-      BrandsCompanion.insert(
-        id: id,
-        name: name,
-        originDeviceId: deviceId,
-        createdAt: now,
-        modifiedAt: now,
-      ),
-    );
-    return id;
+    return legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await into(brands).insert(
+        BrandsCompanion.insert(
+          id: id,
+          name: name,
+          originDeviceId: deviceId,
+          createdAt: now,
+          modifiedAt: now,
+        ),
+      );
+      return id;
+    });
   }
 
   Future<List<Category>> listCategories() {
@@ -169,47 +182,55 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
   }
 
   Future<void> renameCategory(String id, String name) async {
-    final now = DateTime.now().toUtc();
-    await (update(categories)..where((t) => t.id.equals(id))).write(
-      CategoriesCompanion.custom(
-        name: Variable(name),
-        modifiedAt: Variable(now),
-        revision: categories.revision + const Constant(1),
-      ),
-    );
+    await legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await (update(categories)..where((t) => t.id.equals(id))).write(
+        CategoriesCompanion.custom(
+          name: Variable(name),
+          modifiedAt: Variable(now),
+          revision: categories.revision + const Constant(1),
+        ),
+      );
+    });
   }
 
   Future<void> renameStyle(String id, String name) async {
-    final now = DateTime.now().toUtc();
-    await (update(styles)..where((t) => t.id.equals(id))).write(
-      StylesCompanion.custom(
-        name: Variable(name),
-        modifiedAt: Variable(now),
-        revision: styles.revision + const Constant(1),
-      ),
-    );
+    await legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await (update(styles)..where((t) => t.id.equals(id))).write(
+        StylesCompanion.custom(
+          name: Variable(name),
+          modifiedAt: Variable(now),
+          revision: styles.revision + const Constant(1),
+        ),
+      );
+    });
   }
 
   Future<void> renameType(String id, String name) async {
-    final now = DateTime.now().toUtc();
-    await (update(types)..where((t) => t.id.equals(id))).write(
-      TypesCompanion.custom(
-        name: Variable(name),
-        modifiedAt: Variable(now),
-        revision: types.revision + const Constant(1),
-      ),
-    );
+    await legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await (update(types)..where((t) => t.id.equals(id))).write(
+        TypesCompanion.custom(
+          name: Variable(name),
+          modifiedAt: Variable(now),
+          revision: types.revision + const Constant(1),
+        ),
+      );
+    });
   }
 
   Future<void> renameBrand(String id, String name) async {
-    final now = DateTime.now().toUtc();
-    await (update(brands)..where((t) => t.id.equals(id))).write(
-      BrandsCompanion.custom(
-        name: Variable(name),
-        modifiedAt: Variable(now),
-        revision: brands.revision + const Constant(1),
-      ),
-    );
+    await legacyBusinessWrite(db, () async {
+      final now = DateTime.now().toUtc();
+      await (update(brands)..where((t) => t.id.equals(id))).write(
+        BrandsCompanion.custom(
+          name: Variable(name),
+          modifiedAt: Variable(now),
+          revision: brands.revision + const Constant(1),
+        ),
+      );
+    });
   }
 
   Future<bool> isCategoryEmpty(String id) async {
@@ -229,22 +250,28 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
   }
 
   Future<void> softDeleteCategory(String id) async {
-    await _tombstoneCategories(id);
+    await legacyBusinessWrite(db, () async {
+      await _tombstoneCategories(id);
+    });
   }
 
   Future<void> softDeleteStyle(String id) async {
-    await _tombstoneStyles(id);
+    await legacyBusinessWrite(db, () async {
+      await _tombstoneStyles(id);
+    });
   }
 
   Future<void> softDeleteType(String id) async {
-    await _tombstoneTypes(id);
+    await legacyBusinessWrite(db, () async {
+      await _tombstoneTypes(id);
+    });
   }
 
   Future<void> _tombstoneCategories(String id) async {
     final now = DateTime.now().toUtc();
-    await (update(categories)
-          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
-        .write(
+    await (update(
+      categories,
+    )..where((t) => t.id.equals(id) & t.deletedAt.isNull())).write(
       CategoriesCompanion.custom(
         deletedAt: Variable(now),
         modifiedAt: Variable(now),
@@ -255,9 +282,9 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
 
   Future<void> _tombstoneStyles(String id) async {
     final now = DateTime.now().toUtc();
-    await (update(styles)
-          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
-        .write(
+    await (update(
+      styles,
+    )..where((t) => t.id.equals(id) & t.deletedAt.isNull())).write(
       StylesCompanion.custom(
         deletedAt: Variable(now),
         modifiedAt: Variable(now),
@@ -268,9 +295,9 @@ class TaxonomyDao extends DatabaseAccessor<AppDatabase>
 
   Future<void> _tombstoneTypes(String id) async {
     final now = DateTime.now().toUtc();
-    await (update(types)
-          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
-        .write(
+    await (update(
+      types,
+    )..where((t) => t.id.equals(id) & t.deletedAt.isNull())).write(
       TypesCompanion.custom(
         deletedAt: Variable(now),
         modifiedAt: Variable(now),
