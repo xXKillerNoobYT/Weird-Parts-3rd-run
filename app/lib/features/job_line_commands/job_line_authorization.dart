@@ -113,6 +113,82 @@ class _CompanyFacts {
   }
 }
 
+class _ReceiverAuthority {
+  _ReceiverAuthority(this.facts, this.trust, this.floors);
+  final _CompanyFacts facts;
+  final CompanyTrustAnchor trust;
+  final Map<String, int> floors;
+}
+
+/// This capability never leaves the command transaction that created it.
+/// Public installation APIs cannot manufacture an admitted receipt from rows.
+final class VerifiedJobLineReceiptAdmission {
+  VerifiedJobLineReceiptAdmission._(
+    this._db,
+    this._candidate,
+    this._operation,
+    this._verified,
+    this._intent,
+  );
+  final AppDatabase _db;
+  final String _candidate;
+  final _Operation _operation;
+  final VerifiedJobLineSession _verified;
+  final CompanyCommandIntent _intent;
+
+  Future<Uint8List> validateSigningContent(
+    AppDatabase db,
+    InstallationIdentity identity,
+    CompanyCommandIntent pending,
+    CompanyTrustAnchor trust,
+    Map<String, int> floors,
+  ) async {
+    if (!identical(db, _db) ||
+        !db.hasCallerTransaction ||
+        pending.afterWitness != null ||
+        pending.beforeWitness == null ||
+        _canonical(pending.encode()) != _canonical(_intent.encode()) ||
+        _canonical(trust.encode()) != _canonical(_verified._trust.encode()) ||
+        _canonical(floors) != _canonical(_verified._floors)) {
+      throw const JobLineRefusal('receipt admission context changed');
+    }
+    final receipt = await (db.select(
+      db.jobLineReceipts,
+    )..where((t) => t.receiptKey.equals(pending.receiptKey))).getSingle();
+    if (receipt.receiptBytes != _candidate) {
+      throw const JobLineRefusal('receipt candidate changed before signing');
+    }
+    _validateReceiptPayload(
+      decodeJobLineReceipt(_candidate, requireSeal: false),
+      receipt,
+      _operation,
+      identity,
+      pending.storeGeneration,
+      sealed: false,
+    );
+    if (_operation.commitment != pending.operationCommitment ||
+        _operation.commandCommitment != pending.commandCommitment ||
+        _operation.company != pending.companyId ||
+        _operation.line != pending.lineId ||
+        _operation.generation != pending.originGeneration ||
+        _operation.id != pending.requestId) {
+      throw const JobLineRefusal('receipt intent differs from admission');
+    }
+    final operation =
+        await (db.select(db.jobLineOperations)..where(
+              (t) =>
+                  t.companyId.equals(pending.companyId) &
+                  t.originGeneration.equals(pending.originGeneration) &
+                  t.requestId.equals(pending.requestId),
+            ))
+            .getSingle();
+    if (operation.operationBytes != _operation.bytes) {
+      throw const JobLineRefusal('receipt operation changed before signing');
+    }
+    return Uint8List.fromList(utf8.encode(_candidate));
+  }
+}
+
 class JobLineAuthorization {
   JobLineAuthorization({required this.db, required this.installation});
   final AppDatabase db;
@@ -158,10 +234,8 @@ class JobLineAuthorization {
     if (assertion['v'] != 1) {
       throw const JobLineRefusal('unsupported authorization version');
     }
-    final trust = await installation.readCompanyTrust(db);
-    if (trust == null || trust.companyId.value != command.companyId) {
-      throw const JobLineRefusal('company is not enrolled');
-    }
+    final receiver = await _verifyCurrentReceiver(command);
+    final trust = receiver.trust;
     if (assertion['company'] != command.companyId ||
         assertion['shop'] != command.shopId ||
         assertion['line'] != command.lineId ||
@@ -171,44 +245,8 @@ class JobLineAuthorization {
         assertion['facts'] != trust.factsCommitment) {
       throw const JobLineRefusal('authorization scope or commitment differs');
     }
-    final factsRow =
-        await (db.select(db.companyAuthorityFacts)..where(
-              (t) =>
-                  t.companyId.equals(command.companyId) &
-                  t.commitment.equals(trust.factsCommitment),
-            ))
-            .getSingleOrNull();
-    if (factsRow == null) {
-      throw const JobLineRefusal('current company facts missing');
-    }
-    if (utf8.encode(factsRow.signedBytes).length > _maximumBytes) {
-      throw const JobLineRefusal('company facts exceed byte limit');
-    }
-    final signed = _object(jsonDecode(factsRow.signedBytes));
-    _keys(signed, {'body', 'signature'});
-    final factsBody = _object(signed['body']);
-    _keys(factsBody, {
-      'v',
-      'company',
-      'authority',
-      'policy',
-      'devices',
-      'users',
-      'entities',
-    });
-    if (factsBody['v'] != 1 ||
-        factsBody['company'] != command.companyId ||
-        factsBody['authority'] != trust.authorityVersion ||
-        factsBody['policy'] != trust.policy ||
-        _digest(factsBody) != trust.factsCommitment) {
-      throw const JobLineRefusal('company facts do not match protected pin');
-    }
-    await _verifySignature(
-      factsBody,
-      _string(signed, 'signature'),
-      SimplePublicKey(trust.rootKey, type: KeyPairType.ed25519),
-    );
-    final facts = _CompanyFacts(factsBody);
+    final facts = receiver.facts;
+    final factsBody = facts.body;
     final device = facts._entry('devices', _string(assertion, 'device'));
     final user = facts._entry('users', _string(assertion, 'user'));
     final capability = command.mutation is DeleteJobLine
@@ -233,47 +271,9 @@ class JobLineAuthorization {
       'shops',
       'capabilities',
     });
-    final floors = installation.knownSecurityFloors;
+    final floors = receiver.floors;
     bool allows(Map<String, Object?> value, String key, String item) =>
         value[key] is List && (value[key] as List).contains(item);
-    final localIdentity = installation.identity!;
-    final localGrants = (factsBody['devices'] as List)
-        .map(_object)
-        .where(
-          (d) =>
-              d['installation'] == localIdentity.id.value &&
-              d['generation'] == localIdentity.generation.value &&
-              d['key'] == base64Encode(localIdentity.publicKey),
-        )
-        .toList();
-    if (localGrants.length != 1) {
-      throw const JobLineRefusal('receiving installation membership denied');
-    }
-    final receiver = localGrants.single;
-    _keys(receiver, {
-      'id',
-      'installation',
-      'generation',
-      'key',
-      'grant',
-      'version',
-      'revoked',
-      'shops',
-      'capabilities',
-    });
-    final receiverId = _string(receiver, 'id');
-    final receiverGrant = _string(receiver, 'grant');
-    _id(receiverId);
-    _id(receiverGrant);
-    if (receiver['revoked'] != false ||
-        !allows(receiver, 'shops', command.shopId) ||
-        receiver['version'] is! int ||
-        (receiver['version'] as int) < 1 ||
-        (receiver['version'] as int) < (floors['grant.$receiverGrant'] ?? 1) ||
-        (floors['revocation.device.$receiverId'] ?? 0) > 0 ||
-        (floors['revocation.grant.$receiverGrant'] ?? 0) > 0) {
-      throw const JobLineRefusal('receiving installation membership denied');
-    }
     if (device['revoked'] != false ||
         user['revoked'] != false ||
         device['installation'] != assertion['installation'] ||
@@ -326,7 +326,6 @@ class JobLineAuthorization {
     }
     final publicKey = SimplePublicKey(public, type: KeyPairType.ed25519);
     await _verifySignature(assertion, _string(proof, 'signature'), publicKey);
-    facts.entity('jobLine', command.lineId, shop: command.shopId);
     return VerifiedJobLineSession._(
       command,
       proof,
@@ -336,6 +335,106 @@ class JobLineAuthorization {
       publicKey,
     );
   }
+
+  Future<_ReceiverAuthority> _verifyCurrentReceiver(
+    JobLineCommand command,
+  ) async {
+    final trust = await installation.readCompanyTrust(db);
+    if (trust == null || trust.companyId.value != command.companyId) {
+      throw const JobLineRefusal('company is not enrolled');
+    }
+    final factsRow =
+        await (db.select(db.companyAuthorityFacts)..where(
+              (t) =>
+                  t.companyId.equals(command.companyId) &
+                  t.commitment.equals(trust.factsCommitment),
+            ))
+            .getSingleOrNull();
+    if (factsRow == null) {
+      throw const JobLineRefusal('current company facts missing');
+    }
+    if (utf8.encode(factsRow.signedBytes).length > _maximumBytes) {
+      throw const JobLineRefusal('company facts exceed byte limit');
+    }
+    final signed = _object(jsonDecode(factsRow.signedBytes));
+    _keys(signed, {'body', 'signature'});
+    final factsBody = _object(signed['body']);
+    _keys(factsBody, {
+      'v',
+      'company',
+      'authority',
+      'policy',
+      'devices',
+      'users',
+      'entities',
+    });
+    if (factsBody['v'] != 1 ||
+        factsBody['company'] != command.companyId ||
+        factsBody['authority'] != trust.authorityVersion ||
+        factsBody['policy'] != trust.policy ||
+        _digest(factsBody) != trust.factsCommitment) {
+      throw const JobLineRefusal('company facts do not match protected pin');
+    }
+    await _verifySignature(
+      factsBody,
+      _string(signed, 'signature'),
+      SimplePublicKey(trust.rootKey, type: KeyPairType.ed25519),
+    );
+    final facts = _CompanyFacts(factsBody);
+    final floors = installation.knownSecurityFloors;
+    bool allows(Map<String, Object?> value, String key, String item) =>
+        value[key] is List && (value[key] as List).contains(item);
+    final localIdentity = installation.identity!;
+    final receiverDevices = factsBody['devices'];
+    if (receiverDevices is! List || receiverDevices.length > 128) {
+      throw const JobLineRefusal('unsupported company facts');
+    }
+    final localGrants = receiverDevices
+        .map(_object)
+        .where(
+          (d) =>
+              d['installation'] == localIdentity.id.value &&
+              d['generation'] == localIdentity.generation.value &&
+              d['key'] == base64Encode(localIdentity.publicKey),
+        )
+        .toList();
+    if (localGrants.length != 1) {
+      throw const JobLineRefusal('receiving installation membership denied');
+    }
+    final receiver = localGrants.single;
+    _keys(receiver, {
+      'id',
+      'installation',
+      'generation',
+      'key',
+      'grant',
+      'version',
+      'revoked',
+      'shops',
+      'capabilities',
+    });
+    final receiverId = _string(receiver, 'id');
+    final receiverGrant = _string(receiver, 'grant');
+    _id(receiverId);
+    _id(receiverGrant);
+    if (receiver['revoked'] != false ||
+        !allows(receiver, 'shops', command.shopId) ||
+        receiver['version'] is! int ||
+        (receiver['version'] as int) < 1 ||
+        (receiver['version'] as int) < (floors['grant.$receiverGrant'] ?? 1) ||
+        (floors['revocation.device.$receiverId'] ?? 0) > 0 ||
+        (floors['revocation.grant.$receiverGrant'] ?? 0) > 0) {
+      throw const JobLineRefusal('receiving installation membership denied');
+    }
+    if (factsBody['authority'] is! int ||
+        (factsBody['authority'] as int) < 1 ||
+        (factsBody['authority'] as int) <
+            (floors['authority.${command.companyId}'] ?? 0)) {
+      throw const JobLineRefusal('authority version below protected floor');
+    }
+    facts.entity('jobLine', command.lineId, shop: command.shopId);
+    return _ReceiverAuthority(facts, trust, Map.unmodifiable(floors));
+  }
 }
 
 Future<void> _verifySignature(
@@ -343,11 +442,12 @@ Future<void> _verifySignature(
   String encoded,
   SimplePublicKey publicKey, {
   String domain = '',
+  int maximumBytes = _maximumBytes,
 }) async {
   final bytes = base64Decode(encoded);
   if (bytes.length != 64 ||
       !await Ed25519().verify(
-        utf8.encode('$domain${_canonical(body)}'),
+        utf8.encode('$domain${_canonical(body, maximumBytes: maximumBytes)}'),
         signature: Signature(bytes, publicKey: publicKey),
       )) {
     throw const JobLineRefusal('signature verification failed');

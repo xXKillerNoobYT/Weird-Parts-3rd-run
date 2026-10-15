@@ -73,7 +73,7 @@ void _validateExistingDatabase(File file, String deviceId) {
   try {
     db.execute('BEGIN');
     final version = db.select('PRAGMA user_version').single.values.single;
-    if (version != 2 && version != 3) {
+    if (version != 2 && version != 3 && version != 4) {
       rejectNativeTest('fixture-rejected');
     }
     final tables = db
@@ -82,7 +82,7 @@ void _validateExistingDatabase(File file, String deviceId) {
         .toSet();
     final expectedTables = {
       ..._schema2Columns,
-      if (version == 3) ..._companyColumns,
+      if (version == 3 || version == 4) ..._companyColumns,
     };
     if (tables.length != expectedTables.length ||
         !tables.containsAll(expectedTables.keys)) {
@@ -310,7 +310,9 @@ final class NativeFixtureSnapshot {
     await db.transaction(() async {
       version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');
-      if (version != 2 && version != 3) rejectNativeTest('fixture-rejected');
+      if (version != 2 && version != 3 && version != 4) {
+        rejectNativeTest('fixture-rejected');
+      }
       final names =
           (await db
                   .customSelect(
@@ -321,7 +323,7 @@ final class NativeFixtureSnapshot {
               .toSet();
       final expectedNames = {
         ..._schema2Columns.keys,
-        if (version == 3) ..._companyColumns.keys,
+        if (version >= 3) ..._companyColumns.keys,
       };
       if (names.length != expectedNames.length ||
           !names.containsAll(expectedNames)) {

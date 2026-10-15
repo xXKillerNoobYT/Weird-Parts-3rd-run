@@ -13,6 +13,58 @@ String jobLineLegacyBaselineCommitment({
   'row': row.toJson(),
 });
 
+void _validateReceiptPayload(
+  Map<String, Object?> value,
+  JobLineReceipt receipt,
+  _Operation operation,
+  InstallationIdentity identity,
+  String store, {
+  required bool sealed,
+}) {
+  _keys(value, {
+    'v',
+    'key',
+    'parent',
+    'operation',
+    'command',
+    'status',
+    'bytes',
+    'receiver',
+    'store',
+    if (sealed) 'seal',
+  });
+  final base = _digest({
+    'company': operation.company,
+    'origin': operation.generation,
+    'request': operation.id,
+    'receiver': identity.id.value,
+    'store': store,
+  });
+  final status = value['status'];
+  final parent = value['parent'];
+  if (value['v'] != 2 ||
+      !['applied', 'conflict', 'deferred'].contains(status) ||
+      receipt.companyId != operation.company ||
+      receipt.operationCommitment != operation.commitment ||
+      receipt.commandCommitment != operation.commandCommitment ||
+      value['key'] != receipt.receiptKey ||
+      value['operation'] != operation.commitment ||
+      value['command'] != operation.commandCommitment ||
+      value['receiver'] != identity.id.value ||
+      value['store'] != store ||
+      value['bytes'] != base64Encode(utf8.encode(operation.bytes)) ||
+      operation.commandCommitment !=
+          _commandFromOperation(operation).commitment ||
+      (parent == null
+          ? receipt.receiptKey != base
+          : parent != base ||
+                status == 'deferred' ||
+                receipt.receiptKey !=
+                    _digest({'parent': base, 'transition': status}))) {
+    throw const JobLineRefusal('receipt does not cover exact operation');
+  }
+}
+
 class JobLineCommands {
   JobLineCommands({
     required this.authorization,
@@ -59,6 +111,42 @@ class JobLineCommands {
             base64Encode(identity.publicKey)) {
       throw const JobLineRefusal('local command is not this installation');
     }
+    final existing =
+        await (_db.select(_db.jobLineOperations)..where(
+              (t) =>
+                  t.companyId.equals(command.companyId) &
+                  t.originGeneration.equals(identity.generation.value) &
+                  t.requestId.equals(command.requestId),
+            ))
+            .getSingleOrNull();
+    if (existing != null) {
+      final original = _Operation.parse(
+        Uint8List.fromList(utf8.encode(existing.operationBytes)),
+      );
+      for (final key in [
+        'company',
+        'shop',
+        'line',
+        'request',
+        'generation',
+        'installation',
+        'device',
+        'user',
+        'command',
+      ]) {
+        if (original.body[key] != assertion[key]) {
+          throw const JobLineRefusal(
+            'local retry differs from original actor or command',
+          );
+        }
+      }
+      return _apply(
+        original,
+        local: true,
+        resume: false,
+        localSession: verified,
+      );
+    }
     final binding = verified._facts.entity(
       'jobLine',
       command.lineId,
@@ -95,6 +183,7 @@ class JobLineCommands {
       _Operation(body, verified._proof, base64Encode(signature.bytes), bytes),
       local: true,
       resume: false,
+      localSession: verified,
     );
   }
 
@@ -147,16 +236,48 @@ class JobLineCommands {
         .toList();
   }
 
+  Future<JobLineCommandReceipt> _verifySavedReceipt(
+    JobLineReceipt saved,
+    _Operation operation, {
+    JobLineReceipt? parent,
+  }) async {
+    final value = decodeJobLineReceipt(saved.receiptBytes);
+    _validateReceiptPayload(
+      value,
+      saved,
+      operation,
+      _installation.identity!,
+      _installation.receivingStoreGeneration!.value,
+      sealed: true,
+    );
+    await JobLineCommandReceipt.verifyAdmissionSeal(
+      saved.receiptBytes,
+      _installation.identity!,
+      _installation.receivingStoreGeneration!.value,
+    );
+    if (value['parent'] != null) {
+      if (parent == null || parent.receiptKey != value['parent']) {
+        throw const JobLineRefusal('linked receipt parent missing');
+      }
+      final original = await _verifySavedReceipt(parent, operation);
+      if (original.status != 'deferred') {
+        throw const JobLineRefusal('linked receipt parent was not deferred');
+      }
+    }
+    return JobLineCommandReceipt._decode(saved.receiptBytes);
+  }
+
   Future<JobLineCommandReceipt> _apply(
     _Operation operation, {
     required bool local,
     required bool resume,
+    VerifiedJobLineSession? localSession,
   }) async {
     if (_db.hasCallerTransaction) {
       throw const JobLineRefusal('command must own its top-level transaction');
     }
     final command = _commandFromOperation(operation);
-    await authorization._verify(command, operation.authorization);
+    await authorization._verifyCurrentReceiver(command);
     CompanyCommandIntent? intent;
     JobLineCommandReceipt? result;
     try {
@@ -167,39 +288,35 @@ class JobLineCommands {
           'UPDATE app_settings SET value = value WHERE key = ?',
           [kInstallationBindingKey],
         );
-        final verified = await authorization._verify(
-          command,
-          operation.authorization,
-        );
-        for (final key in [
-          'company',
-          'shop',
-          'line',
-          'request',
-          'generation',
-          'installation',
-          'device',
-          'user',
-          'command',
-          'facts',
-        ]) {
-          if (operation.body[key] != verified._assertion[key]) {
-            throw const JobLineRefusal('operation author or assertion differs');
+        await authorization._verifyCurrentReceiver(command);
+        if (local) {
+          if (localSession == null ||
+              localSession.command.commitment != command.commitment) {
+            throw const JobLineRefusal(
+              'current local retry authorization missing',
+            );
           }
-        }
-        await _verifySignature(
-          operation.body,
-          operation.signature,
-          verified._publicKey,
-          domain: 'wiredpart.job.line.operation@1:',
-        );
-        final signedBinding = verified._facts.entity(
-          'jobLine',
-          operation.line,
-          shop: operation.shop,
-        );
-        if (signedBinding['baseline'] != operation.baseline) {
-          throw const JobLineRefusal('unsigned or differing baseline');
+          final fresh = await authorization._verify(
+            localSession.command,
+            localSession._proof,
+          );
+          for (final key in [
+            'company',
+            'shop',
+            'line',
+            'request',
+            'generation',
+            'installation',
+            'device',
+            'user',
+            'command',
+          ]) {
+            if (operation.body[key] != fresh._assertion[key]) {
+              throw const JobLineRefusal(
+                'local retry differs from current actor or command',
+              );
+            }
+          }
         }
         final generation = _installation.receivingStoreGeneration;
         if (generation == null) {
@@ -235,8 +352,74 @@ class JobLineCommands {
               saved.commandCommitment != operation.commandCommitment) {
             throw const JobLineRefusal('receipt commitment collision');
           }
-          final original = JobLineCommandReceipt._decode(saved.receiptBytes);
+          if (existing == null) {
+            throw const JobLineRefusal('receipt operation missing');
+          }
+          final original = await _verifySavedReceipt(saved, operation);
           if (!resume || original.status != 'deferred') return original;
+          final transitions = <JobLineReceipt>[];
+          for (final status in ['applied', 'conflict']) {
+            final linked =
+                await (_db.select(_db.jobLineReceipts)..where(
+                      (t) => t.receiptKey.equals(
+                        _digest({
+                          'parent': baseReceiptKey,
+                          'transition': status,
+                        }),
+                      ),
+                    ))
+                    .getSingleOrNull();
+            if (linked != null) transitions.add(linked);
+          }
+          if (transitions.length > 1) {
+            throw const JobLineRefusal('multiple semantic receipt transitions');
+          }
+          if (transitions.isNotEmpty) {
+            return _verifySavedReceipt(
+              transitions.single,
+              operation,
+              parent: saved,
+            );
+          }
+          final known = (await _operations(
+            operation.company,
+            operation.line,
+          )).map((o) => o.key).toSet();
+          if (operation.parents.any((p) => !known.contains(p))) return original;
+        }
+        final verified = await authorization._verify(
+          command,
+          operation.authorization,
+        );
+        for (final key in [
+          'company',
+          'shop',
+          'line',
+          'request',
+          'generation',
+          'installation',
+          'device',
+          'user',
+          'command',
+          'facts',
+        ]) {
+          if (operation.body[key] != verified._assertion[key]) {
+            throw const JobLineRefusal('operation author or assertion differs');
+          }
+        }
+        await _verifySignature(
+          operation.body,
+          operation.signature,
+          verified._publicKey,
+          domain: 'wiredpart.job.line.operation@1:',
+        );
+        final signedBinding = verified._facts.entity(
+          'jobLine',
+          operation.line,
+          shop: operation.shop,
+        );
+        if (signedBinding['baseline'] != operation.baseline) {
+          throw const JobLineRefusal('unsigned or differing baseline');
         }
         final row = await (_db.select(
           _db.jobLines,
@@ -324,6 +507,9 @@ class JobLineCommands {
             'local command has an unobserved causal parent',
           );
         }
+        if (missing && resume && saved != null) {
+          return JobLineCommandReceipt._decode(saved.receiptBytes);
+        }
         if (local && row.deletedAt != null) {
           throw const JobLineRefusal(
             'ordinary edit cannot restore deleted row',
@@ -372,7 +558,7 @@ class JobLineCommands {
           _db.jobLineReceipts,
         )..where((t) => t.receiptKey.equals(receiptKey))).getSingleOrNull();
         if (transition != null) {
-          return JobLineCommandReceipt._decode(transition.receiptBytes);
+          return _verifySavedReceipt(transition, operation, parent: saved);
         }
         intent = CompanyCommandIntent(
           receiptKey: receiptKey,
@@ -486,10 +672,10 @@ class JobLineCommands {
                 mode: InsertMode.insertOrIgnore,
               );
         }
-        final receiptBytes = _canonical({
-          'v': 1,
+        var receiptBytes = _canonicalReceipt({
+          'v': 2,
           'key': receiptKey,
-          'parent': resume ? baseReceiptKey : null,
+          'parent': resume && saved != null ? baseReceiptKey : null,
           'operation': operation.commitment,
           'command': operation.commandCommitment,
           'status': status,
@@ -523,6 +709,21 @@ class JobLineCommands {
                 }),
               ),
             );
+        final admission = VerifiedJobLineReceiptAdmission._(
+          _db,
+          receiptBytes,
+          operation,
+          verified,
+          intent!,
+        );
+        final seal = await _installation.signCompanyReceipt(_db, admission);
+        receiptBytes = _canonicalReceipt({
+          ...decodeJobLineReceipt(receiptBytes, requireSeal: false),
+          'seal': base64Encode(seal.bytes),
+        });
+        await (_db.update(_db.jobLineReceipts)
+              ..where((t) => t.receiptKey.equals(receiptKey)))
+            .write(JobLineReceiptsCompanion(receiptBytes: Value(receiptBytes)));
         intent = await _installation.sealCompanyCommand(_db, intent!);
         await beforeCommit?.call();
         return JobLineCommandReceipt._decode(receiptBytes);
@@ -594,6 +795,19 @@ class JobLineCommands {
   ) async {
     final identity = _object(state.units['identity']);
     final quantities = _object(state.units['quantities']);
+    final now = DateTime.now().toUtc();
+    final deletedAt = state.deleted ? row.deletedAt ?? now : null;
+    if (state.deleted) {
+      await (_db.update(
+        _db.orderSplits,
+      )..where((t) => t.jobLineId.equals(row.id) & t.deletedAt.isNull())).write(
+        OrderSplitsCompanion.custom(
+          deletedAt: Variable(deletedAt),
+          modifiedAt: Variable(now),
+          revision: _db.orderSplits.revision + const Constant(1),
+        ),
+      );
+    }
     await (_db.update(_db.jobLines)..where((t) => t.id.equals(row.id))).write(
       JobLinesCompanion(
         partId: Value(identity['part'] as String?),
@@ -605,10 +819,8 @@ class JobLineCommands {
         uom: Value(quantities['unit'] as String?),
         notes: Value(state.units['notes'] as String?),
         revision: Value(revision),
-        modifiedAt: Value(DateTime.now().toUtc()),
-        deletedAt: Value(
-          state.deleted ? row.deletedAt ?? DateTime.now().toUtc() : null,
-        ),
+        modifiedAt: Value(now),
+        deletedAt: Value(deletedAt),
       ),
     );
   }

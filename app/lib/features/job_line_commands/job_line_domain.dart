@@ -3,6 +3,41 @@ part of 'job_line_commands.dart';
 const _maximumBytes = 65536;
 const _maximumOperations = 256;
 const _maximumParents = 32;
+const kJobLineReceiptMaximumBytes = 131072;
+
+Map<String, Object?> decodeJobLineReceipt(
+  String bytes, {
+  bool requireSeal = true,
+}) {
+  if (utf8.encode(bytes).length > kJobLineReceiptMaximumBytes) {
+    throw const JobLineRefusal('receipt exceeds byte limit');
+  }
+  final value = _object(jsonDecode(bytes));
+  if (value['v'] != 2) {
+    throw const JobLineRefusal(
+      'unsealed receipt history requires a compatible recovery app',
+    );
+  }
+  _keys(value, {
+    'v',
+    'key',
+    'parent',
+    'operation',
+    'command',
+    'status',
+    'bytes',
+    'receiver',
+    'store',
+    if (requireSeal || value.containsKey('seal')) 'seal',
+  });
+  if (_canonicalReceipt(value) != bytes) {
+    throw const JobLineRefusal('unsupported or noncanonical sealed receipt');
+  }
+  return value;
+}
+
+String _canonicalReceipt(Object? value) =>
+    _canonical(value, maximumBytes: kJobLineReceiptMaximumBytes);
 
 class JobLineRefusal implements Exception {
   const JobLineRefusal(this.reason);
@@ -146,8 +181,32 @@ final class JobLineCommandReceipt {
   final Uint8List _operationBytes;
   Uint8List get operationBytes => Uint8List.fromList(_operationBytes);
   final String bytes;
+  static Future<void> verifyAdmissionSeal(
+    String bytes,
+    InstallationIdentity identity,
+    String storeGeneration,
+  ) async {
+    final value = decodeJobLineReceipt(bytes);
+    if (value['receiver'] != identity.id.value ||
+        value['store'] != storeGeneration) {
+      throw const JobLineRefusal('unsupported or mismatched sealed receipt');
+    }
+    final encodedSeal = _string(value, 'seal');
+    if (base64Encode(base64Decode(encodedSeal)) != encodedSeal) {
+      throw const JobLineRefusal('noncanonical receipt seal');
+    }
+    final payload = {...value}..remove('seal');
+    await _verifySignature(
+      payload,
+      encodedSeal,
+      SimplePublicKey(identity.publicKey, type: KeyPairType.ed25519),
+      domain: 'wiredpart.job.line.receipt@2:',
+      maximumBytes: kJobLineReceiptMaximumBytes,
+    );
+  }
+
   factory JobLineCommandReceipt._decode(String bytes) {
-    final value = _object(jsonDecode(bytes));
+    final value = decodeJobLineReceipt(bytes);
     return JobLineCommandReceipt._(
       _string(value, 'key'),
       _string(value, 'operation'),
@@ -252,7 +311,7 @@ class _Operation {
   }
 }
 
-String _canonical(Object? value) {
+String _canonical(Object? value, {int maximumBytes = _maximumBytes}) {
   Object? sorted(Object? item, int depth) {
     if (depth > 12) throw const JobLineRefusal('encoding nesting limit');
     if (item is Map<String, Object?>) {
@@ -270,7 +329,7 @@ String _canonical(Object? value) {
   }
 
   final text = jsonEncode(sorted(value, 0));
-  if (utf8.encode(text).length > _maximumBytes) {
+  if (utf8.encode(text).length > maximumBytes) {
     throw const JobLineRefusal('encoding exceeds byte limit');
   }
   return text;

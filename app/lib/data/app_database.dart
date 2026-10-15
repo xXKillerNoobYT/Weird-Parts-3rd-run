@@ -19,7 +19,7 @@ import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 3;
+const kAppSchemaVersion = 4;
 
 @DriftDatabase(
   tables: [
@@ -99,6 +99,24 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (m, from, to) async {
       if (from > to) {
         throw StateError('A newer database requires a compatible app');
+      }
+      if (from == 3) {
+        for (final table in [
+          'job_line_baselines',
+          'job_line_operations',
+          'job_line_receipts',
+          'job_line_audits',
+          'job_line_outgoing',
+          'job_line_conflicts',
+        ]) {
+          if ((await customSelect(
+            'SELECT 1 FROM $table LIMIT 1',
+          ).get()).isNotEmpty) {
+            throw StateError(
+              'Unsigned experimental schema-3 history requires its original compatible recovery app',
+            );
+          }
+        }
       }
       await transaction(() async {
         if (from < 2) {

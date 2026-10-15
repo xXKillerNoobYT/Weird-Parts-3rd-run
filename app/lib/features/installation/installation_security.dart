@@ -11,7 +11,11 @@ import 'package:uuid/uuid.dart';
 
 import '../../data/app_database.dart';
 import '../job_line_commands/job_line_commands.dart'
-    show VerifiedJobLineSession;
+    show
+        VerifiedJobLineSession,
+        VerifiedJobLineReceiptAdmission,
+        JobLineCommandReceipt,
+        decodeJobLineReceipt;
 
 const kInstallationBindingKey = 'local_installation_binding_v1';
 const kInstallationStateLimit = 2048;
@@ -162,6 +166,18 @@ Future<String> _companyCommandWitness(
           )..where((t) => t.id.equals(intent.lineId))).get())
           .map((r) => r.toJson())
           .toList();
+  final splits = await db
+      .customSelect(
+        'SELECT * FROM order_splits WHERE job_line_id = ? ORDER BY id LIMIT 513',
+        variables: [Variable(intent.lineId)],
+      )
+      .get();
+  if (splits.length > 512) {
+    throw StateError('Command recovery capacity reached');
+  }
+  if (splits.isNotEmpty) {
+    evidence['order_splits'] = splits.map((r) => r.data).toList();
+  }
   return hashes.sha256
       .convert(utf8.encode(_securityCanonical(evidence)))
       .toString();
@@ -207,8 +223,10 @@ Future<void> _validateCompanyCommit(
       baseline.projectionBytes != _securityCanonical(row.toJson())) {
     throw StateError('Company commit evidence is incomplete');
   }
-  final encodedReceipt =
-      jsonDecode(receipt.receiptBytes) as Map<String, dynamic>;
+  final encodedReceipt = decodeJobLineReceipt(
+    receipt.receiptBytes,
+    requireSeal: false,
+  );
   final encodedOperation =
       jsonDecode(operation.operationBytes) as Map<String, dynamic>;
   final encodedAudit = jsonDecode(audit.auditBytes) as Map<String, dynamic>;
@@ -628,6 +646,55 @@ class InstallationSecurity {
     ], keyPair: pair);
   }
 
+  Future<Signature> signCompanyReceipt(
+    AppDatabase db,
+    VerifiedJobLineReceiptAdmission admission,
+  ) async {
+    if (!db.hasCallerTransaction) {
+      throw StateError(
+        'Receipt signing requires the owning command transaction',
+      );
+    }
+    final persisted = await store.readState(namespace);
+    if (persisted == null) throw StateError('Protected identity is missing');
+    final record = _InstallationRecord.decode(persisted.bytes);
+    final pending = record.pendingCommand;
+    final trust = record.companyTrust;
+    if (record.activation != InstallationActivation.active ||
+        pending == null ||
+        pending.afterWitness != null ||
+        trust == null ||
+        await db.settingsDao.getSetting(kInstallationBindingKey) !=
+            record.binding ||
+        record.storePathFingerprint != await _companyStorePath(db) ||
+        record.storeGeneration.value != pending.storeGeneration) {
+      throw StateError(
+        'Receipt signing requires exact active protected intent',
+      );
+    }
+    final bytes = await admission.validateSigningContent(
+      db,
+      record.identity,
+      pending,
+      trust,
+      record.floors,
+    );
+    await _validateCompanyCommit(db, pending);
+    // No reconciliation here. The candidate is deliberately unsigned and the
+    // protected intent remains held until its sealed receipt is witnessed.
+    final unchanged = await store.readState(namespace);
+    if (unchanged?.revision != persisted.revision ||
+        _securityCanonical(jsonDecode(utf8.decode(unchanged!.bytes))) !=
+            _securityCanonical(jsonDecode(utf8.decode(persisted.bytes)))) {
+      throw StateError('Protected receipt intent changed during signing');
+    }
+    final pair = await Ed25519().newKeyPairFromSeed(record.seed);
+    return Ed25519().sign([
+      ...utf8.encode('wiredpart.job.line.receipt@2:'),
+      ...bytes,
+    ], keyPair: pair);
+  }
+
   /// Called while the command owns a SQLite write lock. CAS binds the authority
   /// revision and installation generation until the database transaction ends.
   Future<CompanyCommandIntent> beginCompanyCommand(
@@ -683,6 +750,14 @@ class InstallationSecurity {
         jsonEncode(intent.encode())) {
       throw StateError('Pending command changed before commit');
     }
+    final receipt = await (db.select(
+      db.jobLineReceipts,
+    )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingle();
+    await JobLineCommandReceipt.verifyAdmissionSeal(
+      receipt.receiptBytes,
+      record.identity,
+      record.storeGeneration.value,
+    );
     final sealed = intent.withWitness(
       after: await _companyCommandWitness(db, intent),
     );
@@ -861,6 +936,30 @@ class InstallationSecurity {
           }
         } else {
           await _validateCompanyCommit(db, intent);
+          await JobLineCommandReceipt.verifyAdmissionSeal(
+            receipt.receiptBytes,
+            next.identity,
+            next.storeGeneration.value,
+          );
+          final value = decodeJobLineReceipt(receipt.receiptBytes);
+          if (value['parent'] case final String parentKey) {
+            final parent = await (db.select(
+              db.jobLineReceipts,
+            )..where((t) => t.receiptKey.equals(parentKey))).getSingle();
+            await JobLineCommandReceipt.verifyAdmissionSeal(
+              parent.receiptBytes,
+              next.identity,
+              next.storeGeneration.value,
+            );
+            final parentValue = decodeJobLineReceipt(parent.receiptBytes);
+            if (parentValue['parent'] != null ||
+                parentValue['status'] != 'deferred' ||
+                parentValue['bytes'] != value['bytes'] ||
+                parent.operationCommitment != intent.operationCommitment ||
+                parent.commandCommitment != intent.commandCommitment) {
+              throw StateError('Committed receipt parent differs');
+            }
+          }
           if (intent.afterWitness == null || witness != intent.afterWitness) {
             throw StateError('Committed company command evidence differs');
           }

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,7 +19,7 @@ import 'atomic_job_line_support.dart';
 void main() {
   // Every fixture deliberately owns two independent file-backed executors.
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-  Map<String, Object?> businessRows(File file) {
+  Map<String, Object?> businessRows(File file, {bool includeHistory = false}) {
     final db = raw_sqlite.sqlite3.open(file.path);
     try {
       return {
@@ -38,6 +39,14 @@ void main() {
           'jobs',
           'job_lines',
           'order_splits',
+          if (includeHistory) ...[
+            'job_line_baselines',
+            'job_line_operations',
+            'job_line_receipts',
+            'job_line_audits',
+            'job_line_outgoing',
+            'job_line_conflicts',
+          ],
         ])
           name:
               (db
@@ -90,6 +99,501 @@ void main() {
     });
     tearDown(() async {
       await fixture.dispose();
+    });
+
+    Future<List<OrderSplit>> seedOrderSplits(int i) async {
+      final db = fixture.databases[i];
+      final now = DateTime.utc(2026, 1, 1);
+      const supplier = '10000000-0000-4000-8000-000000000011';
+      const otherLine = '10000000-0000-4000-8000-000000000012';
+      await db
+          .into(db.suppliers)
+          .insert(
+            SuppliersCompanion.insert(
+              id: supplier,
+              name: 'Synthetic supplier',
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      await db
+          .into(db.jobLines)
+          .insert(
+            JobLinesCompanion.insert(
+              id: otherLine,
+              jobId: job,
+              customName: const Value('Other synthetic line'),
+              neededQty: 3,
+              originDeviceId: legacyDevice,
+              createdAt: now,
+              modifiedAt: now,
+            ),
+          );
+      for (var n = 0; n < 3; n++) {
+        await db
+            .into(db.orderSplits)
+            .insert(
+              OrderSplitsCompanion.insert(
+                id: '10000000-0000-4000-8000-00000000002$n',
+                jobLineId: n == 2 ? otherLine : line,
+                supplierId: supplier,
+                quantity: 2.5 + n,
+                originDeviceId: legacyDevice,
+                createdAt: now,
+                modifiedAt: now,
+                revision: Value(3 + n),
+                deletedAt: Value(n == 1 ? now : null),
+              ),
+            );
+      }
+      return (db.select(
+        db.orderSplits,
+      )..orderBy([(t) => OrderingTerm.asc(t.id)])).get();
+    }
+
+    Future<JobLine> managedRow(int i) => (fixture.databases[i].select(
+      fixture.databases[i].jobLines,
+    )..where((t) => t.id.equals(line))).getSingle();
+
+    for (final splitIndex in [0, 1, 2]) {
+      test(
+        'pending deletion recovery detects related split tamper $splitIndex',
+        () async {
+          final splits = await seedOrderSplits(0);
+          final db = fixture.databases[0];
+          final command = fixture.command(const DeleteJobLine());
+          await expectLater(
+            fixture
+                .commands(
+                  0,
+                  afterCommit: () async {
+                    throw StateError('fixture lost deletion response');
+                  },
+                )
+                .patchJobLine(await fixture.session(0, command), command),
+            throwsStateError,
+          );
+          final pending = fixture
+              .secureStores[0]
+              .states[fixture.installations[0].namespace]!;
+          final receipt = await db.select(db.jobLineReceipts).getSingle();
+          await (db.update(db.orderSplits)
+                ..where((t) => t.id.equals(splits[splitIndex].id)))
+              .write(const OrderSplitsCompanion(quantity: Value(99)));
+          await fixture.reopen(0);
+          if (splitIndex < 2) {
+            expect(
+              fixture.installations[0].readiness,
+              InstallationReadiness.needsRecovery,
+            );
+            final held = fixture
+                .secureStores[0]
+                .states[fixture.installations[0].namespace]!;
+            expect(held.revision, pending.revision);
+            expect(held.bytes, pending.bytes);
+          } else {
+            expect(
+              fixture.installations[0].readiness,
+              InstallationReadiness.ready,
+            );
+            expect(
+              (await fixture.commit(0, command)).bytes,
+              receipt.receiptBytes,
+            );
+          }
+        },
+      );
+    }
+
+    test(
+      'related split recovery capacity refuses before command admission',
+      () async {
+        final splits = await seedOrderSplits(0);
+        final db = fixture.databases[0];
+        await db.transaction(() async {
+          for (var n = 0; n < 511; n++) {
+            await db
+                .into(db.orderSplits)
+                .insert(splits.first.copyWith(id: const Uuid().v4()));
+          }
+        });
+        final before = businessRows(fixture.files[0], includeHistory: true);
+        final protected =
+            fixture.secureStores[0].states[fixture.installations[0].namespace]!;
+        await expectLater(
+          fixture.commit(0, fixture.command(const DeleteJobLine())),
+          throwsStateError,
+        );
+        expect(businessRows(fixture.files[0], includeHistory: true), before);
+        final after =
+            fixture.secureStores[0].states[fixture.installations[0].namespace]!;
+        expect(after.revision, protected.revision);
+        expect(after.bytes, protected.bytes);
+      },
+    );
+
+    Future<Uint8List> integerQuantityOperation(
+      JobLineCommand command,
+      JobLineCommandReceipt template,
+      int needed,
+    ) async {
+      final proof =
+          jsonDecode(utf8.decode(await fixture.assertion(1, command))) as Map;
+      final assertion = proof['body'] as Map;
+      final body = Map<String, Object?>.from(
+        (jsonDecode(utf8.decode(template.operationBytes)) as Map)['body']
+            as Map,
+      );
+      for (final key in [
+        'request',
+        'generation',
+        'installation',
+        'device',
+        'user',
+        'command',
+        'facts',
+      ]) {
+        body[key] = assertion[key];
+      }
+      body['parents'] = command.observedHeads;
+      body['units'] = {
+        'quantities': {'needed': needed, 'pull': 1, 'unit': 'ea'},
+      };
+      // Model another protocol client using integer JSON quantities. The local
+      // signer correctly requires its own exact double-encoded command bytes.
+      final record = jsonDecode(
+        utf8.decode(
+          fixture
+              .secureStores[1]
+              .states[fixture.installations[1].namespace]!
+              .bytes,
+        ),
+      ) as Map;
+      final pair = await Ed25519().newKeyPairFromSeed(
+        base64Decode(record['seed'] as String),
+      );
+      final signature = await Ed25519().sign(
+        utf8.encode('wiredpart.job.line.operation@1:${canonical(body)}'),
+        keyPair: pair,
+      );
+      return Uint8List.fromList(
+        utf8.encode(
+          canonical({
+            'body': body,
+            'authorization': proof,
+            'signature': base64Encode(signature.bytes),
+          }),
+        ),
+      );
+    }
+
+    test('deletion atomically tombstones only active related splits and replay is stable', () async {
+      final original = [await seedOrderSplits(0), await seedOrderSplits(1)];
+      final before = [await managedRow(0), await managedRow(1)];
+      final command = fixture.command(const DeleteJobLine());
+      final local = await fixture.commit(0, command);
+      final incoming = await fixture
+          .commands(1)
+          .applyIncoming(local.operationBytes);
+      expect(local.status, 'applied');
+      expect(incoming.status, 'applied');
+      for (var i = 0; i < 2; i++) {
+        final db = fixture.databases[i];
+        final row = await managedRow(i);
+        expect(row.deletedAt, isNotNull);
+        expect(row.revision, before[i].revision + 1);
+        expect(row.createdAt, before[i].createdAt);
+        expect(row.originDeviceId, before[i].originDeviceId);
+        final splits = await (db.select(
+          db.orderSplits,
+        )..orderBy([(t) => OrderingTerm.asc(t.id)])).get();
+        expect(splits[0].toJson(), {
+          ...original[i][0].toJson(),
+          'revision': original[i][0].revision + 1,
+          'deletedAt': row.deletedAt!.millisecondsSinceEpoch,
+          'modifiedAt': row.deletedAt!.millisecondsSinceEpoch,
+        });
+        expect(splits[1].toJson(), original[i][1].toJson());
+        expect(splits[2].toJson(), original[i][2].toJson());
+        final counts = await fixture.counts(i);
+        final snapshot = businessRows(fixture.files[i]);
+        await fixture.reopen(i);
+        final replay = i == 0
+            ? await fixture.commit(0, command)
+            : await fixture.commands(1).applyIncoming(local.operationBytes);
+        expect(replay.bytes, i == 0 ? local.bytes : incoming.bytes);
+        expect(await fixture.counts(i), counts);
+        expect(businessRows(fixture.files[i]), snapshot);
+      }
+    });
+
+    test('split tombstones survive deletion conflict without another revision bump', () async {
+      await seedOrderSplits(0);
+      await seedOrderSplits(1);
+      final edit = await fixture.commit(
+        1,
+        fixture.command(const JobLinePatch(notes: SetField('Concurrent'))),
+      );
+      final deletion = await fixture.commit(
+        0,
+        fixture.command(const DeleteJobLine()),
+      );
+      final db = fixture.databases[0];
+      final split =
+          await (db.select(db.orderSplits)..where(
+                (t) => t.id.equals('10000000-0000-4000-8000-000000000020'),
+              ))
+              .getSingle();
+      expect(split.deletedAt, isNotNull);
+      expect(
+        (await fixture.commands(0).applyIncoming(edit.operationBytes)).status,
+        'conflict',
+      );
+      expect(
+        (await fixture.commands(1).applyIncoming(deletion.operationBytes))
+            .status,
+        'conflict',
+      );
+      expect(
+        (await (db.select(
+          db.orderSplits,
+        )..where((t) => t.id.equals(split.id))).getSingle()).toJson(),
+        split.toJson(),
+      );
+      expect((await managedRow(0)).deletedAt, isNotNull);
+      expect((await managedRow(1)).deletedAt, isNotNull);
+      expect(
+        await fixture.databases[1].jobsDao.orderSplitsForLine(line),
+        isEmpty,
+      );
+    });
+
+    test('ordinary value conflict does not alter order splits', () async {
+      final original = await seedOrderSplits(0);
+      await fixture.commit(
+        0,
+        fixture.command(const JobLinePatch(notes: SetField('A'))),
+      );
+      final b = await fixture.commit(
+        1,
+        fixture.command(const JobLinePatch(notes: SetField('B'))),
+      );
+      expect(
+        (await fixture.commands(0).applyIncoming(b.operationBytes)).status,
+        'conflict',
+      );
+      final db = fixture.databases[0];
+      final splits = await (db.select(
+        db.orderSplits,
+      )..orderBy([(t) => OrderingTerm.asc(t.id)])).get();
+      expect(
+        splits.map((s) => s.toJson()).toList(),
+        original.map((s) => s.toJson()).toList(),
+      );
+    });
+
+    test(
+      'deletion split writes roll back with all command effects before commit',
+      () async {
+        await seedOrderSplits(0);
+        final before = businessRows(fixture.files[0]);
+        final command = fixture.command(const DeleteJobLine());
+        final service = fixture.commands(
+          0,
+          beforeCommit: () async {
+            throw StateError('fixture split rollback');
+          },
+        );
+        await expectLater(
+          service.patchJobLine(await fixture.session(0, command), command),
+          throwsStateError,
+        );
+        expect(businessRows(fixture.files[0]), before);
+        expect(await fixture.counts(0), [0, 0, 0, 0, 0, 0]);
+        expect(fixture.installations[0].readiness, InstallationReadiness.ready);
+        expect((await fixture.commit(0, command)).status, 'applied');
+        expect(
+          await fixture.databases[0].jobsDao.orderSplitsForLine(line),
+          isEmpty,
+        );
+      },
+    );
+
+    test('equivalent integer and double quantities converge with original operation bytes', () async {
+      final a = await fixture.commit(
+        0,
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 1, shopPull: 1, unit: 'ea'),
+          ),
+        ),
+      );
+      final b = await integerQuantityOperation(
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 1, shopPull: 1, unit: 'ea'),
+          ),
+        ),
+        a,
+        1,
+      );
+      final first = await fixture.commands(1).applyIncoming(b);
+      final second = await fixture.commands(1).applyIncoming(a.operationBytes);
+      final other = await fixture.commands(0).applyIncoming(b);
+      expect(first.status, 'applied');
+      expect(second.status, 'applied');
+      expect(other.status, 'applied');
+      final body = (jsonDecode(utf8.decode(b)) as Map)['body'];
+      for (var i = 0; i < 2; i++) {
+        expect((await fixture.row(i)).neededQty, 1);
+        expect((await fixture.row(i)).shopPullQty, 1);
+        expect((await fixture.row(i)).uom, 'ea');
+        expect(await fixture.counts(i), [1, 2, 2, 2, i == 0 ? 1 : 0, 0]);
+        final db = fixture.databases[i];
+        final stored =
+            await (db.select(db.jobLineOperations)
+                  ..where((t) => t.requestId.equals(body['request'] as String)))
+                .getSingle();
+        expect(stored.operationBytes, utf8.decode(b));
+        expect(stored.commitment, digest(body));
+        expect((await fixture.commands(i).applyIncoming(b)).operationBytes, b);
+        expect(
+          (await fixture.commands(i).applyIncoming(b)).bytes,
+          i == 0 ? other.bytes : first.bytes,
+        );
+      }
+    });
+
+    test('equivalent signed zero quantities do not conflict', () async {
+      final a = await fixture.commit(
+        0,
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(
+              needed: -0.0,
+              shopPull: 1,
+              unit: 'ea',
+            ),
+          ),
+        ),
+      );
+      final b = await integerQuantityOperation(
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 0, shopPull: 1, unit: 'ea'),
+          ),
+        ),
+        a,
+        0,
+      );
+      await fixture.commands(1).applyIncoming(b);
+      expect(
+        (await fixture.commands(1).applyIncoming(a.operationBytes)).status,
+        'applied',
+      );
+      expect((await fixture.commands(0).applyIncoming(b)).status, 'applied');
+      for (final db in fixture.databases) {
+        expect(await db.select(db.jobLineConflicts).get(), isEmpty);
+      }
+    });
+
+    test(
+      'different integer and double quantities retain a real conflict',
+      () async {
+        final a = await fixture.commit(
+          0,
+          fixture.command(
+            const JobLinePatch(
+              quantities: JobLineQuantities(needed: 1, shopPull: 1, unit: 'ea'),
+            ),
+          ),
+        );
+        final b = await integerQuantityOperation(
+          fixture.command(
+            const JobLinePatch(
+              quantities: JobLineQuantities(needed: 2, shopPull: 1, unit: 'ea'),
+            ),
+          ),
+          a,
+          2,
+        );
+        await fixture.commands(1).applyIncoming(b);
+        expect(
+          (await fixture.commands(1).applyIncoming(a.operationBytes)).status,
+          'conflict',
+        );
+        expect((await fixture.commands(0).applyIncoming(b)).status, 'conflict');
+        final conflicts = [
+          for (final db in fixture.databases)
+            await db.select(db.jobLineConflicts).getSingle(),
+        ];
+        expect(conflicts[0].unit, 'quantities');
+        expect(conflicts[0].conflictId, conflicts[1].conflictId);
+        expect(conflicts[0].alternativesBytes, conflicts[1].alternativesBytes);
+        expect((await fixture.row(0)).neededQty, 5);
+        expect((await fixture.row(1)).neededQty, 5);
+      },
+    );
+
+    test('equivalent numeric common ancestors retain agreed quantity on later conflict', () async {
+      final a = await fixture.commit(
+        0,
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 1, shopPull: 1, unit: 'ea'),
+          ),
+        ),
+      );
+      final b = await integerQuantityOperation(
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 1, shopPull: 1, unit: 'ea'),
+          ),
+        ),
+        a,
+        1,
+      );
+      final bReceipt = await fixture.commands(1).applyIncoming(b);
+      await fixture.commands(1).applyIncoming(a.operationBytes);
+      await fixture.commands(0).applyIncoming(b);
+      final parents = [operationKey(a), operationKey(bReceipt)];
+      final c = await fixture.commit(
+        0,
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 2, shopPull: 1, unit: 'ea'),
+          ),
+          parents: parents,
+        ),
+      );
+      final d = await fixture.commit(
+        1,
+        fixture.command(
+          const JobLinePatch(
+            quantities: JobLineQuantities(needed: 3, shopPull: 1, unit: 'ea'),
+          ),
+          parents: parents,
+        ),
+      );
+      expect(
+        (await fixture.commands(0).applyIncoming(d.operationBytes)).status,
+        'conflict',
+      );
+      expect(
+        (await fixture.commands(1).applyIncoming(c.operationBytes)).status,
+        'conflict',
+      );
+      for (var i = 0; i < 2; i++) {
+        expect((await fixture.row(i)).neededQty, 1);
+        expect((await fixture.row(i)).shopPullQty, 1);
+        expect(
+          await fixture.databases[i]
+              .select(fixture.databases[i].jobLineConflicts)
+              .get(),
+          hasLength(1),
+        );
+      }
     });
 
     test('authority update during witness cannot be overwritten using a mutable revision', () async {
@@ -938,18 +1442,50 @@ void main() {
             .applyIncoming(child.operationBytes);
         expect(deferred.status, 'deferred');
         expect((await fixture.row(1)).notes, 'Old note');
-        await fixture.reopen(1);
-        await fixture.commands(1).applyIncoming(parent.operationBytes);
         final origin =
             (jsonDecode(utf8.decode(child.operationBytes)) as Map)['body']
                 as Map;
-        final resumed = await fixture
+        Future<JobLineCommandReceipt> retry() => fixture
             .commands(1)
             .retryDeferred(
               companyId: company,
               originGeneration: origin['generation'] as String,
               requestId: origin['request'] as String,
             );
+        final deferredCounts = await fixture.counts(1);
+        final deferredRows = businessRows(
+          fixture.files[1],
+          includeHistory: true,
+        );
+        final protected =
+            fixture.secureStores[1].states[fixture.installations[1].namespace]!;
+        for (var n = 0; n < 3; n++) {
+          expect((await retry()).bytes, deferred.bytes);
+          expect(await fixture.counts(1), deferredCounts);
+          expect(
+            businessRows(fixture.files[1], includeHistory: true),
+            deferredRows,
+          );
+          expect(
+            fixture
+                .secureStores[1]
+                .states[fixture.installations[1].namespace]!
+                .revision,
+            protected.revision,
+          );
+          expect(
+            fixture
+                .secureStores[1]
+                .states[fixture.installations[1].namespace]!
+                .bytes,
+            protected.bytes,
+          );
+        }
+        await fixture.reopen(1);
+        expect((await retry()).bytes, deferred.bytes);
+        expect(await fixture.counts(1), deferredCounts);
+        await fixture.commands(1).applyIncoming(parent.operationBytes);
+        final resumed = await retry();
         expect(resumed.status, 'applied');
         expect((await fixture.row(1)).notes, 'Child');
         expect(
@@ -957,6 +1493,11 @@ void main() {
           deferred.bytes,
         );
         expect(resumed.key, isNot(deferred.key));
+        expect((jsonDecode(resumed.bytes) as Map)['parent'], deferred.key);
+        final appliedCounts = await fixture.counts(1);
+        expect(appliedCounts, [1, 2, 3, 3, 0, 0]);
+        expect((await retry()).bytes, resumed.bytes);
+        expect(await fixture.counts(1), appliedCounts);
       },
     );
     test('precommit failure rolls back every database effect and clears only proven no-commit', () async {
@@ -1342,7 +1883,7 @@ void main() {
       await fixture.databases[1].close();
       expect(businessRows(file), before);
       raw = raw_sqlite.sqlite3.open(file.path);
-      raw.execute('PRAGMA user_version = 4');
+      raw.execute('PRAGMA user_version = ${kAppSchemaVersion + 1}');
       raw.dispose();
       fixture.databases[1] = AppDatabase.forTesting(NativeDatabase(file));
       await expectLater(
@@ -1351,7 +1892,10 @@ void main() {
       );
       await fixture.databases[1].close();
       raw = raw_sqlite.sqlite3.open(file.path);
-      expect(raw.select('PRAGMA user_version').single.values.first, 4);
+      expect(
+        raw.select('PRAGMA user_version').single.values.first,
+        kAppSchemaVersion + 1,
+      );
       expect(raw.select('SELECT id,job_id FROM job_lines').single['id'], line);
       raw.dispose();
     } finally {

@@ -64,12 +64,23 @@ _Reduction _reduce(_LineState baseline, List<_Operation> operations) {
 
   final units = Map<String, Object?>.from(baseline.units);
   final conflicts = <_Conflict>[];
+  Object valueKey(_Operation operation, String unit) {
+    final value = operation.units[unit];
+    if (unit != 'quantities') return _canonical(value);
+    final quantities = _object(value);
+    return (
+      needed: (quantities['needed'] as num).toDouble(),
+      pull: (quantities['pull'] as num).toDouble(),
+      unit: quantities['unit'],
+    );
+  }
+
   for (final unit in ['identity', 'quantities', 'notes', 'customNotes']) {
     final candidates = maximal(
       operations.where((o) => o.units.containsKey(unit)),
     );
     if (candidates.isEmpty) continue;
-    final values = candidates.map((o) => _canonical(o.units[unit])).toSet();
+    final values = candidates.map((o) => valueKey(o, unit)).toSet();
     if (values.length == 1) {
       units[unit] = candidates.first.units[unit];
     } else {
@@ -80,7 +91,7 @@ _Reduction _reduce(_LineState baseline, List<_Operation> operations) {
         ),
       );
       if (previous.isNotEmpty &&
-          previous.map((o) => _canonical(o.units[unit])).toSet().length == 1) {
+          previous.map((o) => valueKey(o, unit)).toSet().length == 1) {
         units[unit] = previous.first.units[unit];
       }
       conflicts.add(
