@@ -41,6 +41,13 @@ Map<String, Object?> _publicUiSignals() {
     'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
     'createControl': find.byKey(const Key('create-company')).evaluate().length,
     'signinControl': find.byKey(const Key('company-signin')).evaluate().length,
+    'signinEnabled':
+        find.byKey(const Key('company-signin')).evaluate().length == 1
+        ? ((find.byKey(const Key('company-signin')).evaluate().single.widget
+                      as FilledButton)
+                  .onPressed !=
+              null)
+        : null,
     'signoutControl': find
         .byKey(const Key('company-signout'))
         .evaluate()
@@ -292,7 +299,7 @@ Future<void> _waitFor(
           !ready()) {
         final signals = _publicUiSignals();
         if (signals['errorClass'] != 'none' ||
-            signals['lockedTitle'] == 1 ||
+            (signals['lockedTitle'] == 1 && signals['signinEnabled'] == true) ||
             signals['recoveryNeededTitle'] == 1) {
           throw const _NativeFailure();
         }
