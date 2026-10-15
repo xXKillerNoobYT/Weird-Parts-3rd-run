@@ -371,12 +371,30 @@ Future<void> _mount(
 }
 
 Future<void> _signIn(WidgetTester tester, {bool wrong = false}) async {
-  await tester.enterText(
-    find.byKey(const Key('company-signin-pin')),
-    wrong ? '9999' : '1234',
-  );
+  final expected = wrong ? '9999' : '1234';
+  await tester.enterText(find.byKey(const Key('company-signin-pin')), expected);
+  final signin = find.byKey(const Key('company-signin'));
+  await tester.ensureVisible(signin);
+  await tester.pump();
+  final inputMatches =
+      tester
+          .widget<TextField>(find.byKey(const Key('company-signin-pin')))
+          .controller
+          ?.text ==
+      expected;
+  final enabled = tester.widget<FilledButton>(signin).onPressed != null;
+  final hitTestable = signin.hitTestable().evaluate().length == 1;
+  _measurements.add({
+    'action': wrong
+        ? 'wrong-pin-input-preflight'
+        : 'correct-pin-input-preflight',
+    'controllerEqualsSyntheticInput': inputMatches,
+    'signinEnabled': enabled,
+    'signinHitTestable': hitTestable,
+  });
+  _require(inputMatches && enabled && hitTestable);
   final started = Stopwatch()..start();
-  await _tap(tester, find.byKey(const Key('company-signin')));
+  await _tap(tester, signin);
   await _waitFor(
     tester,
     () => wrong
@@ -814,6 +832,7 @@ void main() {
             'witnessStatus': witnessStatus,
             'factsCount': factsCount,
             'ui': _publicUiSignals(),
+            'measurements': _measurements,
           },
         );
       }
