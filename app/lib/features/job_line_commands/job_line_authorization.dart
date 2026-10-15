@@ -20,6 +20,24 @@ final class VerifiedJobLineSession {
   Map<String, Object?> get _proof => _object(jsonDecode(_proofBytes));
   Map<String, Object?> get _assertion => _object(_proof['body']);
 
+  void validateLiveOwner(OwnerSession? owner) {
+    final assertion = _assertion;
+    if (assertion['v'] != 2) return;
+    if (owner == null) {
+      throw const JobLineRefusal('Live administrator session required');
+    }
+    owner.validateCommand(
+      company: _string(assertion, 'company'),
+      shop: _string(assertion, 'shop'),
+      user: _string(assertion, 'user'),
+      device: _string(assertion, 'device'),
+      installation: _string(assertion, 'installation'),
+      generation: _string(assertion, 'generation'),
+      session: _string(assertion, 'session'),
+    );
+    owner.validateAuthority(_trust, _floors);
+  }
+
   /// The protected signer accepts only a complete operation covered by this
   /// opaque proof. Its signature domain cannot mint a login assertion.
   void validateOperationSigningContent(
@@ -214,6 +232,7 @@ class JobLineAuthorization {
   ) async {
     _keys(proof, {'body', 'signature'});
     final assertion = _object(proof['body']);
+    final v2 = assertion['v'] == 2;
     _keys(assertion, {
       'v',
       'company',
@@ -230,8 +249,14 @@ class JobLineAuthorization {
       'permission',
       'authority',
       'facts',
+      if (v2) 'session',
     });
-    if (assertion['v'] != 1) {
+    if (!(assertion['v'] == 1 || v2) ||
+        (v2 &&
+            (assertion['session'] is! String ||
+                !Uuid.isValidUUID(
+                  fromString: assertion['session'] as String,
+                )))) {
       throw const JobLineRefusal('unsupported authorization version');
     }
     final receiver = await _verifyCurrentReceiver(command);
@@ -247,6 +272,9 @@ class JobLineAuthorization {
     }
     final facts = receiver.facts;
     final factsBody = facts.body;
+    if ((factsBody['v'] == 2) != v2) {
+      throw const JobLineRefusal('authorization version differs from facts');
+    }
     final device = facts._entry('devices', _string(assertion, 'device'));
     final user = facts._entry('users', _string(assertion, 'user'));
     final capability = command.mutation is DeleteJobLine
@@ -325,7 +353,12 @@ class JobLineAuthorization {
       throw const JobLineRefusal('invalid signing device key');
     }
     final publicKey = SimplePublicKey(public, type: KeyPairType.ed25519);
-    await _verifySignature(assertion, _string(proof, 'signature'), publicKey);
+    await _verifySignature(
+      assertion,
+      _string(proof, 'signature'),
+      publicKey,
+      domain: v2 ? 'wiredpart.job.line.authorization@2:' : '',
+    );
     return VerifiedJobLineSession._(
       command,
       proof,
@@ -359,26 +392,48 @@ class JobLineAuthorization {
     final signed = _object(jsonDecode(factsRow.signedBytes));
     _keys(signed, {'body', 'signature'});
     final factsBody = _object(signed['body']);
+    final v2 = factsBody['v'] == 2;
     _keys(factsBody, {
       'v',
       'company',
+      if (v2) 'shop',
+      if (v2) 'name',
       'authority',
       'policy',
+      if (v2) 'recovery',
+      if (v2 && factsBody.containsKey('rotation')) 'rotation',
       'devices',
       'users',
       'entities',
     });
-    if (factsBody['v'] != 1 ||
+    if (!(factsBody['v'] == 1 || v2) ||
         factsBody['company'] != command.companyId ||
+        (v2 && factsBody['shop'] != command.shopId) ||
         factsBody['authority'] != trust.authorityVersion ||
         factsBody['policy'] != trust.policy ||
         _digest(factsBody) != trust.factsCommitment) {
       throw const JobLineRefusal('company facts do not match protected pin');
     }
+    if (v2) {
+      final name = factsBody['name'];
+      final recovery = _object(factsBody['recovery']);
+      _keys(recovery, {'v', 'key', 'package'});
+      if (name is! String ||
+          name.trim().isEmpty ||
+          name.length > 100 ||
+          recovery['v'] != 1 ||
+          recovery['package'] is! String ||
+          !Uuid.isValidUUID(fromString: recovery['package'] as String) ||
+          recovery['key'] is! String ||
+          base64Decode(recovery['key'] as String).length != 32) {
+        throw const JobLineRefusal('invalid company recovery facts');
+      }
+    }
     await _verifySignature(
       factsBody,
       _string(signed, 'signature'),
       SimplePublicKey(trust.rootKey, type: KeyPairType.ed25519),
+      domain: v2 ? 'wiredpart.company.facts@2:' : '',
     );
     final facts = _CompanyFacts(factsBody);
     final floors = installation.knownSecurityFloors;

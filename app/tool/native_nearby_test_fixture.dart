@@ -72,8 +72,8 @@ void _validateExistingDatabase(File file, String deviceId) {
   final db = raw.sqlite3.open(file.path, mode: raw.OpenMode.readOnly);
   try {
     db.execute('BEGIN');
-    final version = db.select('PRAGMA user_version').single.values.single;
-    if (version != 2 && version != 3 && version != 4) {
+    final version = db.select('PRAGMA user_version').single.values.single as int;
+    if (version != 2 && version != 3 && version != 4 && version != 5) {
       rejectNativeTest('fixture-rejected');
     }
     final tables = db
@@ -82,7 +82,8 @@ void _validateExistingDatabase(File file, String deviceId) {
         .toSet();
     final expectedTables = {
       ..._schema2Columns,
-      if (version == 3 || version == 4) ..._companyColumns,
+      if (version >= 3) ..._companyColumns,
+      if (version >= 5) ..._schema5Columns,
     };
     if (tables.length != expectedTables.length ||
         !tables.containsAll(expectedTables.keys)) {
@@ -102,7 +103,10 @@ void _validateExistingDatabase(File file, String deviceId) {
       };
       if (!columns.containsAll(expected)) rejectNativeTest('fixture-rejected');
     }
-    for (final table in _companyColumns.keys.where(tables.contains)) {
+    for (final table in {
+      ..._companyColumns.keys,
+      ..._schema5Columns.keys,
+    }.where(tables.contains)) {
       if (db.select('SELECT 1 FROM "$table" LIMIT 1').isNotEmpty) {
         rejectNativeTest('fixture-rejected');
       }
@@ -175,6 +179,16 @@ const _companyColumns = {
     'line_id',
     'unit',
     'alternatives_bytes',
+  },
+};
+const _schema5Columns = {
+  'company_bootstrap_witnesses': {
+    'company_id',
+    'bootstrap_id',
+    'facts_commitment',
+    'package_id',
+    'package_digest',
+    'status',
   },
 };
 const _schema2Columns = {
@@ -310,7 +324,7 @@ final class NativeFixtureSnapshot {
     await db.transaction(() async {
       version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');
-      if (version != 2 && version != 3 && version != 4) {
+      if (version != 2 && version != 3 && version != 4 && version != 5) {
         rejectNativeTest('fixture-rejected');
       }
       final names =
@@ -324,12 +338,16 @@ final class NativeFixtureSnapshot {
       final expectedNames = {
         ..._schema2Columns.keys,
         if (version >= 3) ..._companyColumns.keys,
+        if (version >= 5) ..._schema5Columns.keys,
       };
       if (names.length != expectedNames.length ||
           !names.containsAll(expectedNames)) {
         rejectNativeTest('fixture-rejected');
       }
-      for (final table in _companyColumns.keys.where(names.contains)) {
+      for (final table in {
+        ..._companyColumns.keys,
+        ..._schema5Columns.keys,
+      }.where(names.contains)) {
         if ((await db.customSelect('SELECT 1 FROM "$table" LIMIT 1').get())
             .isNotEmpty) {
           rejectNativeTest('fixture-rejected');
@@ -340,6 +358,7 @@ final class NativeFixtureSnapshot {
       for (final table in tables) {
         final name = table.actualTableName;
         if (version == 2 && !_schema2Columns.containsKey(name)) continue;
+        if (version < 5 && _schema5Columns.containsKey(name)) continue;
         final order = table.$primaryKey
             .map((column) => '"${column.$name}"')
             .join(',');

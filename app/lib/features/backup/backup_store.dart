@@ -12,32 +12,20 @@ import '../../data/app_database.dart';
 import '../../data/sqlite_file.dart';
 import '../reset/local_data_reset.dart';
 import '../installation/installation_security.dart';
+import '../company/company_store_markers.dart';
 import 'backup_codec.dart';
 
 const kLastBackupAtKey = 'last_backup_at';
 const kLastBackupSourceKey = 'last_backup_source_device';
 const kBackupAlreadyInProgressMessage = 'Backup already in progress';
 
-const _companyTables = [
-  'company_authority_facts',
-  'job_line_baselines',
-  'job_line_operations',
-  'job_line_receipts',
-  'job_line_audits',
-  'job_line_outgoing',
-  'job_line_conflicts',
-];
-
 /// Current whole-shop copy has no company authorization or history recovery
 /// journal. Refuse before close, protected activation, or filesystem replacement.
 Future<void> requireLegacyBusinessStore(AppDatabase db) async {
-  for (final table in _companyTables) {
-    final rows = await db.customSelect('SELECT 1 FROM $table LIMIT 1').get();
-    if (rows.isNotEmpty) {
-      throw const BackupFormatException(
-        'Company history requires a compatible authorized backup or copy. This shop was not replaced.',
-      );
-    }
+  if (await hasCompanyStoreMarkers(db)) {
+    throw const BackupFormatException(
+      'Company history requires a compatible authorized backup or copy. This shop was not replaced.',
+    );
   }
 }
 
@@ -54,12 +42,13 @@ void requireLegacyBusinessFile(File file) {
         .toSet();
     final schema = db.select('PRAGMA user_version').single.values.first as int;
     if (schema > kAppSchemaVersion ||
-        (schema >= 3 && !_companyTables.every(names.contains))) {
+        (schema >= 3 && !priorCompanyMarkerTables.every(names.contains)) ||
+        (schema >= 5 && !names.contains('company_bootstrap_witnesses'))) {
       throw const BackupFormatException(
         'Unsupported or incomplete company database',
       );
     }
-    for (final table in _companyTables.where(names.contains)) {
+    for (final table in companyMarkerTables.where(names.contains)) {
       if (db.select('SELECT 1 FROM $table LIMIT 1').isNotEmpty) {
         throw const BackupFormatException(
           'Company history requires a compatible authorized backup or copy. This shop was not replaced.',

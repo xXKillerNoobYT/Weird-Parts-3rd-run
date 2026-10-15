@@ -8514,6 +8514,454 @@ class OrderSplitsCompanion extends UpdateCompanion<OrderSplit> {
   }
 }
 
+class $CompanyBootstrapWitnessesTable extends CompanyBootstrapWitnesses
+    with
+        TableInfo<
+          $CompanyBootstrapWitnessesTable,
+          CompanyBootstrapWitnessesData
+        > {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyBootstrapWitnessesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bootstrapIdMeta = const VerificationMeta(
+    'bootstrapId',
+  );
+  @override
+  late final GeneratedColumn<String> bootstrapId = GeneratedColumn<String>(
+    'bootstrap_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _factsCommitmentMeta = const VerificationMeta(
+    'factsCommitment',
+  );
+  @override
+  late final GeneratedColumn<String> factsCommitment = GeneratedColumn<String>(
+    'facts_commitment',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _packageIdMeta = const VerificationMeta(
+    'packageId',
+  );
+  @override
+  late final GeneratedColumn<String> packageId = GeneratedColumn<String>(
+    'package_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _packageDigestMeta = const VerificationMeta(
+    'packageDigest',
+  );
+  @override
+  late final GeneratedColumn<String> packageDigest = GeneratedColumn<String>(
+    'package_digest',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    bootstrapId,
+    factsCommitment,
+    packageId,
+    packageDigest,
+    status,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_bootstrap_witnesses';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyBootstrapWitnessesData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('bootstrap_id')) {
+      context.handle(
+        _bootstrapIdMeta,
+        bootstrapId.isAcceptableOrUnknown(
+          data['bootstrap_id']!,
+          _bootstrapIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_bootstrapIdMeta);
+    }
+    if (data.containsKey('facts_commitment')) {
+      context.handle(
+        _factsCommitmentMeta,
+        factsCommitment.isAcceptableOrUnknown(
+          data['facts_commitment']!,
+          _factsCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_factsCommitmentMeta);
+    }
+    if (data.containsKey('package_id')) {
+      context.handle(
+        _packageIdMeta,
+        packageId.isAcceptableOrUnknown(data['package_id']!, _packageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_packageIdMeta);
+    }
+    if (data.containsKey('package_digest')) {
+      context.handle(
+        _packageDigestMeta,
+        packageDigest.isAcceptableOrUnknown(
+          data['package_digest']!,
+          _packageDigestMeta,
+        ),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {companyId};
+  @override
+  CompanyBootstrapWitnessesData map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyBootstrapWitnessesData(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      bootstrapId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}bootstrap_id'],
+      )!,
+      factsCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}facts_commitment'],
+      )!,
+      packageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}package_id'],
+      )!,
+      packageDigest: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}package_digest'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyBootstrapWitnessesTable createAlias(String alias) {
+    return $CompanyBootstrapWitnessesTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyBootstrapWitnessesData extends DataClass
+    implements Insertable<CompanyBootstrapWitnessesData> {
+  final String companyId;
+  final String bootstrapId;
+  final String factsCommitment;
+  final String packageId;
+  final String? packageDigest;
+  final String status;
+  const CompanyBootstrapWitnessesData({
+    required this.companyId,
+    required this.bootstrapId,
+    required this.factsCommitment,
+    required this.packageId,
+    this.packageDigest,
+    required this.status,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['bootstrap_id'] = Variable<String>(bootstrapId);
+    map['facts_commitment'] = Variable<String>(factsCommitment);
+    map['package_id'] = Variable<String>(packageId);
+    if (!nullToAbsent || packageDigest != null) {
+      map['package_digest'] = Variable<String>(packageDigest);
+    }
+    map['status'] = Variable<String>(status);
+    return map;
+  }
+
+  CompanyBootstrapWitnessesCompanion toCompanion(bool nullToAbsent) {
+    return CompanyBootstrapWitnessesCompanion(
+      companyId: Value(companyId),
+      bootstrapId: Value(bootstrapId),
+      factsCommitment: Value(factsCommitment),
+      packageId: Value(packageId),
+      packageDigest: packageDigest == null && nullToAbsent
+          ? const Value.absent()
+          : Value(packageDigest),
+      status: Value(status),
+    );
+  }
+
+  factory CompanyBootstrapWitnessesData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyBootstrapWitnessesData(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      bootstrapId: serializer.fromJson<String>(json['bootstrapId']),
+      factsCommitment: serializer.fromJson<String>(json['factsCommitment']),
+      packageId: serializer.fromJson<String>(json['packageId']),
+      packageDigest: serializer.fromJson<String?>(json['packageDigest']),
+      status: serializer.fromJson<String>(json['status']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'bootstrapId': serializer.toJson<String>(bootstrapId),
+      'factsCommitment': serializer.toJson<String>(factsCommitment),
+      'packageId': serializer.toJson<String>(packageId),
+      'packageDigest': serializer.toJson<String?>(packageDigest),
+      'status': serializer.toJson<String>(status),
+    };
+  }
+
+  CompanyBootstrapWitnessesData copyWith({
+    String? companyId,
+    String? bootstrapId,
+    String? factsCommitment,
+    String? packageId,
+    Value<String?> packageDigest = const Value.absent(),
+    String? status,
+  }) => CompanyBootstrapWitnessesData(
+    companyId: companyId ?? this.companyId,
+    bootstrapId: bootstrapId ?? this.bootstrapId,
+    factsCommitment: factsCommitment ?? this.factsCommitment,
+    packageId: packageId ?? this.packageId,
+    packageDigest: packageDigest.present
+        ? packageDigest.value
+        : this.packageDigest,
+    status: status ?? this.status,
+  );
+  CompanyBootstrapWitnessesData copyWithCompanion(
+    CompanyBootstrapWitnessesCompanion data,
+  ) {
+    return CompanyBootstrapWitnessesData(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      bootstrapId: data.bootstrapId.present
+          ? data.bootstrapId.value
+          : this.bootstrapId,
+      factsCommitment: data.factsCommitment.present
+          ? data.factsCommitment.value
+          : this.factsCommitment,
+      packageId: data.packageId.present ? data.packageId.value : this.packageId,
+      packageDigest: data.packageDigest.present
+          ? data.packageDigest.value
+          : this.packageDigest,
+      status: data.status.present ? data.status.value : this.status,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyBootstrapWitnessesData(')
+          ..write('companyId: $companyId, ')
+          ..write('bootstrapId: $bootstrapId, ')
+          ..write('factsCommitment: $factsCommitment, ')
+          ..write('packageId: $packageId, ')
+          ..write('packageDigest: $packageDigest, ')
+          ..write('status: $status')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    companyId,
+    bootstrapId,
+    factsCommitment,
+    packageId,
+    packageDigest,
+    status,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyBootstrapWitnessesData &&
+          other.companyId == this.companyId &&
+          other.bootstrapId == this.bootstrapId &&
+          other.factsCommitment == this.factsCommitment &&
+          other.packageId == this.packageId &&
+          other.packageDigest == this.packageDigest &&
+          other.status == this.status);
+}
+
+class CompanyBootstrapWitnessesCompanion
+    extends UpdateCompanion<CompanyBootstrapWitnessesData> {
+  final Value<String> companyId;
+  final Value<String> bootstrapId;
+  final Value<String> factsCommitment;
+  final Value<String> packageId;
+  final Value<String?> packageDigest;
+  final Value<String> status;
+  final Value<int> rowid;
+  const CompanyBootstrapWitnessesCompanion({
+    this.companyId = const Value.absent(),
+    this.bootstrapId = const Value.absent(),
+    this.factsCommitment = const Value.absent(),
+    this.packageId = const Value.absent(),
+    this.packageDigest = const Value.absent(),
+    this.status = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyBootstrapWitnessesCompanion.insert({
+    required String companyId,
+    required String bootstrapId,
+    required String factsCommitment,
+    required String packageId,
+    this.packageDigest = const Value.absent(),
+    required String status,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       bootstrapId = Value(bootstrapId),
+       factsCommitment = Value(factsCommitment),
+       packageId = Value(packageId),
+       status = Value(status);
+  static Insertable<CompanyBootstrapWitnessesData> custom({
+    Expression<String>? companyId,
+    Expression<String>? bootstrapId,
+    Expression<String>? factsCommitment,
+    Expression<String>? packageId,
+    Expression<String>? packageDigest,
+    Expression<String>? status,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (bootstrapId != null) 'bootstrap_id': bootstrapId,
+      if (factsCommitment != null) 'facts_commitment': factsCommitment,
+      if (packageId != null) 'package_id': packageId,
+      if (packageDigest != null) 'package_digest': packageDigest,
+      if (status != null) 'status': status,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyBootstrapWitnessesCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? bootstrapId,
+    Value<String>? factsCommitment,
+    Value<String>? packageId,
+    Value<String?>? packageDigest,
+    Value<String>? status,
+    Value<int>? rowid,
+  }) {
+    return CompanyBootstrapWitnessesCompanion(
+      companyId: companyId ?? this.companyId,
+      bootstrapId: bootstrapId ?? this.bootstrapId,
+      factsCommitment: factsCommitment ?? this.factsCommitment,
+      packageId: packageId ?? this.packageId,
+      packageDigest: packageDigest ?? this.packageDigest,
+      status: status ?? this.status,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (bootstrapId.present) {
+      map['bootstrap_id'] = Variable<String>(bootstrapId.value);
+    }
+    if (factsCommitment.present) {
+      map['facts_commitment'] = Variable<String>(factsCommitment.value);
+    }
+    if (packageId.present) {
+      map['package_id'] = Variable<String>(packageId.value);
+    }
+    if (packageDigest.present) {
+      map['package_digest'] = Variable<String>(packageDigest.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyBootstrapWitnessesCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('bootstrapId: $bootstrapId, ')
+          ..write('factsCommitment: $factsCommitment, ')
+          ..write('packageId: $packageId, ')
+          ..write('packageDigest: $packageDigest, ')
+          ..write('status: $status, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $CompanyAuthorityFactsTable extends CompanyAuthorityFacts
     with TableInfo<$CompanyAuthorityFactsTable, CompanyAuthorityFact> {
   @override
@@ -11055,6 +11503,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $JobsTable jobs = $JobsTable(this);
   late final $JobLinesTable jobLines = $JobLinesTable(this);
   late final $OrderSplitsTable orderSplits = $OrderSplitsTable(this);
+  late final $CompanyBootstrapWitnessesTable companyBootstrapWitnesses =
+      $CompanyBootstrapWitnessesTable(this);
   late final $CompanyAuthorityFactsTable companyAuthorityFacts =
       $CompanyAuthorityFactsTable(this);
   late final $JobLineBaselinesTable jobLineBaselines = $JobLineBaselinesTable(
@@ -11096,6 +11546,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     jobs,
     jobLines,
     orderSplits,
+    companyBootstrapWitnesses,
     companyAuthorityFacts,
     jobLineBaselines,
     jobLineOperations,
@@ -15295,6 +15746,250 @@ typedef $$OrderSplitsTableProcessedTableManager =
       OrderSplit,
       PrefetchHooks Function()
     >;
+typedef $$CompanyBootstrapWitnessesTableCreateCompanionBuilder =
+    CompanyBootstrapWitnessesCompanion Function({
+      required String companyId,
+      required String bootstrapId,
+      required String factsCommitment,
+      required String packageId,
+      Value<String?> packageDigest,
+      required String status,
+      Value<int> rowid,
+    });
+typedef $$CompanyBootstrapWitnessesTableUpdateCompanionBuilder =
+    CompanyBootstrapWitnessesCompanion Function({
+      Value<String> companyId,
+      Value<String> bootstrapId,
+      Value<String> factsCommitment,
+      Value<String> packageId,
+      Value<String?> packageDigest,
+      Value<String> status,
+      Value<int> rowid,
+    });
+
+class $$CompanyBootstrapWitnessesTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyBootstrapWitnessesTable> {
+  $$CompanyBootstrapWitnessesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bootstrapId => $composableBuilder(
+    column: $table.bootstrapId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get factsCommitment => $composableBuilder(
+    column: $table.factsCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get packageId => $composableBuilder(
+    column: $table.packageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get packageDigest => $composableBuilder(
+    column: $table.packageDigest,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyBootstrapWitnessesTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyBootstrapWitnessesTable> {
+  $$CompanyBootstrapWitnessesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bootstrapId => $composableBuilder(
+    column: $table.bootstrapId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get factsCommitment => $composableBuilder(
+    column: $table.factsCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get packageId => $composableBuilder(
+    column: $table.packageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get packageDigest => $composableBuilder(
+    column: $table.packageDigest,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyBootstrapWitnessesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyBootstrapWitnessesTable> {
+  $$CompanyBootstrapWitnessesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get bootstrapId => $composableBuilder(
+    column: $table.bootstrapId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get factsCommitment => $composableBuilder(
+    column: $table.factsCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get packageId =>
+      $composableBuilder(column: $table.packageId, builder: (column) => column);
+
+  GeneratedColumn<String> get packageDigest => $composableBuilder(
+    column: $table.packageDigest,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+}
+
+class $$CompanyBootstrapWitnessesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyBootstrapWitnessesTable,
+          CompanyBootstrapWitnessesData,
+          $$CompanyBootstrapWitnessesTableFilterComposer,
+          $$CompanyBootstrapWitnessesTableOrderingComposer,
+          $$CompanyBootstrapWitnessesTableAnnotationComposer,
+          $$CompanyBootstrapWitnessesTableCreateCompanionBuilder,
+          $$CompanyBootstrapWitnessesTableUpdateCompanionBuilder,
+          (
+            CompanyBootstrapWitnessesData,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyBootstrapWitnessesTable,
+              CompanyBootstrapWitnessesData
+            >,
+          ),
+          CompanyBootstrapWitnessesData,
+          PrefetchHooks Function()
+        > {
+  $$CompanyBootstrapWitnessesTableTableManager(
+    _$AppDatabase db,
+    $CompanyBootstrapWitnessesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyBootstrapWitnessesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CompanyBootstrapWitnessesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CompanyBootstrapWitnessesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> bootstrapId = const Value.absent(),
+                Value<String> factsCommitment = const Value.absent(),
+                Value<String> packageId = const Value.absent(),
+                Value<String?> packageDigest = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyBootstrapWitnessesCompanion(
+                companyId: companyId,
+                bootstrapId: bootstrapId,
+                factsCommitment: factsCommitment,
+                packageId: packageId,
+                packageDigest: packageDigest,
+                status: status,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String bootstrapId,
+                required String factsCommitment,
+                required String packageId,
+                Value<String?> packageDigest = const Value.absent(),
+                required String status,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyBootstrapWitnessesCompanion.insert(
+                companyId: companyId,
+                bootstrapId: bootstrapId,
+                factsCommitment: factsCommitment,
+                packageId: packageId,
+                packageDigest: packageDigest,
+                status: status,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyBootstrapWitnessesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyBootstrapWitnessesTable,
+      CompanyBootstrapWitnessesData,
+      $$CompanyBootstrapWitnessesTableFilterComposer,
+      $$CompanyBootstrapWitnessesTableOrderingComposer,
+      $$CompanyBootstrapWitnessesTableAnnotationComposer,
+      $$CompanyBootstrapWitnessesTableCreateCompanionBuilder,
+      $$CompanyBootstrapWitnessesTableUpdateCompanionBuilder,
+      (
+        CompanyBootstrapWitnessesData,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyBootstrapWitnessesTable,
+          CompanyBootstrapWitnessesData
+        >,
+      ),
+      CompanyBootstrapWitnessesData,
+      PrefetchHooks Function()
+    >;
 typedef $$CompanyAuthorityFactsTableCreateCompanionBuilder =
     CompanyAuthorityFactsCompanion Function({
       required String companyId,
@@ -16767,6 +17462,11 @@ class $AppDatabaseManager {
       $$JobLinesTableTableManager(_db, _db.jobLines);
   $$OrderSplitsTableTableManager get orderSplits =>
       $$OrderSplitsTableTableManager(_db, _db.orderSplits);
+  $$CompanyBootstrapWitnessesTableTableManager get companyBootstrapWitnesses =>
+      $$CompanyBootstrapWitnessesTableTableManager(
+        _db,
+        _db.companyBootstrapWitnesses,
+      );
   $$CompanyAuthorityFactsTableTableManager get companyAuthorityFacts =>
       $$CompanyAuthorityFactsTableTableManager(_db, _db.companyAuthorityFacts);
   $$JobLineBaselinesTableTableManager get jobLineBaselines =>

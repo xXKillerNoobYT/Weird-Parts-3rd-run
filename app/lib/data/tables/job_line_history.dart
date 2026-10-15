@@ -1,5 +1,17 @@
 import 'package:drift/drift.dart';
 
+class CompanyBootstrapWitnesses extends Table {
+  TextColumn get companyId => text()();
+  TextColumn get bootstrapId => text()();
+  TextColumn get factsCommitment => text()();
+  TextColumn get packageId => text()();
+  TextColumn get packageDigest => text().nullable()();
+  TextColumn get status => text()();
+
+  @override
+  Set<Column> get primaryKey => {companyId};
+}
+
 class CompanyAuthorityFacts extends Table {
   TextColumn get companyId => text()();
   TextColumn get commitment => text()();

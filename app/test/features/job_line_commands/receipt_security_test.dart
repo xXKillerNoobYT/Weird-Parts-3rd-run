@@ -877,7 +877,7 @@ void main() {
   );
 
   test(
-    'frozen schema3 migration refuses schema4 without row or version changes',
+    'frozen schema3 migration refuses newer schema without row or version changes',
     () async {
       await fixture.commit(
         0,
@@ -892,7 +892,7 @@ void main() {
         await old.close();
       }
       final raw = sqlite.sqlite3.open(fixture.files[0].path);
-      expect(raw.select('PRAGMA user_version').single.values.single, 4);
+      expect(raw.select('PRAGMA user_version').single.values.single, kAppSchemaVersion);
       raw.dispose();
       expect(snapshot(fixture.files[0]), before);
     },
@@ -933,7 +933,7 @@ void main() {
         expect(
           (await newer.customSelect('PRAGMA user_version').getSingle())
               .read<int>('user_version'),
-          4,
+          kAppSchemaVersion,
         );
         expect(snapshot(fixture.files[0]), before);
       } finally {

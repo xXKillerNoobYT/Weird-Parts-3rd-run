@@ -80,7 +80,8 @@ final class NativeRestartExpectation {
       final proof = PrivateSnapshotProof.fromJson(data['proof']);
       if (!((proof.schemaVersion == 2 && proof.tableCount == 13) ||
               (proof.schemaVersion == 3 && proof.tableCount == 20) ||
-              (proof.schemaVersion == 4 && proof.tableCount == 20)) ||
+              (proof.schemaVersion == 4 && proof.tableCount == 20) ||
+              (proof.schemaVersion == 5 && proof.tableCount == 21)) ||
           proof.assetCount != 1 ||
           !proof.integrityValid ||
           !proof.referencesValid) {

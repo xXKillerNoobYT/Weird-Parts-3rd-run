@@ -93,8 +93,25 @@ class JobLineCommands {
 
   Future<JobLineCommandReceipt> patchJobLine(
     VerifiedJobLineSession session,
-    JobLineCommand command,
-  ) async {
+    JobLineCommand command, {
+    OwnerSession? ownerSession,
+  }) async {
+    if (session._assertion['v'] == 2) {
+      if (ownerSession == null) {
+        throw const JobLineRefusal('Live administrator session required');
+      }
+      return ownerSession.runLocalCommand(
+        () => _patchJobLine(session, command, ownerSession: ownerSession),
+      );
+    }
+    return _patchJobLine(session, command);
+  }
+
+  Future<JobLineCommandReceipt> _patchJobLine(
+    VerifiedJobLineSession session,
+    JobLineCommand command, {
+    OwnerSession? ownerSession,
+  }) async {
     if (_db.hasCallerTransaction) {
       throw const JobLineRefusal('command must own its top-level transaction');
     }
@@ -103,6 +120,7 @@ class JobLineCommands {
     }
     final verified = await authorization._verify(command, session._proof);
     final assertion = verified._assertion;
+    _validateLocalOwner(verified, ownerSession);
     final identity = _installation.identity;
     if (identity == null ||
         assertion['installation'] != identity.id.value ||
@@ -145,6 +163,7 @@ class JobLineCommands {
         local: true,
         resume: false,
         localSession: verified,
+        localOwner: ownerSession,
       );
     }
     final binding = verified._facts.entity(
@@ -173,6 +192,7 @@ class JobLineCommands {
       _db,
       verified,
       Uint8List.fromList(utf8.encode(_canonical(body))),
+      ownerSession: ownerSession,
     );
     final bytes = _canonical({
       'body': body,
@@ -184,7 +204,15 @@ class JobLineCommands {
       local: true,
       resume: false,
       localSession: verified,
+      localOwner: ownerSession,
     );
+  }
+
+  void _validateLocalOwner(
+    VerifiedJobLineSession verified,
+    OwnerSession? owner,
+  ) {
+    verified.validateLiveOwner(owner);
   }
 
   Future<JobLineCommandReceipt> applyIncoming(
@@ -272,6 +300,7 @@ class JobLineCommands {
     required bool local,
     required bool resume,
     VerifiedJobLineSession? localSession,
+    OwnerSession? localOwner,
   }) async {
     if (_db.hasCallerTransaction) {
       throw const JobLineRefusal('command must own its top-level transaction');
@@ -282,23 +311,121 @@ class JobLineCommands {
     JobLineCommandReceipt? result;
     try {
       result = await _db.transaction(() async {
-        // Obtain SQLite's write lock before the protected CAS. Recovery uses
-        // this same lock, so it cannot clear a still-running command's intent.
-        await _db.customStatement(
-          'UPDATE app_settings SET value = value WHERE key = ?',
-          [kInstallationBindingKey],
-        );
-        await authorization._verifyCurrentReceiver(command);
-        if (local) {
-          if (localSession == null ||
-              localSession.command.commitment != command.commitment) {
+        try {
+          // Obtain SQLite's write lock before the protected CAS. Recovery uses
+          // this same lock, so it cannot clear a still-running command's intent.
+          await _db.customStatement(
+            'UPDATE app_settings SET value = value WHERE key = ?',
+            [kInstallationBindingKey],
+          );
+          await authorization._verifyCurrentReceiver(command);
+          if (local) {
+            if (localSession == null ||
+                localSession.command.commitment != command.commitment) {
+              throw const JobLineRefusal(
+                'current local retry authorization missing',
+              );
+            }
+            final fresh = await authorization._verify(
+              localSession.command,
+              localSession._proof,
+            );
+            _validateLocalOwner(fresh, localOwner);
+            for (final key in [
+              'company',
+              'shop',
+              'line',
+              'request',
+              'generation',
+              'installation',
+              'device',
+              'user',
+              'command',
+            ]) {
+              if (operation.body[key] != fresh._assertion[key]) {
+                throw const JobLineRefusal(
+                  'local retry differs from current actor or command',
+                );
+              }
+            }
+          }
+          final generation = _installation.receivingStoreGeneration;
+          if (generation == null) {
+            throw const JobLineRefusal('receiving generation missing');
+          }
+          final baseReceiptKey = _digest({
+            'company': operation.company,
+            'origin': operation.generation,
+            'request': operation.id,
+            'receiver': _installation.identity!.id.value,
+            'store': generation.value,
+          });
+          final saved =
+              await (_db.select(_db.jobLineReceipts)
+                    ..where((t) => t.receiptKey.equals(baseReceiptKey)))
+                  .getSingleOrNull();
+          final existing =
+              await (_db.select(_db.jobLineOperations)..where(
+                    (t) =>
+                        t.companyId.equals(operation.company) &
+                        t.originGeneration.equals(operation.generation) &
+                        t.requestId.equals(operation.id),
+                  ))
+                  .getSingleOrNull();
+          if (existing != null &&
+              (existing.commitment != operation.commitment ||
+                  existing.operationBytes != operation.bytes)) {
             throw const JobLineRefusal(
-              'current local retry authorization missing',
+              'operation ID reused with different bytes or actor',
             );
           }
-          final fresh = await authorization._verify(
-            localSession.command,
-            localSession._proof,
+          if (saved != null) {
+            if (saved.operationCommitment != operation.commitment ||
+                saved.commandCommitment != operation.commandCommitment) {
+              throw const JobLineRefusal('receipt commitment collision');
+            }
+            if (existing == null) {
+              throw const JobLineRefusal('receipt operation missing');
+            }
+            final original = await _verifySavedReceipt(saved, operation);
+            if (!resume || original.status != 'deferred') return original;
+            final transitions = <JobLineReceipt>[];
+            for (final status in ['applied', 'conflict']) {
+              final linked =
+                  await (_db.select(_db.jobLineReceipts)..where(
+                        (t) => t.receiptKey.equals(
+                          _digest({
+                            'parent': baseReceiptKey,
+                            'transition': status,
+                          }),
+                        ),
+                      ))
+                      .getSingleOrNull();
+              if (linked != null) transitions.add(linked);
+            }
+            if (transitions.length > 1) {
+              throw const JobLineRefusal(
+                'multiple semantic receipt transitions',
+              );
+            }
+            if (transitions.isNotEmpty) {
+              return await _verifySavedReceipt(
+                transitions.single,
+                operation,
+                parent: saved,
+              );
+            }
+            final known = (await _operations(
+              operation.company,
+              operation.line,
+            )).map((o) => o.key).toSet();
+            if (operation.parents.any((p) => !known.contains(p))) {
+              return original;
+            }
+          }
+          final verified = await authorization._verify(
+            command,
+            operation.authorization,
           );
           for (final key in [
             'company',
@@ -310,425 +437,353 @@ class JobLineCommands {
             'device',
             'user',
             'command',
+            'facts',
           ]) {
-            if (operation.body[key] != fresh._assertion[key]) {
+            if (operation.body[key] != verified._assertion[key]) {
               throw const JobLineRefusal(
-                'local retry differs from current actor or command',
+                'operation author or assertion differs',
               );
             }
           }
-        }
-        final generation = _installation.receivingStoreGeneration;
-        if (generation == null) {
-          throw const JobLineRefusal('receiving generation missing');
-        }
-        final baseReceiptKey = _digest({
-          'company': operation.company,
-          'origin': operation.generation,
-          'request': operation.id,
-          'receiver': _installation.identity!.id.value,
-          'store': generation.value,
-        });
-        final saved = await (_db.select(
-          _db.jobLineReceipts,
-        )..where((t) => t.receiptKey.equals(baseReceiptKey))).getSingleOrNull();
-        final existing =
-            await (_db.select(_db.jobLineOperations)..where(
+          await _verifySignature(
+            operation.body,
+            operation.signature,
+            verified._publicKey,
+            domain: 'wiredpart.job.line.operation@1:',
+          );
+          final signedBinding = verified._facts.entity(
+            'jobLine',
+            operation.line,
+            shop: operation.shop,
+          );
+          if (signedBinding['baseline'] != operation.baseline) {
+            throw const JobLineRefusal('unsigned or differing baseline');
+          }
+          final row = await (_db.select(
+            _db.jobLines,
+          )..where((t) => t.id.equals(operation.line))).getSingleOrNull();
+          if (row == null) throw const JobLineRefusal('job line missing');
+          final scopes = await (_db.select(
+            _db.jobLineBaselines,
+          )..where((t) => t.lineId.equals(operation.line))).get();
+          if (scopes.any(
+            (b) =>
+                b.companyId != operation.company || b.shopId != operation.shop,
+          )) {
+            throw const JobLineRefusal(
+              'job line already belongs to another scope',
+            );
+          }
+          final stored = scopes.isEmpty ? null : scopes.single;
+          if (stored != null &&
+              (stored.baselineId != operation.baseline ||
+                  stored.projectionBytes != _canonical(row.toJson()))) {
+            throw const JobLineRefusal(
+              'legacy writer changed managed projection',
+            );
+          }
+          if (stored == null &&
+              jobLineLegacyBaselineCommitment(
+                    companyId: operation.company,
+                    shopId: operation.shop,
+                    row: row,
+                  ) !=
+                  operation.baseline) {
+            throw const JobLineRefusal(
+              'legacy baseline is not the signed state',
+            );
+          }
+          final baseline = stored == null
+              ? _LineState.fromRow(row)
+              : _LineState(
+                  _object(_object(jsonDecode(stored.baselineBytes))['state']),
+                );
+          final baselineRow = stored == null
+              ? row.toJson()
+              : _object(_object(jsonDecode(stored.baselineBytes))['row']);
+          await _validateReferences(
+            verified._facts,
+            operation,
+            row,
+            _LineState({..._LineState.fromRow(row).units, ...operation.units}),
+            requireActiveIdentity: operation.units.containsKey('identity'),
+          );
+          final operations = await _operations(
+            operation.company,
+            operation.line,
+          );
+          final storedCount =
+              await (_db.select(_db.jobLineOperations)..where(
+                    (t) =>
+                        t.companyId.equals(operation.company) &
+                        t.lineId.equals(operation.line),
+                  ))
+                  .get();
+          if (existing == null && storedCount.length >= _maximumOperations) {
+            throw const JobLineRefusal('operation storage capacity reached');
+          }
+          final storedGraph = {
+            for (final r in storedCount)
+              '${r.originGeneration}/${r.requestId}': _Operation.parse(
+                Uint8List.fromList(utf8.encode(r.operationBytes)),
+              ),
+            operation.key: operation,
+          };
+          final visited = <String>{};
+          void validateGraph(String key, Set<String> path) {
+            if (path.contains(key)) throw const JobLineRefusal('causal cycle');
+            if (visited.contains(key)) return;
+            final node = storedGraph[key];
+            if (node == null) return;
+            for (final parent in node.parents) {
+              validateGraph(parent, {...path, key});
+            }
+            visited.add(key);
+          }
+
+          validateGraph(operation.key, {});
+          final known = operations.map((o) => o.key).toSet();
+          if (operation.parents.contains(operation.key)) {
+            throw const JobLineRefusal('operation depends on itself');
+          }
+          final missing = operation.parents.any((p) => !known.contains(p));
+          if (local && missing) {
+            throw const JobLineRefusal(
+              'local command has an unobserved causal parent',
+            );
+          }
+          if (missing && resume && saved != null) {
+            return JobLineCommandReceipt._decode(saved.receiptBytes);
+          }
+          if (local && row.deletedAt != null) {
+            throw const JobLineRefusal(
+              'ordinary edit cannot restore deleted row',
+            );
+          }
+          final observed = <String>{};
+          void observe(String key) {
+            if (!observed.add(key)) return;
+            for (final parent in storedGraph[key]?.parents ?? <String>[]) {
+              observe(parent);
+            }
+          }
+
+          for (final parent in operation.parents) {
+            observe(parent);
+          }
+          if (operations.any(
+            (o) => o.units.containsKey('lifecycle') && observed.contains(o.key),
+          )) {
+            throw const JobLineRefusal('edit descends from deletion barrier');
+          }
+          final all = [
+            ...operations.where((o) => o.key != operation.key),
+            if (!missing) operation,
+          ];
+          final reduction = missing
+              ? _Reduction(_LineState.fromRow(row), [])
+              : _reduce(baseline, all);
+          if (!missing) {
+            await _validateReferences(
+              verified._facts,
+              operation,
+              row,
+              reduction.state,
+              requireActiveIdentity: false,
+            );
+          }
+          final status = missing
+              ? 'deferred'
+              : reduction.conflicts.isEmpty
+              ? 'applied'
+              : 'conflict';
+          final receiptKey = resume && saved != null
+              ? _digest({'parent': baseReceiptKey, 'transition': status})
+              : baseReceiptKey;
+          final transition = await (_db.select(
+            _db.jobLineReceipts,
+          )..where((t) => t.receiptKey.equals(receiptKey))).getSingleOrNull();
+          if (transition != null) {
+            return await _verifySavedReceipt(
+              transition,
+              operation,
+              parent: saved,
+            );
+          }
+          intent = CompanyCommandIntent(
+            receiptKey: receiptKey,
+            operationCommitment: operation.commitment,
+            commandCommitment: operation.commandCommitment,
+            storeGeneration: generation.value,
+            companyId: operation.company,
+            lineId: operation.line,
+            originGeneration: operation.generation,
+            requestId: operation.id,
+          );
+          intent = await _installation.beginCompanyCommand(
+            _db,
+            intent!,
+            expectedTrust: verified._trust,
+            expectedFloors: verified._floors,
+          );
+          if (stored == null) {
+            await _db
+                .into(_db.jobLineBaselines)
+                .insert(
+                  JobLineBaselinesCompanion.insert(
+                    companyId: operation.company,
+                    lineId: operation.line,
+                    shopId: operation.shop,
+                    baselineId: operation.baseline,
+                    baselineBytes: _canonical({
+                      'state': baseline.units,
+                      'row': baselineRow,
+                    }),
+                    projectionBytes: _canonical(row.toJson()),
+                  ),
+                );
+          }
+          if (existing == null) {
+            await _db
+                .into(_db.jobLineOperations)
+                .insert(
+                  JobLineOperationsCompanion.insert(
+                    companyId: operation.company,
+                    originGeneration: operation.generation,
+                    requestId: operation.id,
+                    lineId: operation.line,
+                    commitment: operation.commitment,
+                    operationBytes: operation.bytes,
+                    admitted: !missing,
+                  ),
+                );
+          } else if (!missing && !existing.admitted) {
+            await (_db.update(_db.jobLineOperations)..where(
                   (t) =>
                       t.companyId.equals(operation.company) &
                       t.originGeneration.equals(operation.generation) &
                       t.requestId.equals(operation.id),
                 ))
-                .getSingleOrNull();
-        if (existing != null &&
-            (existing.commitment != operation.commitment ||
-                existing.operationBytes != operation.bytes)) {
-          throw const JobLineRefusal(
-            'operation ID reused with different bytes or actor',
-          );
-        }
-        if (saved != null) {
-          if (saved.operationCommitment != operation.commitment ||
-              saved.commandCommitment != operation.commandCommitment) {
-            throw const JobLineRefusal('receipt commitment collision');
+                .write(const JobLineOperationsCompanion(admitted: Value(true)));
           }
-          if (existing == null) {
-            throw const JobLineRefusal('receipt operation missing');
-          }
-          final original = await _verifySavedReceipt(saved, operation);
-          if (!resume || original.status != 'deferred') return original;
-          final transitions = <JobLineReceipt>[];
-          for (final status in ['applied', 'conflict']) {
-            final linked =
-                await (_db.select(_db.jobLineReceipts)..where(
-                      (t) => t.receiptKey.equals(
-                        _digest({
-                          'parent': baseReceiptKey,
-                          'transition': status,
-                        }),
-                      ),
-                    ))
-                    .getSingleOrNull();
-            if (linked != null) transitions.add(linked);
-          }
-          if (transitions.length > 1) {
-            throw const JobLineRefusal('multiple semantic receipt transitions');
-          }
-          if (transitions.isNotEmpty) {
-            return _verifySavedReceipt(
-              transitions.single,
-              operation,
-              parent: saved,
+          if (!missing) {
+            await _writeProjection(
+              row,
+              reduction.state,
+              (baselineRow['revision'] as num).toInt() + all.length,
             );
+            final projected = await (_db.select(
+              _db.jobLines,
+            )..where((t) => t.id.equals(row.id))).getSingle();
+            await (_db.update(
+              _db.jobLineBaselines,
+            )..where((t) => t.lineId.equals(row.id))).write(
+              JobLineBaselinesCompanion(
+                projectionBytes: Value(_canonical(projected.toJson())),
+              ),
+            );
+            for (final conflict in reduction.conflicts) {
+              final alternatives = _canonical({
+                'candidates': conflict.candidates,
+                'frontier': conflict.frontier.isEmpty
+                    ? [operation.baseline]
+                    : conflict.frontier,
+              });
+              final conflictId = _digest({
+                'company': operation.company,
+                'line': operation.line,
+                'unit': conflict.unit,
+                'alternatives': jsonDecode(alternatives),
+              });
+              await _db
+                  .into(_db.jobLineConflicts)
+                  .insert(
+                    JobLineConflictsCompanion.insert(
+                      conflictId: conflictId,
+                      companyId: operation.company,
+                      lineId: operation.line,
+                      unit: conflict.unit,
+                      alternativesBytes: alternatives,
+                    ),
+                    mode: InsertMode.insertOrIgnore,
+                  );
+            }
           }
-          final known = (await _operations(
-            operation.company,
-            operation.line,
-          )).map((o) => o.key).toSet();
-          if (operation.parents.any((p) => !known.contains(p))) return original;
-        }
-        final verified = await authorization._verify(
-          command,
-          operation.authorization,
-        );
-        for (final key in [
-          'company',
-          'shop',
-          'line',
-          'request',
-          'generation',
-          'installation',
-          'device',
-          'user',
-          'command',
-          'facts',
-        ]) {
-          if (operation.body[key] != verified._assertion[key]) {
-            throw const JobLineRefusal('operation author or assertion differs');
-          }
-        }
-        await _verifySignature(
-          operation.body,
-          operation.signature,
-          verified._publicKey,
-          domain: 'wiredpart.job.line.operation@1:',
-        );
-        final signedBinding = verified._facts.entity(
-          'jobLine',
-          operation.line,
-          shop: operation.shop,
-        );
-        if (signedBinding['baseline'] != operation.baseline) {
-          throw const JobLineRefusal('unsigned or differing baseline');
-        }
-        final row = await (_db.select(
-          _db.jobLines,
-        )..where((t) => t.id.equals(operation.line))).getSingleOrNull();
-        if (row == null) throw const JobLineRefusal('job line missing');
-        final scopes = await (_db.select(
-          _db.jobLineBaselines,
-        )..where((t) => t.lineId.equals(operation.line))).get();
-        if (scopes.any(
-          (b) => b.companyId != operation.company || b.shopId != operation.shop,
-        )) {
-          throw const JobLineRefusal(
-            'job line already belongs to another scope',
-          );
-        }
-        final stored = scopes.isEmpty ? null : scopes.single;
-        if (stored != null &&
-            (stored.baselineId != operation.baseline ||
-                stored.projectionBytes != _canonical(row.toJson()))) {
-          throw const JobLineRefusal(
-            'legacy writer changed managed projection',
-          );
-        }
-        if (stored == null &&
-            jobLineLegacyBaselineCommitment(
-                  companyId: operation.company,
-                  shopId: operation.shop,
-                  row: row,
-                ) !=
-                operation.baseline) {
-          throw const JobLineRefusal('legacy baseline is not the signed state');
-        }
-        final baseline = stored == null
-            ? _LineState.fromRow(row)
-            : _LineState(
-                _object(_object(jsonDecode(stored.baselineBytes))['state']),
-              );
-        final baselineRow = stored == null
-            ? row.toJson()
-            : _object(_object(jsonDecode(stored.baselineBytes))['row']);
-        await _validateReferences(
-          verified._facts,
-          operation,
-          row,
-          _LineState({..._LineState.fromRow(row).units, ...operation.units}),
-          requireActiveIdentity: operation.units.containsKey('identity'),
-        );
-        final operations = await _operations(operation.company, operation.line);
-        final storedCount =
-            await (_db.select(_db.jobLineOperations)..where(
-                  (t) =>
-                      t.companyId.equals(operation.company) &
-                      t.lineId.equals(operation.line),
-                ))
-                .get();
-        if (existing == null && storedCount.length >= _maximumOperations) {
-          throw const JobLineRefusal('operation storage capacity reached');
-        }
-        final storedGraph = {
-          for (final r in storedCount)
-            '${r.originGeneration}/${r.requestId}': _Operation.parse(
-              Uint8List.fromList(utf8.encode(r.operationBytes)),
-            ),
-          operation.key: operation,
-        };
-        final visited = <String>{};
-        void validateGraph(String key, Set<String> path) {
-          if (path.contains(key)) throw const JobLineRefusal('causal cycle');
-          if (visited.contains(key)) return;
-          final node = storedGraph[key];
-          if (node == null) return;
-          for (final parent in node.parents) {
-            validateGraph(parent, {...path, key});
-          }
-          visited.add(key);
-        }
-
-        validateGraph(operation.key, {});
-        final known = operations.map((o) => o.key).toSet();
-        if (operation.parents.contains(operation.key)) {
-          throw const JobLineRefusal('operation depends on itself');
-        }
-        final missing = operation.parents.any((p) => !known.contains(p));
-        if (local && missing) {
-          throw const JobLineRefusal(
-            'local command has an unobserved causal parent',
-          );
-        }
-        if (missing && resume && saved != null) {
-          return JobLineCommandReceipt._decode(saved.receiptBytes);
-        }
-        if (local && row.deletedAt != null) {
-          throw const JobLineRefusal(
-            'ordinary edit cannot restore deleted row',
-          );
-        }
-        final observed = <String>{};
-        void observe(String key) {
-          if (!observed.add(key)) return;
-          for (final parent in storedGraph[key]?.parents ?? <String>[]) {
-            observe(parent);
-          }
-        }
-
-        for (final parent in operation.parents) {
-          observe(parent);
-        }
-        if (operations.any(
-          (o) => o.units.containsKey('lifecycle') && observed.contains(o.key),
-        )) {
-          throw const JobLineRefusal('edit descends from deletion barrier');
-        }
-        final all = [
-          ...operations.where((o) => o.key != operation.key),
-          if (!missing) operation,
-        ];
-        final reduction = missing
-            ? _Reduction(_LineState.fromRow(row), [])
-            : _reduce(baseline, all);
-        if (!missing) {
-          await _validateReferences(
-            verified._facts,
-            operation,
-            row,
-            reduction.state,
-            requireActiveIdentity: false,
-          );
-        }
-        final status = missing
-            ? 'deferred'
-            : reduction.conflicts.isEmpty
-            ? 'applied'
-            : 'conflict';
-        final receiptKey = resume && saved != null
-            ? _digest({'parent': baseReceiptKey, 'transition': status})
-            : baseReceiptKey;
-        final transition = await (_db.select(
-          _db.jobLineReceipts,
-        )..where((t) => t.receiptKey.equals(receiptKey))).getSingleOrNull();
-        if (transition != null) {
-          return _verifySavedReceipt(transition, operation, parent: saved);
-        }
-        intent = CompanyCommandIntent(
-          receiptKey: receiptKey,
-          operationCommitment: operation.commitment,
-          commandCommitment: operation.commandCommitment,
-          storeGeneration: generation.value,
-          companyId: operation.company,
-          lineId: operation.line,
-          originGeneration: operation.generation,
-          requestId: operation.id,
-        );
-        intent = await _installation.beginCompanyCommand(
-          _db,
-          intent!,
-          expectedTrust: verified._trust,
-          expectedFloors: verified._floors,
-        );
-        if (stored == null) {
-          await _db
-              .into(_db.jobLineBaselines)
-              .insert(
-                JobLineBaselinesCompanion.insert(
-                  companyId: operation.company,
-                  lineId: operation.line,
-                  shopId: operation.shop,
-                  baselineId: operation.baseline,
-                  baselineBytes: _canonical({
-                    'state': baseline.units,
-                    'row': baselineRow,
-                  }),
-                  projectionBytes: _canonical(row.toJson()),
-                ),
-              );
-        }
-        if (existing == null) {
-          await _db
-              .into(_db.jobLineOperations)
-              .insert(
-                JobLineOperationsCompanion.insert(
-                  companyId: operation.company,
-                  originGeneration: operation.generation,
-                  requestId: operation.id,
-                  lineId: operation.line,
-                  commitment: operation.commitment,
-                  operationBytes: operation.bytes,
-                  admitted: !missing,
-                ),
-              );
-        } else if (!missing && !existing.admitted) {
-          await (_db.update(_db.jobLineOperations)..where(
-                (t) =>
-                    t.companyId.equals(operation.company) &
-                    t.originGeneration.equals(operation.generation) &
-                    t.requestId.equals(operation.id),
-              ))
-              .write(const JobLineOperationsCompanion(admitted: Value(true)));
-        }
-        if (!missing) {
-          await _writeProjection(
-            row,
-            reduction.state,
-            (baselineRow['revision'] as num).toInt() + all.length,
-          );
-          final projected = await (_db.select(
-            _db.jobLines,
-          )..where((t) => t.id.equals(row.id))).getSingle();
-          await (_db.update(
-            _db.jobLineBaselines,
-          )..where((t) => t.lineId.equals(row.id))).write(
-            JobLineBaselinesCompanion(
-              projectionBytes: Value(_canonical(projected.toJson())),
-            ),
-          );
-          for (final conflict in reduction.conflicts) {
-            final alternatives = _canonical({
-              'candidates': conflict.candidates,
-              'frontier': conflict.frontier.isEmpty
-                  ? [operation.baseline]
-                  : conflict.frontier,
-            });
-            final conflictId = _digest({
-              'company': operation.company,
-              'line': operation.line,
-              'unit': conflict.unit,
-              'alternatives': jsonDecode(alternatives),
-            });
+          if (local && !missing) {
             await _db
-                .into(_db.jobLineConflicts)
+                .into(_db.jobLineOutgoing)
                 .insert(
-                  JobLineConflictsCompanion.insert(
-                    conflictId: conflictId,
+                  JobLineOutgoingCompanion.insert(
                     companyId: operation.company,
-                    lineId: operation.line,
-                    unit: conflict.unit,
-                    alternativesBytes: alternatives,
+                    originGeneration: operation.generation,
+                    requestId: operation.id,
+                    operationCommitment: operation.commitment,
                   ),
                   mode: InsertMode.insertOrIgnore,
                 );
           }
-        }
-        if (local && !missing) {
+          var receiptBytes = _canonicalReceipt({
+            'v': 2,
+            'key': receiptKey,
+            'parent': resume && saved != null ? baseReceiptKey : null,
+            'operation': operation.commitment,
+            'command': operation.commandCommitment,
+            'status': status,
+            'bytes': base64Encode(utf8.encode(operation.bytes)),
+            'receiver': _installation.identity!.id.value,
+            'store': generation.value,
+          });
           await _db
-              .into(_db.jobLineOutgoing)
+              .into(_db.jobLineReceipts)
               .insert(
-                JobLineOutgoingCompanion.insert(
+                JobLineReceiptsCompanion.insert(
+                  receiptKey: receiptKey,
                   companyId: operation.company,
-                  originGeneration: operation.generation,
-                  requestId: operation.id,
                   operationCommitment: operation.commitment,
+                  commandCommitment: operation.commandCommitment,
+                  receiptBytes: receiptBytes,
                 ),
-                mode: InsertMode.insertOrIgnore,
               );
+          await _db
+              .into(_db.jobLineAudits)
+              .insert(
+                JobLineAuditsCompanion.insert(
+                  receiptKey: receiptKey,
+                  auditBytes: _canonical({
+                    'operation': operation.commitment,
+                    'originalUser': operation.body['user'],
+                    'originalDevice': operation.body['device'],
+                    'status': status,
+                    'receipt': receiptKey,
+                    'outgoing': local && !missing,
+                  }),
+                ),
+              );
+          final admission = VerifiedJobLineReceiptAdmission._(
+            _db,
+            receiptBytes,
+            operation,
+            verified,
+            intent!,
+          );
+          final seal = await _installation.signCompanyReceipt(_db, admission);
+          receiptBytes = _canonicalReceipt({
+            ...decodeJobLineReceipt(receiptBytes, requireSeal: false),
+            'seal': base64Encode(seal.bytes),
+          });
+          await (_db.update(
+            _db.jobLineReceipts,
+          )..where((t) => t.receiptKey.equals(receiptKey))).write(
+            JobLineReceiptsCompanion(receiptBytes: Value(receiptBytes)),
+          );
+          intent = await _installation.sealCompanyCommand(_db, intent!);
+          await beforeCommit?.call();
+          return JobLineCommandReceipt._decode(receiptBytes);
+        } finally {
+          if (local && localSession?._assertion['v'] == 2) {
+            _validateLocalOwner(localSession!, localOwner);
+          }
         }
-        var receiptBytes = _canonicalReceipt({
-          'v': 2,
-          'key': receiptKey,
-          'parent': resume && saved != null ? baseReceiptKey : null,
-          'operation': operation.commitment,
-          'command': operation.commandCommitment,
-          'status': status,
-          'bytes': base64Encode(utf8.encode(operation.bytes)),
-          'receiver': _installation.identity!.id.value,
-          'store': generation.value,
-        });
-        await _db
-            .into(_db.jobLineReceipts)
-            .insert(
-              JobLineReceiptsCompanion.insert(
-                receiptKey: receiptKey,
-                companyId: operation.company,
-                operationCommitment: operation.commitment,
-                commandCommitment: operation.commandCommitment,
-                receiptBytes: receiptBytes,
-              ),
-            );
-        await _db
-            .into(_db.jobLineAudits)
-            .insert(
-              JobLineAuditsCompanion.insert(
-                receiptKey: receiptKey,
-                auditBytes: _canonical({
-                  'operation': operation.commitment,
-                  'originalUser': operation.body['user'],
-                  'originalDevice': operation.body['device'],
-                  'status': status,
-                  'receipt': receiptKey,
-                  'outgoing': local && !missing,
-                }),
-              ),
-            );
-        final admission = VerifiedJobLineReceiptAdmission._(
-          _db,
-          receiptBytes,
-          operation,
-          verified,
-          intent!,
-        );
-        final seal = await _installation.signCompanyReceipt(_db, admission);
-        receiptBytes = _canonicalReceipt({
-          ...decodeJobLineReceipt(receiptBytes, requireSeal: false),
-          'seal': base64Encode(seal.bytes),
-        });
-        await (_db.update(_db.jobLineReceipts)
-              ..where((t) => t.receiptKey.equals(receiptKey)))
-            .write(JobLineReceiptsCompanion(receiptBytes: Value(receiptBytes)));
-        intent = await _installation.sealCompanyCommand(_db, intent!);
-        await beforeCommit?.call();
-        return JobLineCommandReceipt._decode(receiptBytes);
       });
     } catch (_) {
       if (intent != null) await _installation.reconcile(_db);

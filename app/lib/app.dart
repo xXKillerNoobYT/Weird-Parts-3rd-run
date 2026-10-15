@@ -11,6 +11,7 @@ import 'features/pin/pin_service.dart';
 import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
 import 'features/installation/installation_security.dart';
+import 'features/company/company_gate.dart';
 
 class AppScope extends InheritedWidget {
   const AppScope({
@@ -58,6 +59,9 @@ class WiredPartsApp extends StatefulWidget {
     this.failDeviceProfileWrite = false,
     this.beforeRestore,
     this.installation,
+    this.enableCompanyBootstrap = false,
+    this.pickCompanyRecoveryPath,
+    this.pickCompanySourcePath,
     super.key,
   });
 
@@ -72,6 +76,9 @@ class WiredPartsApp extends StatefulWidget {
   /// Test hook: after `_wiping` is set, before decrypt. Production is a no-op.
   final Future<void> Function()? beforeRestore;
   final InstallationSecurity? installation;
+  final bool enableCompanyBootstrap;
+  final Future<String?> Function()? pickCompanyRecoveryPath;
+  final Future<String?> Function()? pickCompanySourcePath;
 
   @override
   State<WiredPartsApp> createState() => _WiredPartsAppState();
@@ -152,7 +159,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     try {
       await requireLegacyBusinessStore(_db);
       await widget.reset.preflight();
-      await widget.installation?.prepareReset();
+      await widget.installation?.prepareReset(_db);
       await _db.close();
       try {
         await widget.reset.wipeFiles();
@@ -357,7 +364,17 @@ class _WiredPartsAppState extends State<WiredPartsApp>
             ),
           ),
         ),
-        home: HomeShell(key: ValueKey(_generation)),
+        home: widget.enableCompanyBootstrap && widget.installation != null
+            ? CompanyBootstrapGate(
+                key: ValueKey(_generation),
+                db: _db,
+                installation: widget.installation!,
+                supportDirectory: widget.reset.supportDir,
+                photosDirectory: widget.reset.photosDir,
+                pickRecoveryPath: widget.pickCompanyRecoveryPath,
+                pickSourcePath: widget.pickCompanySourcePath,
+              )
+            : HomeShell(key: ValueKey(_generation)),
       ),
     );
   }
