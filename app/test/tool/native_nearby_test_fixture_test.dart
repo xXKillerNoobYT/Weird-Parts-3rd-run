@@ -115,7 +115,7 @@ void main() {
       await seedValidationShop(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       expect(baseline.schemaVersion, kAppSchemaVersion);
-      expect(baseline.domain.length, 20);
+      expect(baseline.domain.length, 21);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
       expect(baseline.referencesValid, true);
@@ -251,7 +251,8 @@ void main() {
         .where(
           (table) =>
               table.actualTableName.startsWith('job_line_') ||
-              table.actualTableName == 'company_authority_facts',
+              table.actualTableName == 'company_authority_facts' ||
+              table.actualTableName == 'company_bootstrap_witnesses',
         )
         .toList();
     for (final table in companyTables) {
@@ -283,6 +284,7 @@ void main() {
   });
 
   for (final history in [
+    'company_bootstrap_witnesses',
     'company_authority_facts',
     'job_line_baselines',
     'job_line_operations',

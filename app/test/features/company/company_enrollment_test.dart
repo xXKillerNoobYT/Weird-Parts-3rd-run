@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -557,8 +558,14 @@ void main() {
         throwsA(isA<Exception>()),
       );
       expect(targetStore.states.length, 1);
-      final tampered = Uint8List.fromList(sourceBytes);
-      tampered[tampered.length - 2] ^= 1;
+      final tamperedEnvelope =
+          jsonDecode(utf8.decode(sourceBytes)) as Map<String, dynamic>;
+      final tamperedCipher = base64Decode(tamperedEnvelope['cipher'] as String);
+      tamperedCipher[0] ^= 1;
+      tamperedEnvelope['cipher'] = base64Encode(tamperedCipher);
+      final tampered = Uint8List.fromList(
+        utf8.encode(jsonEncode(tamperedEnvelope)),
+      );
       final tamperedFile = File(p.join(targetDir.path, 'tampered.wpca'));
       await tamperedFile.writeAsBytes(tampered);
       final truncatedFile = File(p.join(targetDir.path, 'truncated.wpca'));
@@ -805,9 +812,37 @@ void main() {
     // only exercises the current v2 assertion, signer and command boundaries.
     final line = const Uuid().v4();
     final request = const Uuid().v4();
-    final baseline = hashes.sha256
-        .convert(utf8.encode('test baseline'))
-        .toString();
+    final job = const Uuid().v4();
+    final now = DateTime.utc(2026, 1, 1);
+    await db
+        .into(db.jobs)
+        .insert(
+          JobsCompanion.insert(
+            id: job,
+            name: 'Test-only job',
+            originDeviceId: company.deviceId,
+            createdAt: now,
+            modifiedAt: now,
+          ),
+        );
+    await db
+        .into(db.jobLines)
+        .insert(
+          JobLinesCompanion.insert(
+            id: line,
+            jobId: job,
+            customName: const Value('Test-only line'),
+            neededQty: 1,
+            originDeviceId: company.deviceId,
+            createdAt: now,
+            modifiedAt: now,
+          ),
+        );
+    final baseline = jobLineLegacyBaselineCommitment(
+      companyId: company.companyId,
+      shopId: company.shopId,
+      row: await db.select(db.jobLines).getSingle(),
+    );
     final originalFact = await db.select(db.companyAuthorityFacts).getSingle();
     final signed = jsonDecode(originalFact.signedBytes) as Map<String, dynamic>;
     final body = signed['body'] as Map<String, dynamic>;
@@ -818,6 +853,7 @@ void main() {
         'shop': company.shopId,
         'baseline': baseline,
       },
+      {'kind': 'job', 'id': job, 'shop': company.shopId},
     ];
     final newCommitment = hashes.sha256
         .convert(utf8.encode(_canonical(body)))
@@ -902,6 +938,58 @@ void main() {
       )).bytes,
       hasLength(64),
     );
+    final authorization = JobLineAuthorization(
+      db: db,
+      installation: installation,
+    );
+    await expectLater(
+      JobLineCommands(authorization: authorization)
+          .patchJobLine(verified, command),
+      throwsA(isA<JobLineRefusal>()),
+    );
+    Future<String> businessAndHistory() async => _canonical({
+      'line': (await db.select(db.jobLines).getSingle()).toJson(),
+      'baselines': (await db.select(db.jobLineBaselines).get())
+          .map((row) => row.toJson())
+          .toList(),
+      'operations': (await db.select(db.jobLineOperations).get())
+          .map((row) => row.toJson())
+          .toList(),
+      'receipts': (await db.select(db.jobLineReceipts).get())
+          .map((row) => row.toJson())
+          .toList(),
+      'audits': (await db.select(db.jobLineAudits).get())
+          .map((row) => row.toJson())
+          .toList(),
+      'outgoing': (await db.select(db.jobLineOutgoing).get())
+          .map((row) => row.toJson())
+          .toList(),
+      'conflicts': (await db.select(db.jobLineConflicts).get())
+          .map((row) => row.toJson())
+          .toList(),
+    });
+    final beforeRace = await businessAndHistory();
+    Future<void>? signOutDuringCommit;
+    var reachedBeforeCommit = false;
+    final racingCommands = JobLineCommands(
+      authorization: authorization,
+      beforeCommit: () async {
+        reachedBeforeCommit = true;
+        signOutDuringCommit = enrollment.signOut();
+        await Future<void>.delayed(Duration.zero);
+      },
+    );
+    Object? racingError;
+    try {
+      await racingCommands.patchJobLine(verified, command, ownerSession: owner);
+    } catch (error) {
+      racingError = error;
+    }
+    expect(reachedBeforeCommit, isTrue, reason: '$racingError');
+    expect(racingError, anyOf(isA<StateError>(), isA<JobLineRefusal>()));
+    await signOutDuringCommit;
+    expect(await businessAndHistory(), beforeRace);
+    expect(enrollment.currentSession, isNull);
     await enrollment.signOut();
     await expectLater(
       installation.signCompanyOperation(
@@ -921,6 +1009,12 @@ void main() {
 
     final nextOwner = await enrollment.signIn('1234');
     final nextVerified = await enrollment.issueJobLineAssertion(command);
+    expect(
+      (await JobLineCommands(
+        authorization: authorization,
+      ).patchJobLine(nextVerified, command, ownerSession: nextOwner)).status,
+      'applied',
+    );
     final changedBaseState = store.states[namespace]!;
     final changedBase =
         jsonDecode(utf8.decode(changedBaseState.bytes)) as Map<String, dynamic>;

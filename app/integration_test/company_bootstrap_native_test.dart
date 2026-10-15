@@ -30,6 +30,55 @@ const _passphrase = 'Synthetic authority recovery only 123';
 const _replacementPassphrase = 'Synthetic replacement recovery only 456';
 const _store = NativeInstallationSecureStore();
 final _measurements = <Map<String, Object?>>[];
+var _stage = 'initializing';
+
+Map<String, Object?> _publicUiSignals() {
+  final errorVisible = find.byType(Text).evaluate().any((element) {
+    final widget = element.widget as Text;
+    return widget.style?.color == Theme.of(element).colorScheme.error;
+  });
+  return {
+    'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
+    'createControl': find.byKey(const Key('create-company')).evaluate().length,
+    'signinControl': find.byKey(const Key('company-signin')).evaluate().length,
+    'signoutControl': find
+        .byKey(const Key('company-signout'))
+        .evaluate()
+        .length,
+    'lockedTitle': find.text('Company locked').evaluate().length,
+    'createTitle': find.text('Create company').evaluate().length,
+    'setupPendingTitle': find.text('Finish company setup').evaluate().length,
+    'recoveryNeededTitle': find
+        .text('Company recovery needed')
+        .evaluate()
+        .length,
+    'createError': find
+        .text(
+          'Company creation needs recovery or a retry with the same details.',
+        )
+        .evaluate()
+        .length,
+    'signinError': find
+        .text('Administrator PIN refused or company needs recovery.')
+        .evaluate()
+        .length,
+    'errorClass': !errorVisible
+        ? 'none'
+        : find
+              .text(
+                'Company creation needs recovery or a retry with the same details.',
+              )
+              .evaluate()
+              .isNotEmpty
+        ? 'create-unexpected-error'
+        : find
+              .text('Administrator PIN refused or company needs recovery.')
+              .evaluate()
+              .isNotEmpty
+        ? 'signin-refused'
+        : 'other-company-error',
+  };
+}
 
 void _require(bool value) {
   if (!value) throw const _NativeFailure();
@@ -101,8 +150,14 @@ final class _Installation {
 final class _Lifetime with WidgetsBindingObserver {
   final installations = <_Installation>[];
   final workspaces = <ValidationWorkspace>[];
+  final lifecycleStates = <String>[];
   var _closed = false;
   _Installation? visible;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (lifecycleStates.length < 16) lifecycleStates.add(state.name);
+  }
 
   Future<void> close() async {
     if (_closed) return;
@@ -231,6 +286,17 @@ Future<void> _waitFor(
       if (gap > maxPollingGapMicros) maxPollingGapMicros = gap;
       final rss = ProcessInfo.currentRss;
       if (rss > sampledRssMax) sampledRssMax = rss;
+      if ((measurement == 'create-and-signin' ||
+              measurement == 'replacement-recovery-and-signin') &&
+          polls >= 10 &&
+          !ready()) {
+        final signals = _publicUiSignals();
+        if (signals['errorClass'] != 'none' ||
+            signals['lockedTitle'] == 1 ||
+            signals['recoveryNeededTitle'] == 1) {
+          throw const _NativeFailure();
+        }
+      }
     }
     _require(ready());
   } finally {
@@ -333,6 +399,7 @@ Future<void> _createOrRecover(
   _Installation installation, {
   bool recovery = false,
 }) async {
+  _stage = recovery ? 'entering-recovery' : 'entering-create';
   if (recovery) {
     await _tap(tester, find.byKey(const Key('switch-company-recovery')));
     await _tap(tester, find.byKey(const Key('choose-source-package')));
@@ -360,6 +427,9 @@ Future<void> _createOrRecover(
         find.text('Recovery file destination selected').evaluate().length == 1,
   );
   final started = Stopwatch()..start();
+  _stage = recovery
+      ? 'awaiting-recovery-active-ui'
+      : 'awaiting-create-active-ui';
   await _tap(tester, find.byKey(const Key('create-company')));
   await _waitFor(
     tester,
@@ -371,9 +441,13 @@ Future<void> _createOrRecover(
   );
   _require(installation.package.existsSync());
   _require(find.textContaining('Company ID:').evaluate().length == 1);
+  _stage = recovery ? 'recovery-signout' : 'create-signout';
   await _signOut(tester);
+  _stage = recovery ? 'recovery-wrong-pin' : 'create-wrong-pin';
   await _signIn(tester, wrong: true);
+  _stage = recovery ? 'recovery-correct-pin' : 'create-correct-pin';
   await _signIn(tester);
+  _stage = recovery ? 'recovery-final-signout' : 'create-final-signout';
   await _signOut(tester);
 }
 
@@ -648,6 +722,26 @@ void main() {
       await _resident(tester, original, phase);
     } catch (_) {
       if (lifetime.workspaces.isNotEmpty) {
+        int? witnessCount;
+        int? factsCount;
+        String? witnessStatus;
+        if (lifetime.installations.isNotEmpty) {
+          try {
+            final failedDb = lifetime.installations.first.db;
+            final witnesses = await failedDb
+                .select(failedDb.companyBootstrapWitnesses)
+                .get();
+            witnessCount = witnesses.length;
+            witnessStatus = witnesses.length == 1
+                ? witnesses.single.status
+                : null;
+            factsCount =
+                (await failedDb.select(failedDb.companyAuthorityFacts).get())
+                    .length;
+          } catch (_) {
+            // A failed database read must not replace the original failure.
+          }
+        }
         _writeOnce(
           File(
             p.join(
@@ -659,6 +753,12 @@ void main() {
             'phase': phase,
             'passed': false,
             'reason': 'native-validation-failed',
+            'stage': _stage,
+            'lifecycleStates': lifetime.lifecycleStates,
+            'witnessCount': witnessCount,
+            'witnessStatus': witnessStatus,
+            'factsCount': factsCount,
+            'ui': _publicUiSignals(),
           },
         );
       }
