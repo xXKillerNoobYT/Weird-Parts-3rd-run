@@ -643,6 +643,10 @@ void main() {
   testWidgets('native production company bootstrap and recovery', (
     tester,
   ) async {
+    // IntegrationTestWidgetsFlutterBinding leaves the test text-input channel
+    // unregistered; register before any EditableText obtains its client ID.
+    tester.testTextInput.register();
+    _require(tester.testTextInput.isRegistered);
     final lifetime = _Lifetime();
     WidgetsBinding.instance.addObserver(lifetime);
     final originalError = FlutterError.onError;
@@ -789,6 +793,7 @@ void main() {
         'original': first,
         'replacement': second,
         'productionWidgetFlow': true,
+        'textEntry': 'registered simulated Flutter test input',
         'wrongPinRejected': true,
         'finalVisibleCompanyShell': true,
         'measurements': _measurements,
@@ -836,6 +841,7 @@ void main() {
             'passed': false,
             'reason': 'native-validation-failed',
             'stage': _stage,
+            'textEntry': 'registered simulated Flutter test input',
             'lifecycleStates': lifetime.lifecycleStates,
             'witnessCount': witnessCount,
             'witnessStatus': witnessStatus,
@@ -847,6 +853,7 @@ void main() {
       }
       throw const _NativeFailure();
     } finally {
+      tester.testTextInput.unregister();
       FlutterError.onError = originalError;
       WidgetsBinding.instance.removeObserver(lifetime);
       await lifetime.close();
