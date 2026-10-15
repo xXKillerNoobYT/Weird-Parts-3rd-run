@@ -135,6 +135,56 @@ enum InstallationSecurityRecordCodec {
   }
 }
 
+enum RecoveryFilePublisher {
+  static func writeExclusive(
+    path: String,
+    bytes: Data,
+    synchronizeDirectory: (Int32) -> Int32 = Darwin.fsync,
+    fullSynchronizeFile: (Int32) -> Int32 = { Darwin.fcntl($0, F_FULLFSYNC) }
+  ) throws -> Int {
+    let pathBytes = path.utf8
+    guard pathBytes.first == 47, !pathBytes.contains(0), pathBytes.count <= 4096,
+      let separator = pathBytes.lastIndex(of: 47),
+      !bytes.isEmpty, bytes.count <= 65536 else {
+      throw StoreError.invalidArgument
+    }
+    let parentPath = separator == pathBytes.startIndex
+      ? "/" : String(decoding: pathBytes[..<separator], as: UTF8.self)
+    let filename = String(decoding: pathBytes[pathBytes.index(after: separator)...], as: UTF8.self)
+    let parentDescriptor = open(parentPath, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+    guard parentDescriptor >= 0 else { throw StoreError.operatingSystem(errno) }
+    defer { close(parentDescriptor) }
+    let descriptor = openat(
+      parentDescriptor, filename, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+      S_IRUSR | S_IWUSR)
+    guard descriptor >= 0 else { throw StoreError.operatingSystem(errno) }
+    defer { close(descriptor) }
+    var info = stat()
+    guard fstat(descriptor, &info) == 0,
+      info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+      info.st_uid == geteuid(), info.st_nlink == 1 else {
+      throw StoreError.unavailable
+    }
+    try bytes.withUnsafeBytes { raw in
+      guard let base = raw.baseAddress else { throw StoreError.invalidArgument }
+      var offset = 0
+      while offset < bytes.count {
+        let count = Darwin.write(descriptor, base.advanced(by: offset), bytes.count - offset)
+        if count < 0 && errno == EINTR { continue }
+        guard count > 0 else { throw StoreError.operatingSystem(errno) }
+        offset += count
+      }
+    }
+    guard synchronizeDirectory(parentDescriptor) == 0 else {
+      throw StoreError.operatingSystem(errno)
+    }
+    guard fullSynchronizeFile(descriptor) == 0 else {
+      throw StoreError.operatingSystem(errno)
+    }
+    return bytes.count
+  }
+}
+
 final class InstallationSecurityStore {
   private static let operations = DispatchQueue(label: "wired_parts.installation_security")
   private let service: String
@@ -206,34 +256,7 @@ final class InstallationSecurityStore {
     completion: @escaping (Result<Int, StoreError>) -> Void
   ) {
     perform(completion) {
-      guard path.hasPrefix("/"), !path.utf8.contains(0), path.utf8.count <= 4096,
-        !bytes.isEmpty, bytes.count <= 65536 else {
-        throw StoreError.invalidArgument
-      }
-      let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-                            S_IRUSR | S_IWUSR)
-      guard descriptor >= 0 else {
-        throw StoreError.operatingSystem(errno)
-      }
-      defer { close(descriptor) }
-      var info = stat()
-      guard fstat(descriptor, &info) == 0,
-        info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
-        info.st_uid == geteuid(), info.st_nlink == 1 else {
-        throw StoreError.unavailable
-      }
-      try bytes.withUnsafeBytes { raw in
-        guard let base = raw.baseAddress else { throw StoreError.invalidArgument }
-        var offset = 0
-        while offset < bytes.count {
-          let count = Darwin.write(descriptor, base.advanced(by: offset), bytes.count - offset)
-          if count < 0 && errno == EINTR { continue }
-          guard count > 0 else { throw StoreError.operatingSystem(errno) }
-          offset += count
-        }
-      }
-      guard fsync(descriptor) == 0 else { throw StoreError.operatingSystem(errno) }
-      return bytes.count
+      try RecoveryFilePublisher.writeExclusive(path: path, bytes: bytes)
     }
   }
 
