@@ -372,7 +372,15 @@ Future<void> _mount(
 
 Future<void> _signIn(WidgetTester tester, {bool wrong = false}) async {
   final expected = wrong ? '9999' : '1234';
-  await tester.enterText(find.byKey(const Key('company-signin-pin')), expected);
+  final pinField = find.byKey(const Key('company-signin-pin'));
+  var clearedBeforeInput = true;
+  if (!wrong) {
+    await tester.enterText(pinField, '');
+    await tester.pump();
+    clearedBeforeInput =
+        tester.widget<TextField>(pinField).controller?.text.isEmpty == true;
+  }
+  await tester.enterText(pinField, expected);
   final signin = find.byKey(const Key('company-signin'));
   await tester.ensureVisible(signin);
   await tester.pump();
@@ -388,11 +396,12 @@ Future<void> _signIn(WidgetTester tester, {bool wrong = false}) async {
     'action': wrong
         ? 'wrong-pin-input-preflight'
         : 'correct-pin-input-preflight',
+    'clearedBeforeInput': clearedBeforeInput,
     'controllerEqualsSyntheticInput': inputMatches,
     'signinEnabled': enabled,
     'signinHitTestable': hitTestable,
   });
-  _require(inputMatches && enabled && hitTestable);
+  _require(clearedBeforeInput && inputMatches && enabled && hitTestable);
   final started = Stopwatch()..start();
   await _tap(tester, signin);
   await _waitFor(
