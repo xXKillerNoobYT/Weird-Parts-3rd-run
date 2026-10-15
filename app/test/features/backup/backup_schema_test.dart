@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
@@ -14,6 +16,27 @@ import '../../../tool/nearby_lan_validation.dart';
 import 'backup_test_support.dart';
 
 void main() {
+  test('schema-4 empty-history backup remains admissible; schema-5 witness is required', () async {
+    final dir = Directory.systemTemp.createTempSync('company-schema-gate-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final file = File(p.join(dir.path, kSqliteFileName));
+    final db = AppDatabase.forTesting(NativeDatabase(file));
+    await db.customSelect('SELECT 1 FROM company_bootstrap_witnesses LIMIT 1').get();
+    await db.close();
+
+    requireLegacyBusinessFile(file);
+    final old = sqlite3.sqlite3.open(file.path);
+    old.execute('DROP TABLE company_bootstrap_witnesses');
+    old.execute('PRAGMA user_version = 4');
+    old.dispose();
+    requireLegacyBusinessFile(file);
+
+    final malformed = sqlite3.sqlite3.open(file.path);
+    malformed.execute('PRAGMA user_version = 5');
+    malformed.dispose();
+    expect(() => requireLegacyBusinessFile(file), throwsA(isA<BackupFormatException>()));
+  });
+
   test('unknown SQLite schemas reject before live recovery, directory creation or file changes', () async {
     final temp = Directory.systemTemp.createTempSync('backup-schema-reject-');
     addTearDown(() => temp.deleteSync(recursive: true));

@@ -55,7 +55,7 @@ struct InstallationSecurityNamespace {
       bytes.allSatisfy({ Self.isAlphanumeric($0) || $0 == 46 || $0 == 95 || $0 == 45 }) else {
       throw StoreError.invalidArgument
     }
-    if rawValue != "production" {
+    if rawValue != "production" && rawValue != "production.company-custody" {
       let prefix = "synthetic."
       guard rawValue.hasPrefix(prefix),
         let first = bytes.dropFirst(prefix.utf8.count).first,
@@ -197,6 +197,43 @@ final class InstallationSecurityStore {
         }
         return nextState.revision
       }
+    }
+  }
+
+  func writeRecoveryFileExclusive(
+    path: String,
+    bytes: Data,
+    completion: @escaping (Result<Int, StoreError>) -> Void
+  ) {
+    perform(completion) {
+      guard path.hasPrefix("/"), !path.utf8.contains(0), path.utf8.count <= 4096,
+        !bytes.isEmpty, bytes.count <= 65536 else {
+        throw StoreError.invalidArgument
+      }
+      let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                            S_IRUSR | S_IWUSR)
+      guard descriptor >= 0 else {
+        throw StoreError.operatingSystem(errno)
+      }
+      defer { close(descriptor) }
+      var info = stat()
+      guard fstat(descriptor, &info) == 0,
+        info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+        info.st_uid == geteuid(), info.st_nlink == 1 else {
+        throw StoreError.unavailable
+      }
+      try bytes.withUnsafeBytes { raw in
+        guard let base = raw.baseAddress else { throw StoreError.invalidArgument }
+        var offset = 0
+        while offset < bytes.count {
+          let count = Darwin.write(descriptor, base.advanced(by: offset), bytes.count - offset)
+          if count < 0 && errno == EINTR { continue }
+          guard count > 0 else { throw StoreError.operatingSystem(errno) }
+          offset += count
+        }
+      }
+      guard fsync(descriptor) == 0 else { throw StoreError.operatingSystem(errno) }
+      return bytes.count
     }
   }
 

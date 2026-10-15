@@ -18,7 +18,7 @@ const kLastBackupAtKey = 'last_backup_at';
 const kLastBackupSourceKey = 'last_backup_source_device';
 const kBackupAlreadyInProgressMessage = 'Backup already in progress';
 
-const _companyTables = [
+const _priorCompanyTables = [
   'company_authority_facts',
   'job_line_baselines',
   'job_line_operations',
@@ -26,6 +26,10 @@ const _companyTables = [
   'job_line_audits',
   'job_line_outgoing',
   'job_line_conflicts',
+];
+const _companyTables = [
+  ..._priorCompanyTables,
+  'company_bootstrap_witnesses',
 ];
 
 /// Current whole-shop copy has no company authorization or history recovery
@@ -54,7 +58,8 @@ void requireLegacyBusinessFile(File file) {
         .toSet();
     final schema = db.select('PRAGMA user_version').single.values.first as int;
     if (schema > kAppSchemaVersion ||
-        (schema >= 3 && !_companyTables.every(names.contains))) {
+        (schema >= 3 && !_priorCompanyTables.every(names.contains)) ||
+        (schema >= 5 && !names.contains('company_bootstrap_witnesses'))) {
       throw const BackupFormatException(
         'Unsupported or incomplete company database',
       );

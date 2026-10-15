@@ -67,8 +67,20 @@ class MainFlutterWindow: NSWindow {
 private enum InstallationSecurityRequest {
   case read(InstallationSecurityNamespace)
   case compareAndSwap(InstallationSecurityNamespace, InstallationSecurityRevision?, ProtectedInstallationState)
+  case writeRecoveryFile(String, Data)
 
   init(_ call: FlutterMethodCall) throws {
+    if call.method == "writeRecoveryFileExclusive" {
+      guard let arguments = call.arguments as? [String: Any],
+        Set(arguments.keys) == ["path", "bytes"],
+        let path = arguments["path"] as? String,
+        let bytes = arguments["bytes"] as? FlutterStandardTypedData,
+        bytes.type == .uInt8 else {
+        throw StoreError.invalidArgument
+      }
+      self = .writeRecoveryFile(path, bytes.data)
+      return
+    }
     guard let arguments = call.arguments as? [String: Any],
       let rawNamespace = arguments["namespace"] as? String else {
       throw StoreError.invalidArgument
@@ -112,7 +124,8 @@ private final class InstallationSecurityChannel {
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard call.method == "readState" || call.method == "compareAndSwapState" else {
+    guard call.method == "readState" || call.method == "compareAndSwapState" ||
+      call.method == "writeRecoveryFileExclusive" else {
       result(FlutterMethodNotImplemented)
       return
     }
@@ -142,6 +155,13 @@ private final class InstallationSecurityChannel {
         ) { outcome in
           switch outcome {
           case .success(let revision): result(["revision": revision.rawValue])
+          case .failure(let error): result(Self.flutterError(error))
+          }
+        }
+      case .writeRecoveryFile(let path, let bytes):
+        storage.writeRecoveryFileExclusive(path: path, bytes: bytes) { outcome in
+          switch outcome {
+          case .success(let count): result(["written": count])
           case .failure(let error): result(Self.flutterError(error))
           }
         }
