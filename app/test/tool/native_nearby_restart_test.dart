@@ -192,6 +192,20 @@ void main() {
     });
   }
 
+  test('schema2 proof retains its exact count and cannot relabel schema3', () {
+    final proof = envelope['proof'] as Map<String, dynamic>;
+    proof['schemaVersion'] = 2;
+    proof['tableCount'] = 13;
+    save();
+    final before = bytes();
+    final admitted = read();
+    expect(() => admitted.verify(baseline), throwsA(isA<NativeTestFailure>()));
+    expect(bytes(), before);
+    proof['tableCount'] = 20;
+    save();
+    expect(read, throwsA(isA<NativeTestFailure>()));
+  });
+
   for (final key in [
     'schemaVersion',
     'tableCount',
@@ -358,7 +372,7 @@ void main() {
         assetsDigest: baseline.assetsDigest,
         sharedSettingsDigest: baseline.sharedSettingsDigest,
         profileDigest: baseline.profileDigest,
-        schemaVersion: 2,
+        schemaVersion: baseline.schemaVersion,
         tableCount: baseline.domain.length,
         rowCount: baseline.rowCount,
         assetCount: 1,

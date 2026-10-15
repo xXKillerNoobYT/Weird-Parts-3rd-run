@@ -94,7 +94,25 @@ void main() {
         'jobs',
         'job_lines',
         'order_splits',
+        'company_authority_facts',
+        'job_line_baselines',
+        'job_line_operations',
+        'job_line_receipts',
+        'job_line_audits',
+        'job_line_outgoing',
+        'job_line_conflicts',
       });
+      for (final table in [
+        'company_authority_facts',
+        'job_line_baselines',
+        'job_line_operations',
+        'job_line_receipts',
+        'job_line_audits',
+        'job_line_outgoing',
+        'job_line_conflicts',
+      ]) {
+        expect(registry[table], isEmpty);
+      }
       final prefix = '${scenario.source.run}-sender';
       expect(
         (registry['parts'] as List).single,

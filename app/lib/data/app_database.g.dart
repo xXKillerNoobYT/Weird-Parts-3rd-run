@@ -8514,6 +8514,2527 @@ class OrderSplitsCompanion extends UpdateCompanion<OrderSplit> {
   }
 }
 
+class $CompanyAuthorityFactsTable extends CompanyAuthorityFacts
+    with TableInfo<$CompanyAuthorityFactsTable, CompanyAuthorityFact> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyAuthorityFactsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _commitmentMeta = const VerificationMeta(
+    'commitment',
+  );
+  @override
+  late final GeneratedColumn<String> commitment = GeneratedColumn<String>(
+    'commitment',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _signedBytesMeta = const VerificationMeta(
+    'signedBytes',
+  );
+  @override
+  late final GeneratedColumn<String> signedBytes = GeneratedColumn<String>(
+    'signed_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [companyId, commitment, signedBytes];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_authority_facts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyAuthorityFact> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('commitment')) {
+      context.handle(
+        _commitmentMeta,
+        commitment.isAcceptableOrUnknown(data['commitment']!, _commitmentMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_commitmentMeta);
+    }
+    if (data.containsKey('signed_bytes')) {
+      context.handle(
+        _signedBytesMeta,
+        signedBytes.isAcceptableOrUnknown(
+          data['signed_bytes']!,
+          _signedBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_signedBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {companyId, commitment};
+  @override
+  CompanyAuthorityFact map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyAuthorityFact(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      commitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}commitment'],
+      )!,
+      signedBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}signed_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyAuthorityFactsTable createAlias(String alias) {
+    return $CompanyAuthorityFactsTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyAuthorityFact extends DataClass
+    implements Insertable<CompanyAuthorityFact> {
+  final String companyId;
+  final String commitment;
+  final String signedBytes;
+  const CompanyAuthorityFact({
+    required this.companyId,
+    required this.commitment,
+    required this.signedBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['commitment'] = Variable<String>(commitment);
+    map['signed_bytes'] = Variable<String>(signedBytes);
+    return map;
+  }
+
+  CompanyAuthorityFactsCompanion toCompanion(bool nullToAbsent) {
+    return CompanyAuthorityFactsCompanion(
+      companyId: Value(companyId),
+      commitment: Value(commitment),
+      signedBytes: Value(signedBytes),
+    );
+  }
+
+  factory CompanyAuthorityFact.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyAuthorityFact(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      commitment: serializer.fromJson<String>(json['commitment']),
+      signedBytes: serializer.fromJson<String>(json['signedBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'commitment': serializer.toJson<String>(commitment),
+      'signedBytes': serializer.toJson<String>(signedBytes),
+    };
+  }
+
+  CompanyAuthorityFact copyWith({
+    String? companyId,
+    String? commitment,
+    String? signedBytes,
+  }) => CompanyAuthorityFact(
+    companyId: companyId ?? this.companyId,
+    commitment: commitment ?? this.commitment,
+    signedBytes: signedBytes ?? this.signedBytes,
+  );
+  CompanyAuthorityFact copyWithCompanion(CompanyAuthorityFactsCompanion data) {
+    return CompanyAuthorityFact(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      commitment: data.commitment.present
+          ? data.commitment.value
+          : this.commitment,
+      signedBytes: data.signedBytes.present
+          ? data.signedBytes.value
+          : this.signedBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyAuthorityFact(')
+          ..write('companyId: $companyId, ')
+          ..write('commitment: $commitment, ')
+          ..write('signedBytes: $signedBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(companyId, commitment, signedBytes);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyAuthorityFact &&
+          other.companyId == this.companyId &&
+          other.commitment == this.commitment &&
+          other.signedBytes == this.signedBytes);
+}
+
+class CompanyAuthorityFactsCompanion
+    extends UpdateCompanion<CompanyAuthorityFact> {
+  final Value<String> companyId;
+  final Value<String> commitment;
+  final Value<String> signedBytes;
+  final Value<int> rowid;
+  const CompanyAuthorityFactsCompanion({
+    this.companyId = const Value.absent(),
+    this.commitment = const Value.absent(),
+    this.signedBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyAuthorityFactsCompanion.insert({
+    required String companyId,
+    required String commitment,
+    required String signedBytes,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       commitment = Value(commitment),
+       signedBytes = Value(signedBytes);
+  static Insertable<CompanyAuthorityFact> custom({
+    Expression<String>? companyId,
+    Expression<String>? commitment,
+    Expression<String>? signedBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (commitment != null) 'commitment': commitment,
+      if (signedBytes != null) 'signed_bytes': signedBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyAuthorityFactsCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? commitment,
+    Value<String>? signedBytes,
+    Value<int>? rowid,
+  }) {
+    return CompanyAuthorityFactsCompanion(
+      companyId: companyId ?? this.companyId,
+      commitment: commitment ?? this.commitment,
+      signedBytes: signedBytes ?? this.signedBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (commitment.present) {
+      map['commitment'] = Variable<String>(commitment.value);
+    }
+    if (signedBytes.present) {
+      map['signed_bytes'] = Variable<String>(signedBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyAuthorityFactsCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('commitment: $commitment, ')
+          ..write('signedBytes: $signedBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLineBaselinesTable extends JobLineBaselines
+    with TableInfo<$JobLineBaselinesTable, JobLineBaseline> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLineBaselinesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lineIdMeta = const VerificationMeta('lineId');
+  @override
+  late final GeneratedColumn<String> lineId = GeneratedColumn<String>(
+    'line_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shopIdMeta = const VerificationMeta('shopId');
+  @override
+  late final GeneratedColumn<String> shopId = GeneratedColumn<String>(
+    'shop_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _baselineIdMeta = const VerificationMeta(
+    'baselineId',
+  );
+  @override
+  late final GeneratedColumn<String> baselineId = GeneratedColumn<String>(
+    'baseline_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _baselineBytesMeta = const VerificationMeta(
+    'baselineBytes',
+  );
+  @override
+  late final GeneratedColumn<String> baselineBytes = GeneratedColumn<String>(
+    'baseline_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectionBytesMeta = const VerificationMeta(
+    'projectionBytes',
+  );
+  @override
+  late final GeneratedColumn<String> projectionBytes = GeneratedColumn<String>(
+    'projection_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    lineId,
+    shopId,
+    baselineId,
+    baselineBytes,
+    projectionBytes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_line_baselines';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLineBaseline> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('line_id')) {
+      context.handle(
+        _lineIdMeta,
+        lineId.isAcceptableOrUnknown(data['line_id']!, _lineIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_lineIdMeta);
+    }
+    if (data.containsKey('shop_id')) {
+      context.handle(
+        _shopIdMeta,
+        shopId.isAcceptableOrUnknown(data['shop_id']!, _shopIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shopIdMeta);
+    }
+    if (data.containsKey('baseline_id')) {
+      context.handle(
+        _baselineIdMeta,
+        baselineId.isAcceptableOrUnknown(data['baseline_id']!, _baselineIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_baselineIdMeta);
+    }
+    if (data.containsKey('baseline_bytes')) {
+      context.handle(
+        _baselineBytesMeta,
+        baselineBytes.isAcceptableOrUnknown(
+          data['baseline_bytes']!,
+          _baselineBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_baselineBytesMeta);
+    }
+    if (data.containsKey('projection_bytes')) {
+      context.handle(
+        _projectionBytesMeta,
+        projectionBytes.isAcceptableOrUnknown(
+          data['projection_bytes']!,
+          _projectionBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_projectionBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {companyId, lineId};
+  @override
+  JobLineBaseline map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLineBaseline(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      lineId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}line_id'],
+      )!,
+      shopId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shop_id'],
+      )!,
+      baselineId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}baseline_id'],
+      )!,
+      baselineBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}baseline_bytes'],
+      )!,
+      projectionBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}projection_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $JobLineBaselinesTable createAlias(String alias) {
+    return $JobLineBaselinesTable(attachedDatabase, alias);
+  }
+}
+
+class JobLineBaseline extends DataClass implements Insertable<JobLineBaseline> {
+  final String companyId;
+  final String lineId;
+  final String shopId;
+  final String baselineId;
+  final String baselineBytes;
+  final String projectionBytes;
+  const JobLineBaseline({
+    required this.companyId,
+    required this.lineId,
+    required this.shopId,
+    required this.baselineId,
+    required this.baselineBytes,
+    required this.projectionBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['line_id'] = Variable<String>(lineId);
+    map['shop_id'] = Variable<String>(shopId);
+    map['baseline_id'] = Variable<String>(baselineId);
+    map['baseline_bytes'] = Variable<String>(baselineBytes);
+    map['projection_bytes'] = Variable<String>(projectionBytes);
+    return map;
+  }
+
+  JobLineBaselinesCompanion toCompanion(bool nullToAbsent) {
+    return JobLineBaselinesCompanion(
+      companyId: Value(companyId),
+      lineId: Value(lineId),
+      shopId: Value(shopId),
+      baselineId: Value(baselineId),
+      baselineBytes: Value(baselineBytes),
+      projectionBytes: Value(projectionBytes),
+    );
+  }
+
+  factory JobLineBaseline.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLineBaseline(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      lineId: serializer.fromJson<String>(json['lineId']),
+      shopId: serializer.fromJson<String>(json['shopId']),
+      baselineId: serializer.fromJson<String>(json['baselineId']),
+      baselineBytes: serializer.fromJson<String>(json['baselineBytes']),
+      projectionBytes: serializer.fromJson<String>(json['projectionBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'lineId': serializer.toJson<String>(lineId),
+      'shopId': serializer.toJson<String>(shopId),
+      'baselineId': serializer.toJson<String>(baselineId),
+      'baselineBytes': serializer.toJson<String>(baselineBytes),
+      'projectionBytes': serializer.toJson<String>(projectionBytes),
+    };
+  }
+
+  JobLineBaseline copyWith({
+    String? companyId,
+    String? lineId,
+    String? shopId,
+    String? baselineId,
+    String? baselineBytes,
+    String? projectionBytes,
+  }) => JobLineBaseline(
+    companyId: companyId ?? this.companyId,
+    lineId: lineId ?? this.lineId,
+    shopId: shopId ?? this.shopId,
+    baselineId: baselineId ?? this.baselineId,
+    baselineBytes: baselineBytes ?? this.baselineBytes,
+    projectionBytes: projectionBytes ?? this.projectionBytes,
+  );
+  JobLineBaseline copyWithCompanion(JobLineBaselinesCompanion data) {
+    return JobLineBaseline(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      lineId: data.lineId.present ? data.lineId.value : this.lineId,
+      shopId: data.shopId.present ? data.shopId.value : this.shopId,
+      baselineId: data.baselineId.present
+          ? data.baselineId.value
+          : this.baselineId,
+      baselineBytes: data.baselineBytes.present
+          ? data.baselineBytes.value
+          : this.baselineBytes,
+      projectionBytes: data.projectionBytes.present
+          ? data.projectionBytes.value
+          : this.projectionBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineBaseline(')
+          ..write('companyId: $companyId, ')
+          ..write('lineId: $lineId, ')
+          ..write('shopId: $shopId, ')
+          ..write('baselineId: $baselineId, ')
+          ..write('baselineBytes: $baselineBytes, ')
+          ..write('projectionBytes: $projectionBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    companyId,
+    lineId,
+    shopId,
+    baselineId,
+    baselineBytes,
+    projectionBytes,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLineBaseline &&
+          other.companyId == this.companyId &&
+          other.lineId == this.lineId &&
+          other.shopId == this.shopId &&
+          other.baselineId == this.baselineId &&
+          other.baselineBytes == this.baselineBytes &&
+          other.projectionBytes == this.projectionBytes);
+}
+
+class JobLineBaselinesCompanion extends UpdateCompanion<JobLineBaseline> {
+  final Value<String> companyId;
+  final Value<String> lineId;
+  final Value<String> shopId;
+  final Value<String> baselineId;
+  final Value<String> baselineBytes;
+  final Value<String> projectionBytes;
+  final Value<int> rowid;
+  const JobLineBaselinesCompanion({
+    this.companyId = const Value.absent(),
+    this.lineId = const Value.absent(),
+    this.shopId = const Value.absent(),
+    this.baselineId = const Value.absent(),
+    this.baselineBytes = const Value.absent(),
+    this.projectionBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLineBaselinesCompanion.insert({
+    required String companyId,
+    required String lineId,
+    required String shopId,
+    required String baselineId,
+    required String baselineBytes,
+    required String projectionBytes,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       lineId = Value(lineId),
+       shopId = Value(shopId),
+       baselineId = Value(baselineId),
+       baselineBytes = Value(baselineBytes),
+       projectionBytes = Value(projectionBytes);
+  static Insertable<JobLineBaseline> custom({
+    Expression<String>? companyId,
+    Expression<String>? lineId,
+    Expression<String>? shopId,
+    Expression<String>? baselineId,
+    Expression<String>? baselineBytes,
+    Expression<String>? projectionBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (lineId != null) 'line_id': lineId,
+      if (shopId != null) 'shop_id': shopId,
+      if (baselineId != null) 'baseline_id': baselineId,
+      if (baselineBytes != null) 'baseline_bytes': baselineBytes,
+      if (projectionBytes != null) 'projection_bytes': projectionBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLineBaselinesCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? lineId,
+    Value<String>? shopId,
+    Value<String>? baselineId,
+    Value<String>? baselineBytes,
+    Value<String>? projectionBytes,
+    Value<int>? rowid,
+  }) {
+    return JobLineBaselinesCompanion(
+      companyId: companyId ?? this.companyId,
+      lineId: lineId ?? this.lineId,
+      shopId: shopId ?? this.shopId,
+      baselineId: baselineId ?? this.baselineId,
+      baselineBytes: baselineBytes ?? this.baselineBytes,
+      projectionBytes: projectionBytes ?? this.projectionBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (lineId.present) {
+      map['line_id'] = Variable<String>(lineId.value);
+    }
+    if (shopId.present) {
+      map['shop_id'] = Variable<String>(shopId.value);
+    }
+    if (baselineId.present) {
+      map['baseline_id'] = Variable<String>(baselineId.value);
+    }
+    if (baselineBytes.present) {
+      map['baseline_bytes'] = Variable<String>(baselineBytes.value);
+    }
+    if (projectionBytes.present) {
+      map['projection_bytes'] = Variable<String>(projectionBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineBaselinesCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('lineId: $lineId, ')
+          ..write('shopId: $shopId, ')
+          ..write('baselineId: $baselineId, ')
+          ..write('baselineBytes: $baselineBytes, ')
+          ..write('projectionBytes: $projectionBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLineOperationsTable extends JobLineOperations
+    with TableInfo<$JobLineOperationsTable, JobLineOperation> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLineOperationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originGenerationMeta = const VerificationMeta(
+    'originGeneration',
+  );
+  @override
+  late final GeneratedColumn<String> originGeneration = GeneratedColumn<String>(
+    'origin_generation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lineIdMeta = const VerificationMeta('lineId');
+  @override
+  late final GeneratedColumn<String> lineId = GeneratedColumn<String>(
+    'line_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _commitmentMeta = const VerificationMeta(
+    'commitment',
+  );
+  @override
+  late final GeneratedColumn<String> commitment = GeneratedColumn<String>(
+    'commitment',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationBytesMeta = const VerificationMeta(
+    'operationBytes',
+  );
+  @override
+  late final GeneratedColumn<String> operationBytes = GeneratedColumn<String>(
+    'operation_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _admittedMeta = const VerificationMeta(
+    'admitted',
+  );
+  @override
+  late final GeneratedColumn<bool> admitted = GeneratedColumn<bool>(
+    'admitted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("admitted" IN (0, 1))',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    originGeneration,
+    requestId,
+    lineId,
+    commitment,
+    operationBytes,
+    admitted,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_line_operations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLineOperation> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('origin_generation')) {
+      context.handle(
+        _originGenerationMeta,
+        originGeneration.isAcceptableOrUnknown(
+          data['origin_generation']!,
+          _originGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originGenerationMeta);
+    }
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('line_id')) {
+      context.handle(
+        _lineIdMeta,
+        lineId.isAcceptableOrUnknown(data['line_id']!, _lineIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_lineIdMeta);
+    }
+    if (data.containsKey('commitment')) {
+      context.handle(
+        _commitmentMeta,
+        commitment.isAcceptableOrUnknown(data['commitment']!, _commitmentMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_commitmentMeta);
+    }
+    if (data.containsKey('operation_bytes')) {
+      context.handle(
+        _operationBytesMeta,
+        operationBytes.isAcceptableOrUnknown(
+          data['operation_bytes']!,
+          _operationBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationBytesMeta);
+    }
+    if (data.containsKey('admitted')) {
+      context.handle(
+        _admittedMeta,
+        admitted.isAcceptableOrUnknown(data['admitted']!, _admittedMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_admittedMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {
+    companyId,
+    originGeneration,
+    requestId,
+  };
+  @override
+  JobLineOperation map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLineOperation(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      originGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_generation'],
+      )!,
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      lineId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}line_id'],
+      )!,
+      commitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}commitment'],
+      )!,
+      operationBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_bytes'],
+      )!,
+      admitted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}admitted'],
+      )!,
+    );
+  }
+
+  @override
+  $JobLineOperationsTable createAlias(String alias) {
+    return $JobLineOperationsTable(attachedDatabase, alias);
+  }
+}
+
+class JobLineOperation extends DataClass
+    implements Insertable<JobLineOperation> {
+  final String companyId;
+  final String originGeneration;
+  final String requestId;
+  final String lineId;
+  final String commitment;
+  final String operationBytes;
+  final bool admitted;
+  const JobLineOperation({
+    required this.companyId,
+    required this.originGeneration,
+    required this.requestId,
+    required this.lineId,
+    required this.commitment,
+    required this.operationBytes,
+    required this.admitted,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['origin_generation'] = Variable<String>(originGeneration);
+    map['request_id'] = Variable<String>(requestId);
+    map['line_id'] = Variable<String>(lineId);
+    map['commitment'] = Variable<String>(commitment);
+    map['operation_bytes'] = Variable<String>(operationBytes);
+    map['admitted'] = Variable<bool>(admitted);
+    return map;
+  }
+
+  JobLineOperationsCompanion toCompanion(bool nullToAbsent) {
+    return JobLineOperationsCompanion(
+      companyId: Value(companyId),
+      originGeneration: Value(originGeneration),
+      requestId: Value(requestId),
+      lineId: Value(lineId),
+      commitment: Value(commitment),
+      operationBytes: Value(operationBytes),
+      admitted: Value(admitted),
+    );
+  }
+
+  factory JobLineOperation.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLineOperation(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      originGeneration: serializer.fromJson<String>(json['originGeneration']),
+      requestId: serializer.fromJson<String>(json['requestId']),
+      lineId: serializer.fromJson<String>(json['lineId']),
+      commitment: serializer.fromJson<String>(json['commitment']),
+      operationBytes: serializer.fromJson<String>(json['operationBytes']),
+      admitted: serializer.fromJson<bool>(json['admitted']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'originGeneration': serializer.toJson<String>(originGeneration),
+      'requestId': serializer.toJson<String>(requestId),
+      'lineId': serializer.toJson<String>(lineId),
+      'commitment': serializer.toJson<String>(commitment),
+      'operationBytes': serializer.toJson<String>(operationBytes),
+      'admitted': serializer.toJson<bool>(admitted),
+    };
+  }
+
+  JobLineOperation copyWith({
+    String? companyId,
+    String? originGeneration,
+    String? requestId,
+    String? lineId,
+    String? commitment,
+    String? operationBytes,
+    bool? admitted,
+  }) => JobLineOperation(
+    companyId: companyId ?? this.companyId,
+    originGeneration: originGeneration ?? this.originGeneration,
+    requestId: requestId ?? this.requestId,
+    lineId: lineId ?? this.lineId,
+    commitment: commitment ?? this.commitment,
+    operationBytes: operationBytes ?? this.operationBytes,
+    admitted: admitted ?? this.admitted,
+  );
+  JobLineOperation copyWithCompanion(JobLineOperationsCompanion data) {
+    return JobLineOperation(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      originGeneration: data.originGeneration.present
+          ? data.originGeneration.value
+          : this.originGeneration,
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      lineId: data.lineId.present ? data.lineId.value : this.lineId,
+      commitment: data.commitment.present
+          ? data.commitment.value
+          : this.commitment,
+      operationBytes: data.operationBytes.present
+          ? data.operationBytes.value
+          : this.operationBytes,
+      admitted: data.admitted.present ? data.admitted.value : this.admitted,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineOperation(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('lineId: $lineId, ')
+          ..write('commitment: $commitment, ')
+          ..write('operationBytes: $operationBytes, ')
+          ..write('admitted: $admitted')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    companyId,
+    originGeneration,
+    requestId,
+    lineId,
+    commitment,
+    operationBytes,
+    admitted,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLineOperation &&
+          other.companyId == this.companyId &&
+          other.originGeneration == this.originGeneration &&
+          other.requestId == this.requestId &&
+          other.lineId == this.lineId &&
+          other.commitment == this.commitment &&
+          other.operationBytes == this.operationBytes &&
+          other.admitted == this.admitted);
+}
+
+class JobLineOperationsCompanion extends UpdateCompanion<JobLineOperation> {
+  final Value<String> companyId;
+  final Value<String> originGeneration;
+  final Value<String> requestId;
+  final Value<String> lineId;
+  final Value<String> commitment;
+  final Value<String> operationBytes;
+  final Value<bool> admitted;
+  final Value<int> rowid;
+  const JobLineOperationsCompanion({
+    this.companyId = const Value.absent(),
+    this.originGeneration = const Value.absent(),
+    this.requestId = const Value.absent(),
+    this.lineId = const Value.absent(),
+    this.commitment = const Value.absent(),
+    this.operationBytes = const Value.absent(),
+    this.admitted = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLineOperationsCompanion.insert({
+    required String companyId,
+    required String originGeneration,
+    required String requestId,
+    required String lineId,
+    required String commitment,
+    required String operationBytes,
+    required bool admitted,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       originGeneration = Value(originGeneration),
+       requestId = Value(requestId),
+       lineId = Value(lineId),
+       commitment = Value(commitment),
+       operationBytes = Value(operationBytes),
+       admitted = Value(admitted);
+  static Insertable<JobLineOperation> custom({
+    Expression<String>? companyId,
+    Expression<String>? originGeneration,
+    Expression<String>? requestId,
+    Expression<String>? lineId,
+    Expression<String>? commitment,
+    Expression<String>? operationBytes,
+    Expression<bool>? admitted,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (originGeneration != null) 'origin_generation': originGeneration,
+      if (requestId != null) 'request_id': requestId,
+      if (lineId != null) 'line_id': lineId,
+      if (commitment != null) 'commitment': commitment,
+      if (operationBytes != null) 'operation_bytes': operationBytes,
+      if (admitted != null) 'admitted': admitted,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLineOperationsCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? originGeneration,
+    Value<String>? requestId,
+    Value<String>? lineId,
+    Value<String>? commitment,
+    Value<String>? operationBytes,
+    Value<bool>? admitted,
+    Value<int>? rowid,
+  }) {
+    return JobLineOperationsCompanion(
+      companyId: companyId ?? this.companyId,
+      originGeneration: originGeneration ?? this.originGeneration,
+      requestId: requestId ?? this.requestId,
+      lineId: lineId ?? this.lineId,
+      commitment: commitment ?? this.commitment,
+      operationBytes: operationBytes ?? this.operationBytes,
+      admitted: admitted ?? this.admitted,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (originGeneration.present) {
+      map['origin_generation'] = Variable<String>(originGeneration.value);
+    }
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (lineId.present) {
+      map['line_id'] = Variable<String>(lineId.value);
+    }
+    if (commitment.present) {
+      map['commitment'] = Variable<String>(commitment.value);
+    }
+    if (operationBytes.present) {
+      map['operation_bytes'] = Variable<String>(operationBytes.value);
+    }
+    if (admitted.present) {
+      map['admitted'] = Variable<bool>(admitted.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineOperationsCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('lineId: $lineId, ')
+          ..write('commitment: $commitment, ')
+          ..write('operationBytes: $operationBytes, ')
+          ..write('admitted: $admitted, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLineReceiptsTable extends JobLineReceipts
+    with TableInfo<$JobLineReceiptsTable, JobLineReceipt> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLineReceiptsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _receiptKeyMeta = const VerificationMeta(
+    'receiptKey',
+  );
+  @override
+  late final GeneratedColumn<String> receiptKey = GeneratedColumn<String>(
+    'receipt_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationCommitmentMeta =
+      const VerificationMeta('operationCommitment');
+  @override
+  late final GeneratedColumn<String> operationCommitment =
+      GeneratedColumn<String>(
+        'operation_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _commandCommitmentMeta = const VerificationMeta(
+    'commandCommitment',
+  );
+  @override
+  late final GeneratedColumn<String> commandCommitment =
+      GeneratedColumn<String>(
+        'command_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _receiptBytesMeta = const VerificationMeta(
+    'receiptBytes',
+  );
+  @override
+  late final GeneratedColumn<String> receiptBytes = GeneratedColumn<String>(
+    'receipt_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    receiptKey,
+    companyId,
+    operationCommitment,
+    commandCommitment,
+    receiptBytes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_line_receipts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLineReceipt> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('receipt_key')) {
+      context.handle(
+        _receiptKeyMeta,
+        receiptKey.isAcceptableOrUnknown(data['receipt_key']!, _receiptKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptKeyMeta);
+    }
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('operation_commitment')) {
+      context.handle(
+        _operationCommitmentMeta,
+        operationCommitment.isAcceptableOrUnknown(
+          data['operation_commitment']!,
+          _operationCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationCommitmentMeta);
+    }
+    if (data.containsKey('command_commitment')) {
+      context.handle(
+        _commandCommitmentMeta,
+        commandCommitment.isAcceptableOrUnknown(
+          data['command_commitment']!,
+          _commandCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_commandCommitmentMeta);
+    }
+    if (data.containsKey('receipt_bytes')) {
+      context.handle(
+        _receiptBytesMeta,
+        receiptBytes.isAcceptableOrUnknown(
+          data['receipt_bytes']!,
+          _receiptBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {receiptKey};
+  @override
+  JobLineReceipt map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLineReceipt(
+      receiptKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_key'],
+      )!,
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      operationCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_commitment'],
+      )!,
+      commandCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}command_commitment'],
+      )!,
+      receiptBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $JobLineReceiptsTable createAlias(String alias) {
+    return $JobLineReceiptsTable(attachedDatabase, alias);
+  }
+}
+
+class JobLineReceipt extends DataClass implements Insertable<JobLineReceipt> {
+  final String receiptKey;
+  final String companyId;
+  final String operationCommitment;
+  final String commandCommitment;
+  final String receiptBytes;
+  const JobLineReceipt({
+    required this.receiptKey,
+    required this.companyId,
+    required this.operationCommitment,
+    required this.commandCommitment,
+    required this.receiptBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['receipt_key'] = Variable<String>(receiptKey);
+    map['company_id'] = Variable<String>(companyId);
+    map['operation_commitment'] = Variable<String>(operationCommitment);
+    map['command_commitment'] = Variable<String>(commandCommitment);
+    map['receipt_bytes'] = Variable<String>(receiptBytes);
+    return map;
+  }
+
+  JobLineReceiptsCompanion toCompanion(bool nullToAbsent) {
+    return JobLineReceiptsCompanion(
+      receiptKey: Value(receiptKey),
+      companyId: Value(companyId),
+      operationCommitment: Value(operationCommitment),
+      commandCommitment: Value(commandCommitment),
+      receiptBytes: Value(receiptBytes),
+    );
+  }
+
+  factory JobLineReceipt.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLineReceipt(
+      receiptKey: serializer.fromJson<String>(json['receiptKey']),
+      companyId: serializer.fromJson<String>(json['companyId']),
+      operationCommitment: serializer.fromJson<String>(
+        json['operationCommitment'],
+      ),
+      commandCommitment: serializer.fromJson<String>(json['commandCommitment']),
+      receiptBytes: serializer.fromJson<String>(json['receiptBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'receiptKey': serializer.toJson<String>(receiptKey),
+      'companyId': serializer.toJson<String>(companyId),
+      'operationCommitment': serializer.toJson<String>(operationCommitment),
+      'commandCommitment': serializer.toJson<String>(commandCommitment),
+      'receiptBytes': serializer.toJson<String>(receiptBytes),
+    };
+  }
+
+  JobLineReceipt copyWith({
+    String? receiptKey,
+    String? companyId,
+    String? operationCommitment,
+    String? commandCommitment,
+    String? receiptBytes,
+  }) => JobLineReceipt(
+    receiptKey: receiptKey ?? this.receiptKey,
+    companyId: companyId ?? this.companyId,
+    operationCommitment: operationCommitment ?? this.operationCommitment,
+    commandCommitment: commandCommitment ?? this.commandCommitment,
+    receiptBytes: receiptBytes ?? this.receiptBytes,
+  );
+  JobLineReceipt copyWithCompanion(JobLineReceiptsCompanion data) {
+    return JobLineReceipt(
+      receiptKey: data.receiptKey.present
+          ? data.receiptKey.value
+          : this.receiptKey,
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      operationCommitment: data.operationCommitment.present
+          ? data.operationCommitment.value
+          : this.operationCommitment,
+      commandCommitment: data.commandCommitment.present
+          ? data.commandCommitment.value
+          : this.commandCommitment,
+      receiptBytes: data.receiptBytes.present
+          ? data.receiptBytes.value
+          : this.receiptBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineReceipt(')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('companyId: $companyId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('commandCommitment: $commandCommitment, ')
+          ..write('receiptBytes: $receiptBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    receiptKey,
+    companyId,
+    operationCommitment,
+    commandCommitment,
+    receiptBytes,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLineReceipt &&
+          other.receiptKey == this.receiptKey &&
+          other.companyId == this.companyId &&
+          other.operationCommitment == this.operationCommitment &&
+          other.commandCommitment == this.commandCommitment &&
+          other.receiptBytes == this.receiptBytes);
+}
+
+class JobLineReceiptsCompanion extends UpdateCompanion<JobLineReceipt> {
+  final Value<String> receiptKey;
+  final Value<String> companyId;
+  final Value<String> operationCommitment;
+  final Value<String> commandCommitment;
+  final Value<String> receiptBytes;
+  final Value<int> rowid;
+  const JobLineReceiptsCompanion({
+    this.receiptKey = const Value.absent(),
+    this.companyId = const Value.absent(),
+    this.operationCommitment = const Value.absent(),
+    this.commandCommitment = const Value.absent(),
+    this.receiptBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLineReceiptsCompanion.insert({
+    required String receiptKey,
+    required String companyId,
+    required String operationCommitment,
+    required String commandCommitment,
+    required String receiptBytes,
+    this.rowid = const Value.absent(),
+  }) : receiptKey = Value(receiptKey),
+       companyId = Value(companyId),
+       operationCommitment = Value(operationCommitment),
+       commandCommitment = Value(commandCommitment),
+       receiptBytes = Value(receiptBytes);
+  static Insertable<JobLineReceipt> custom({
+    Expression<String>? receiptKey,
+    Expression<String>? companyId,
+    Expression<String>? operationCommitment,
+    Expression<String>? commandCommitment,
+    Expression<String>? receiptBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (receiptKey != null) 'receipt_key': receiptKey,
+      if (companyId != null) 'company_id': companyId,
+      if (operationCommitment != null)
+        'operation_commitment': operationCommitment,
+      if (commandCommitment != null) 'command_commitment': commandCommitment,
+      if (receiptBytes != null) 'receipt_bytes': receiptBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLineReceiptsCompanion copyWith({
+    Value<String>? receiptKey,
+    Value<String>? companyId,
+    Value<String>? operationCommitment,
+    Value<String>? commandCommitment,
+    Value<String>? receiptBytes,
+    Value<int>? rowid,
+  }) {
+    return JobLineReceiptsCompanion(
+      receiptKey: receiptKey ?? this.receiptKey,
+      companyId: companyId ?? this.companyId,
+      operationCommitment: operationCommitment ?? this.operationCommitment,
+      commandCommitment: commandCommitment ?? this.commandCommitment,
+      receiptBytes: receiptBytes ?? this.receiptBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (receiptKey.present) {
+      map['receipt_key'] = Variable<String>(receiptKey.value);
+    }
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (operationCommitment.present) {
+      map['operation_commitment'] = Variable<String>(operationCommitment.value);
+    }
+    if (commandCommitment.present) {
+      map['command_commitment'] = Variable<String>(commandCommitment.value);
+    }
+    if (receiptBytes.present) {
+      map['receipt_bytes'] = Variable<String>(receiptBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineReceiptsCompanion(')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('companyId: $companyId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('commandCommitment: $commandCommitment, ')
+          ..write('receiptBytes: $receiptBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLineAuditsTable extends JobLineAudits
+    with TableInfo<$JobLineAuditsTable, JobLineAudit> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLineAuditsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _receiptKeyMeta = const VerificationMeta(
+    'receiptKey',
+  );
+  @override
+  late final GeneratedColumn<String> receiptKey = GeneratedColumn<String>(
+    'receipt_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _auditBytesMeta = const VerificationMeta(
+    'auditBytes',
+  );
+  @override
+  late final GeneratedColumn<String> auditBytes = GeneratedColumn<String>(
+    'audit_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [receiptKey, auditBytes];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_line_audits';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLineAudit> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('receipt_key')) {
+      context.handle(
+        _receiptKeyMeta,
+        receiptKey.isAcceptableOrUnknown(data['receipt_key']!, _receiptKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptKeyMeta);
+    }
+    if (data.containsKey('audit_bytes')) {
+      context.handle(
+        _auditBytesMeta,
+        auditBytes.isAcceptableOrUnknown(data['audit_bytes']!, _auditBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_auditBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {receiptKey};
+  @override
+  JobLineAudit map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLineAudit(
+      receiptKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_key'],
+      )!,
+      auditBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}audit_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $JobLineAuditsTable createAlias(String alias) {
+    return $JobLineAuditsTable(attachedDatabase, alias);
+  }
+}
+
+class JobLineAudit extends DataClass implements Insertable<JobLineAudit> {
+  final String receiptKey;
+  final String auditBytes;
+  const JobLineAudit({required this.receiptKey, required this.auditBytes});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['receipt_key'] = Variable<String>(receiptKey);
+    map['audit_bytes'] = Variable<String>(auditBytes);
+    return map;
+  }
+
+  JobLineAuditsCompanion toCompanion(bool nullToAbsent) {
+    return JobLineAuditsCompanion(
+      receiptKey: Value(receiptKey),
+      auditBytes: Value(auditBytes),
+    );
+  }
+
+  factory JobLineAudit.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLineAudit(
+      receiptKey: serializer.fromJson<String>(json['receiptKey']),
+      auditBytes: serializer.fromJson<String>(json['auditBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'receiptKey': serializer.toJson<String>(receiptKey),
+      'auditBytes': serializer.toJson<String>(auditBytes),
+    };
+  }
+
+  JobLineAudit copyWith({String? receiptKey, String? auditBytes}) =>
+      JobLineAudit(
+        receiptKey: receiptKey ?? this.receiptKey,
+        auditBytes: auditBytes ?? this.auditBytes,
+      );
+  JobLineAudit copyWithCompanion(JobLineAuditsCompanion data) {
+    return JobLineAudit(
+      receiptKey: data.receiptKey.present
+          ? data.receiptKey.value
+          : this.receiptKey,
+      auditBytes: data.auditBytes.present
+          ? data.auditBytes.value
+          : this.auditBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineAudit(')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('auditBytes: $auditBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(receiptKey, auditBytes);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLineAudit &&
+          other.receiptKey == this.receiptKey &&
+          other.auditBytes == this.auditBytes);
+}
+
+class JobLineAuditsCompanion extends UpdateCompanion<JobLineAudit> {
+  final Value<String> receiptKey;
+  final Value<String> auditBytes;
+  final Value<int> rowid;
+  const JobLineAuditsCompanion({
+    this.receiptKey = const Value.absent(),
+    this.auditBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLineAuditsCompanion.insert({
+    required String receiptKey,
+    required String auditBytes,
+    this.rowid = const Value.absent(),
+  }) : receiptKey = Value(receiptKey),
+       auditBytes = Value(auditBytes);
+  static Insertable<JobLineAudit> custom({
+    Expression<String>? receiptKey,
+    Expression<String>? auditBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (receiptKey != null) 'receipt_key': receiptKey,
+      if (auditBytes != null) 'audit_bytes': auditBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLineAuditsCompanion copyWith({
+    Value<String>? receiptKey,
+    Value<String>? auditBytes,
+    Value<int>? rowid,
+  }) {
+    return JobLineAuditsCompanion(
+      receiptKey: receiptKey ?? this.receiptKey,
+      auditBytes: auditBytes ?? this.auditBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (receiptKey.present) {
+      map['receipt_key'] = Variable<String>(receiptKey.value);
+    }
+    if (auditBytes.present) {
+      map['audit_bytes'] = Variable<String>(auditBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineAuditsCompanion(')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('auditBytes: $auditBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLineOutgoingTable extends JobLineOutgoing
+    with TableInfo<$JobLineOutgoingTable, JobLineOutgoingData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLineOutgoingTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originGenerationMeta = const VerificationMeta(
+    'originGeneration',
+  );
+  @override
+  late final GeneratedColumn<String> originGeneration = GeneratedColumn<String>(
+    'origin_generation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationCommitmentMeta =
+      const VerificationMeta('operationCommitment');
+  @override
+  late final GeneratedColumn<String> operationCommitment =
+      GeneratedColumn<String>(
+        'operation_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    originGeneration,
+    requestId,
+    operationCommitment,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_line_outgoing';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLineOutgoingData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('origin_generation')) {
+      context.handle(
+        _originGenerationMeta,
+        originGeneration.isAcceptableOrUnknown(
+          data['origin_generation']!,
+          _originGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originGenerationMeta);
+    }
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('operation_commitment')) {
+      context.handle(
+        _operationCommitmentMeta,
+        operationCommitment.isAcceptableOrUnknown(
+          data['operation_commitment']!,
+          _operationCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationCommitmentMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {
+    companyId,
+    originGeneration,
+    requestId,
+  };
+  @override
+  JobLineOutgoingData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLineOutgoingData(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      originGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_generation'],
+      )!,
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      operationCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_commitment'],
+      )!,
+    );
+  }
+
+  @override
+  $JobLineOutgoingTable createAlias(String alias) {
+    return $JobLineOutgoingTable(attachedDatabase, alias);
+  }
+}
+
+class JobLineOutgoingData extends DataClass
+    implements Insertable<JobLineOutgoingData> {
+  final String companyId;
+  final String originGeneration;
+  final String requestId;
+  final String operationCommitment;
+  const JobLineOutgoingData({
+    required this.companyId,
+    required this.originGeneration,
+    required this.requestId,
+    required this.operationCommitment,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['origin_generation'] = Variable<String>(originGeneration);
+    map['request_id'] = Variable<String>(requestId);
+    map['operation_commitment'] = Variable<String>(operationCommitment);
+    return map;
+  }
+
+  JobLineOutgoingCompanion toCompanion(bool nullToAbsent) {
+    return JobLineOutgoingCompanion(
+      companyId: Value(companyId),
+      originGeneration: Value(originGeneration),
+      requestId: Value(requestId),
+      operationCommitment: Value(operationCommitment),
+    );
+  }
+
+  factory JobLineOutgoingData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLineOutgoingData(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      originGeneration: serializer.fromJson<String>(json['originGeneration']),
+      requestId: serializer.fromJson<String>(json['requestId']),
+      operationCommitment: serializer.fromJson<String>(
+        json['operationCommitment'],
+      ),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'originGeneration': serializer.toJson<String>(originGeneration),
+      'requestId': serializer.toJson<String>(requestId),
+      'operationCommitment': serializer.toJson<String>(operationCommitment),
+    };
+  }
+
+  JobLineOutgoingData copyWith({
+    String? companyId,
+    String? originGeneration,
+    String? requestId,
+    String? operationCommitment,
+  }) => JobLineOutgoingData(
+    companyId: companyId ?? this.companyId,
+    originGeneration: originGeneration ?? this.originGeneration,
+    requestId: requestId ?? this.requestId,
+    operationCommitment: operationCommitment ?? this.operationCommitment,
+  );
+  JobLineOutgoingData copyWithCompanion(JobLineOutgoingCompanion data) {
+    return JobLineOutgoingData(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      originGeneration: data.originGeneration.present
+          ? data.originGeneration.value
+          : this.originGeneration,
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      operationCommitment: data.operationCommitment.present
+          ? data.operationCommitment.value
+          : this.operationCommitment,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineOutgoingData(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('operationCommitment: $operationCommitment')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(companyId, originGeneration, requestId, operationCommitment);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLineOutgoingData &&
+          other.companyId == this.companyId &&
+          other.originGeneration == this.originGeneration &&
+          other.requestId == this.requestId &&
+          other.operationCommitment == this.operationCommitment);
+}
+
+class JobLineOutgoingCompanion extends UpdateCompanion<JobLineOutgoingData> {
+  final Value<String> companyId;
+  final Value<String> originGeneration;
+  final Value<String> requestId;
+  final Value<String> operationCommitment;
+  final Value<int> rowid;
+  const JobLineOutgoingCompanion({
+    this.companyId = const Value.absent(),
+    this.originGeneration = const Value.absent(),
+    this.requestId = const Value.absent(),
+    this.operationCommitment = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLineOutgoingCompanion.insert({
+    required String companyId,
+    required String originGeneration,
+    required String requestId,
+    required String operationCommitment,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       originGeneration = Value(originGeneration),
+       requestId = Value(requestId),
+       operationCommitment = Value(operationCommitment);
+  static Insertable<JobLineOutgoingData> custom({
+    Expression<String>? companyId,
+    Expression<String>? originGeneration,
+    Expression<String>? requestId,
+    Expression<String>? operationCommitment,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (originGeneration != null) 'origin_generation': originGeneration,
+      if (requestId != null) 'request_id': requestId,
+      if (operationCommitment != null)
+        'operation_commitment': operationCommitment,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLineOutgoingCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? originGeneration,
+    Value<String>? requestId,
+    Value<String>? operationCommitment,
+    Value<int>? rowid,
+  }) {
+    return JobLineOutgoingCompanion(
+      companyId: companyId ?? this.companyId,
+      originGeneration: originGeneration ?? this.originGeneration,
+      requestId: requestId ?? this.requestId,
+      operationCommitment: operationCommitment ?? this.operationCommitment,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (originGeneration.present) {
+      map['origin_generation'] = Variable<String>(originGeneration.value);
+    }
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (operationCommitment.present) {
+      map['operation_commitment'] = Variable<String>(operationCommitment.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineOutgoingCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $JobLineConflictsTable extends JobLineConflicts
+    with TableInfo<$JobLineConflictsTable, JobLineConflict> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $JobLineConflictsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _conflictIdMeta = const VerificationMeta(
+    'conflictId',
+  );
+  @override
+  late final GeneratedColumn<String> conflictId = GeneratedColumn<String>(
+    'conflict_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lineIdMeta = const VerificationMeta('lineId');
+  @override
+  late final GeneratedColumn<String> lineId = GeneratedColumn<String>(
+    'line_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _unitMeta = const VerificationMeta('unit');
+  @override
+  late final GeneratedColumn<String> unit = GeneratedColumn<String>(
+    'unit',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _alternativesBytesMeta = const VerificationMeta(
+    'alternativesBytes',
+  );
+  @override
+  late final GeneratedColumn<String> alternativesBytes =
+      GeneratedColumn<String>(
+        'alternatives_bytes',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  @override
+  List<GeneratedColumn> get $columns => [
+    conflictId,
+    companyId,
+    lineId,
+    unit,
+    alternativesBytes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'job_line_conflicts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<JobLineConflict> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('conflict_id')) {
+      context.handle(
+        _conflictIdMeta,
+        conflictId.isAcceptableOrUnknown(data['conflict_id']!, _conflictIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_conflictIdMeta);
+    }
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('line_id')) {
+      context.handle(
+        _lineIdMeta,
+        lineId.isAcceptableOrUnknown(data['line_id']!, _lineIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_lineIdMeta);
+    }
+    if (data.containsKey('unit')) {
+      context.handle(
+        _unitMeta,
+        unit.isAcceptableOrUnknown(data['unit']!, _unitMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_unitMeta);
+    }
+    if (data.containsKey('alternatives_bytes')) {
+      context.handle(
+        _alternativesBytesMeta,
+        alternativesBytes.isAcceptableOrUnknown(
+          data['alternatives_bytes']!,
+          _alternativesBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_alternativesBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {conflictId};
+  @override
+  JobLineConflict map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return JobLineConflict(
+      conflictId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}conflict_id'],
+      )!,
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      lineId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}line_id'],
+      )!,
+      unit: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit'],
+      )!,
+      alternativesBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}alternatives_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $JobLineConflictsTable createAlias(String alias) {
+    return $JobLineConflictsTable(attachedDatabase, alias);
+  }
+}
+
+class JobLineConflict extends DataClass implements Insertable<JobLineConflict> {
+  final String conflictId;
+  final String companyId;
+  final String lineId;
+  final String unit;
+  final String alternativesBytes;
+  const JobLineConflict({
+    required this.conflictId,
+    required this.companyId,
+    required this.lineId,
+    required this.unit,
+    required this.alternativesBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['conflict_id'] = Variable<String>(conflictId);
+    map['company_id'] = Variable<String>(companyId);
+    map['line_id'] = Variable<String>(lineId);
+    map['unit'] = Variable<String>(unit);
+    map['alternatives_bytes'] = Variable<String>(alternativesBytes);
+    return map;
+  }
+
+  JobLineConflictsCompanion toCompanion(bool nullToAbsent) {
+    return JobLineConflictsCompanion(
+      conflictId: Value(conflictId),
+      companyId: Value(companyId),
+      lineId: Value(lineId),
+      unit: Value(unit),
+      alternativesBytes: Value(alternativesBytes),
+    );
+  }
+
+  factory JobLineConflict.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return JobLineConflict(
+      conflictId: serializer.fromJson<String>(json['conflictId']),
+      companyId: serializer.fromJson<String>(json['companyId']),
+      lineId: serializer.fromJson<String>(json['lineId']),
+      unit: serializer.fromJson<String>(json['unit']),
+      alternativesBytes: serializer.fromJson<String>(json['alternativesBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'conflictId': serializer.toJson<String>(conflictId),
+      'companyId': serializer.toJson<String>(companyId),
+      'lineId': serializer.toJson<String>(lineId),
+      'unit': serializer.toJson<String>(unit),
+      'alternativesBytes': serializer.toJson<String>(alternativesBytes),
+    };
+  }
+
+  JobLineConflict copyWith({
+    String? conflictId,
+    String? companyId,
+    String? lineId,
+    String? unit,
+    String? alternativesBytes,
+  }) => JobLineConflict(
+    conflictId: conflictId ?? this.conflictId,
+    companyId: companyId ?? this.companyId,
+    lineId: lineId ?? this.lineId,
+    unit: unit ?? this.unit,
+    alternativesBytes: alternativesBytes ?? this.alternativesBytes,
+  );
+  JobLineConflict copyWithCompanion(JobLineConflictsCompanion data) {
+    return JobLineConflict(
+      conflictId: data.conflictId.present
+          ? data.conflictId.value
+          : this.conflictId,
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      lineId: data.lineId.present ? data.lineId.value : this.lineId,
+      unit: data.unit.present ? data.unit.value : this.unit,
+      alternativesBytes: data.alternativesBytes.present
+          ? data.alternativesBytes.value
+          : this.alternativesBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineConflict(')
+          ..write('conflictId: $conflictId, ')
+          ..write('companyId: $companyId, ')
+          ..write('lineId: $lineId, ')
+          ..write('unit: $unit, ')
+          ..write('alternativesBytes: $alternativesBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(conflictId, companyId, lineId, unit, alternativesBytes);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is JobLineConflict &&
+          other.conflictId == this.conflictId &&
+          other.companyId == this.companyId &&
+          other.lineId == this.lineId &&
+          other.unit == this.unit &&
+          other.alternativesBytes == this.alternativesBytes);
+}
+
+class JobLineConflictsCompanion extends UpdateCompanion<JobLineConflict> {
+  final Value<String> conflictId;
+  final Value<String> companyId;
+  final Value<String> lineId;
+  final Value<String> unit;
+  final Value<String> alternativesBytes;
+  final Value<int> rowid;
+  const JobLineConflictsCompanion({
+    this.conflictId = const Value.absent(),
+    this.companyId = const Value.absent(),
+    this.lineId = const Value.absent(),
+    this.unit = const Value.absent(),
+    this.alternativesBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  JobLineConflictsCompanion.insert({
+    required String conflictId,
+    required String companyId,
+    required String lineId,
+    required String unit,
+    required String alternativesBytes,
+    this.rowid = const Value.absent(),
+  }) : conflictId = Value(conflictId),
+       companyId = Value(companyId),
+       lineId = Value(lineId),
+       unit = Value(unit),
+       alternativesBytes = Value(alternativesBytes);
+  static Insertable<JobLineConflict> custom({
+    Expression<String>? conflictId,
+    Expression<String>? companyId,
+    Expression<String>? lineId,
+    Expression<String>? unit,
+    Expression<String>? alternativesBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (conflictId != null) 'conflict_id': conflictId,
+      if (companyId != null) 'company_id': companyId,
+      if (lineId != null) 'line_id': lineId,
+      if (unit != null) 'unit': unit,
+      if (alternativesBytes != null) 'alternatives_bytes': alternativesBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  JobLineConflictsCompanion copyWith({
+    Value<String>? conflictId,
+    Value<String>? companyId,
+    Value<String>? lineId,
+    Value<String>? unit,
+    Value<String>? alternativesBytes,
+    Value<int>? rowid,
+  }) {
+    return JobLineConflictsCompanion(
+      conflictId: conflictId ?? this.conflictId,
+      companyId: companyId ?? this.companyId,
+      lineId: lineId ?? this.lineId,
+      unit: unit ?? this.unit,
+      alternativesBytes: alternativesBytes ?? this.alternativesBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (conflictId.present) {
+      map['conflict_id'] = Variable<String>(conflictId.value);
+    }
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (lineId.present) {
+      map['line_id'] = Variable<String>(lineId.value);
+    }
+    if (unit.present) {
+      map['unit'] = Variable<String>(unit.value);
+    }
+    if (alternativesBytes.present) {
+      map['alternatives_bytes'] = Variable<String>(alternativesBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('JobLineConflictsCompanion(')
+          ..write('conflictId: $conflictId, ')
+          ..write('companyId: $companyId, ')
+          ..write('lineId: $lineId, ')
+          ..write('unit: $unit, ')
+          ..write('alternativesBytes: $alternativesBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -8534,6 +11055,23 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $JobsTable jobs = $JobsTable(this);
   late final $JobLinesTable jobLines = $JobLinesTable(this);
   late final $OrderSplitsTable orderSplits = $OrderSplitsTable(this);
+  late final $CompanyAuthorityFactsTable companyAuthorityFacts =
+      $CompanyAuthorityFactsTable(this);
+  late final $JobLineBaselinesTable jobLineBaselines = $JobLineBaselinesTable(
+    this,
+  );
+  late final $JobLineOperationsTable jobLineOperations =
+      $JobLineOperationsTable(this);
+  late final $JobLineReceiptsTable jobLineReceipts = $JobLineReceiptsTable(
+    this,
+  );
+  late final $JobLineAuditsTable jobLineAudits = $JobLineAuditsTable(this);
+  late final $JobLineOutgoingTable jobLineOutgoing = $JobLineOutgoingTable(
+    this,
+  );
+  late final $JobLineConflictsTable jobLineConflicts = $JobLineConflictsTable(
+    this,
+  );
   late final SettingsDao settingsDao = SettingsDao(this as AppDatabase);
   late final TaxonomyDao taxonomyDao = TaxonomyDao(this as AppDatabase);
   late final PartsDao partsDao = PartsDao(this as AppDatabase);
@@ -8558,6 +11096,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     jobs,
     jobLines,
     orderSplits,
+    companyAuthorityFacts,
+    jobLineBaselines,
+    jobLineOperations,
+    jobLineReceipts,
+    jobLineAudits,
+    jobLineOutgoing,
+    jobLineConflicts,
   ];
 }
 
@@ -12750,6 +15295,1445 @@ typedef $$OrderSplitsTableProcessedTableManager =
       OrderSplit,
       PrefetchHooks Function()
     >;
+typedef $$CompanyAuthorityFactsTableCreateCompanionBuilder =
+    CompanyAuthorityFactsCompanion Function({
+      required String companyId,
+      required String commitment,
+      required String signedBytes,
+      Value<int> rowid,
+    });
+typedef $$CompanyAuthorityFactsTableUpdateCompanionBuilder =
+    CompanyAuthorityFactsCompanion Function({
+      Value<String> companyId,
+      Value<String> commitment,
+      Value<String> signedBytes,
+      Value<int> rowid,
+    });
+
+class $$CompanyAuthorityFactsTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyAuthorityFactsTable> {
+  $$CompanyAuthorityFactsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get commitment => $composableBuilder(
+    column: $table.commitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get signedBytes => $composableBuilder(
+    column: $table.signedBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyAuthorityFactsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyAuthorityFactsTable> {
+  $$CompanyAuthorityFactsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get commitment => $composableBuilder(
+    column: $table.commitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get signedBytes => $composableBuilder(
+    column: $table.signedBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyAuthorityFactsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyAuthorityFactsTable> {
+  $$CompanyAuthorityFactsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get commitment => $composableBuilder(
+    column: $table.commitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get signedBytes => $composableBuilder(
+    column: $table.signedBytes,
+    builder: (column) => column,
+  );
+}
+
+class $$CompanyAuthorityFactsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyAuthorityFactsTable,
+          CompanyAuthorityFact,
+          $$CompanyAuthorityFactsTableFilterComposer,
+          $$CompanyAuthorityFactsTableOrderingComposer,
+          $$CompanyAuthorityFactsTableAnnotationComposer,
+          $$CompanyAuthorityFactsTableCreateCompanionBuilder,
+          $$CompanyAuthorityFactsTableUpdateCompanionBuilder,
+          (
+            CompanyAuthorityFact,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyAuthorityFactsTable,
+              CompanyAuthorityFact
+            >,
+          ),
+          CompanyAuthorityFact,
+          PrefetchHooks Function()
+        > {
+  $$CompanyAuthorityFactsTableTableManager(
+    _$AppDatabase db,
+    $CompanyAuthorityFactsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyAuthorityFactsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CompanyAuthorityFactsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CompanyAuthorityFactsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> commitment = const Value.absent(),
+                Value<String> signedBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyAuthorityFactsCompanion(
+                companyId: companyId,
+                commitment: commitment,
+                signedBytes: signedBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String commitment,
+                required String signedBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyAuthorityFactsCompanion.insert(
+                companyId: companyId,
+                commitment: commitment,
+                signedBytes: signedBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyAuthorityFactsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyAuthorityFactsTable,
+      CompanyAuthorityFact,
+      $$CompanyAuthorityFactsTableFilterComposer,
+      $$CompanyAuthorityFactsTableOrderingComposer,
+      $$CompanyAuthorityFactsTableAnnotationComposer,
+      $$CompanyAuthorityFactsTableCreateCompanionBuilder,
+      $$CompanyAuthorityFactsTableUpdateCompanionBuilder,
+      (
+        CompanyAuthorityFact,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyAuthorityFactsTable,
+          CompanyAuthorityFact
+        >,
+      ),
+      CompanyAuthorityFact,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLineBaselinesTableCreateCompanionBuilder =
+    JobLineBaselinesCompanion Function({
+      required String companyId,
+      required String lineId,
+      required String shopId,
+      required String baselineId,
+      required String baselineBytes,
+      required String projectionBytes,
+      Value<int> rowid,
+    });
+typedef $$JobLineBaselinesTableUpdateCompanionBuilder =
+    JobLineBaselinesCompanion Function({
+      Value<String> companyId,
+      Value<String> lineId,
+      Value<String> shopId,
+      Value<String> baselineId,
+      Value<String> baselineBytes,
+      Value<String> projectionBytes,
+      Value<int> rowid,
+    });
+
+class $$JobLineBaselinesTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLineBaselinesTable> {
+  $$JobLineBaselinesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lineId => $composableBuilder(
+    column: $table.lineId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shopId => $composableBuilder(
+    column: $table.shopId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get baselineId => $composableBuilder(
+    column: $table.baselineId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get baselineBytes => $composableBuilder(
+    column: $table.baselineBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get projectionBytes => $composableBuilder(
+    column: $table.projectionBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLineBaselinesTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLineBaselinesTable> {
+  $$JobLineBaselinesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lineId => $composableBuilder(
+    column: $table.lineId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shopId => $composableBuilder(
+    column: $table.shopId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get baselineId => $composableBuilder(
+    column: $table.baselineId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get baselineBytes => $composableBuilder(
+    column: $table.baselineBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get projectionBytes => $composableBuilder(
+    column: $table.projectionBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLineBaselinesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLineBaselinesTable> {
+  $$JobLineBaselinesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get lineId =>
+      $composableBuilder(column: $table.lineId, builder: (column) => column);
+
+  GeneratedColumn<String> get shopId =>
+      $composableBuilder(column: $table.shopId, builder: (column) => column);
+
+  GeneratedColumn<String> get baselineId => $composableBuilder(
+    column: $table.baselineId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get baselineBytes => $composableBuilder(
+    column: $table.baselineBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get projectionBytes => $composableBuilder(
+    column: $table.projectionBytes,
+    builder: (column) => column,
+  );
+}
+
+class $$JobLineBaselinesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLineBaselinesTable,
+          JobLineBaseline,
+          $$JobLineBaselinesTableFilterComposer,
+          $$JobLineBaselinesTableOrderingComposer,
+          $$JobLineBaselinesTableAnnotationComposer,
+          $$JobLineBaselinesTableCreateCompanionBuilder,
+          $$JobLineBaselinesTableUpdateCompanionBuilder,
+          (
+            JobLineBaseline,
+            BaseReferences<
+              _$AppDatabase,
+              $JobLineBaselinesTable,
+              JobLineBaseline
+            >,
+          ),
+          JobLineBaseline,
+          PrefetchHooks Function()
+        > {
+  $$JobLineBaselinesTableTableManager(
+    _$AppDatabase db,
+    $JobLineBaselinesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLineBaselinesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLineBaselinesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLineBaselinesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> lineId = const Value.absent(),
+                Value<String> shopId = const Value.absent(),
+                Value<String> baselineId = const Value.absent(),
+                Value<String> baselineBytes = const Value.absent(),
+                Value<String> projectionBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineBaselinesCompanion(
+                companyId: companyId,
+                lineId: lineId,
+                shopId: shopId,
+                baselineId: baselineId,
+                baselineBytes: baselineBytes,
+                projectionBytes: projectionBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String lineId,
+                required String shopId,
+                required String baselineId,
+                required String baselineBytes,
+                required String projectionBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineBaselinesCompanion.insert(
+                companyId: companyId,
+                lineId: lineId,
+                shopId: shopId,
+                baselineId: baselineId,
+                baselineBytes: baselineBytes,
+                projectionBytes: projectionBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLineBaselinesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLineBaselinesTable,
+      JobLineBaseline,
+      $$JobLineBaselinesTableFilterComposer,
+      $$JobLineBaselinesTableOrderingComposer,
+      $$JobLineBaselinesTableAnnotationComposer,
+      $$JobLineBaselinesTableCreateCompanionBuilder,
+      $$JobLineBaselinesTableUpdateCompanionBuilder,
+      (
+        JobLineBaseline,
+        BaseReferences<_$AppDatabase, $JobLineBaselinesTable, JobLineBaseline>,
+      ),
+      JobLineBaseline,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLineOperationsTableCreateCompanionBuilder =
+    JobLineOperationsCompanion Function({
+      required String companyId,
+      required String originGeneration,
+      required String requestId,
+      required String lineId,
+      required String commitment,
+      required String operationBytes,
+      required bool admitted,
+      Value<int> rowid,
+    });
+typedef $$JobLineOperationsTableUpdateCompanionBuilder =
+    JobLineOperationsCompanion Function({
+      Value<String> companyId,
+      Value<String> originGeneration,
+      Value<String> requestId,
+      Value<String> lineId,
+      Value<String> commitment,
+      Value<String> operationBytes,
+      Value<bool> admitted,
+      Value<int> rowid,
+    });
+
+class $$JobLineOperationsTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLineOperationsTable> {
+  $$JobLineOperationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lineId => $composableBuilder(
+    column: $table.lineId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get commitment => $composableBuilder(
+    column: $table.commitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get admitted => $composableBuilder(
+    column: $table.admitted,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLineOperationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLineOperationsTable> {
+  $$JobLineOperationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lineId => $composableBuilder(
+    column: $table.lineId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get commitment => $composableBuilder(
+    column: $table.commitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get admitted => $composableBuilder(
+    column: $table.admitted,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLineOperationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLineOperationsTable> {
+  $$JobLineOperationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get lineId =>
+      $composableBuilder(column: $table.lineId, builder: (column) => column);
+
+  GeneratedColumn<String> get commitment => $composableBuilder(
+    column: $table.commitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get admitted =>
+      $composableBuilder(column: $table.admitted, builder: (column) => column);
+}
+
+class $$JobLineOperationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLineOperationsTable,
+          JobLineOperation,
+          $$JobLineOperationsTableFilterComposer,
+          $$JobLineOperationsTableOrderingComposer,
+          $$JobLineOperationsTableAnnotationComposer,
+          $$JobLineOperationsTableCreateCompanionBuilder,
+          $$JobLineOperationsTableUpdateCompanionBuilder,
+          (
+            JobLineOperation,
+            BaseReferences<
+              _$AppDatabase,
+              $JobLineOperationsTable,
+              JobLineOperation
+            >,
+          ),
+          JobLineOperation,
+          PrefetchHooks Function()
+        > {
+  $$JobLineOperationsTableTableManager(
+    _$AppDatabase db,
+    $JobLineOperationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLineOperationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLineOperationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLineOperationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> originGeneration = const Value.absent(),
+                Value<String> requestId = const Value.absent(),
+                Value<String> lineId = const Value.absent(),
+                Value<String> commitment = const Value.absent(),
+                Value<String> operationBytes = const Value.absent(),
+                Value<bool> admitted = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineOperationsCompanion(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                lineId: lineId,
+                commitment: commitment,
+                operationBytes: operationBytes,
+                admitted: admitted,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String originGeneration,
+                required String requestId,
+                required String lineId,
+                required String commitment,
+                required String operationBytes,
+                required bool admitted,
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineOperationsCompanion.insert(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                lineId: lineId,
+                commitment: commitment,
+                operationBytes: operationBytes,
+                admitted: admitted,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLineOperationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLineOperationsTable,
+      JobLineOperation,
+      $$JobLineOperationsTableFilterComposer,
+      $$JobLineOperationsTableOrderingComposer,
+      $$JobLineOperationsTableAnnotationComposer,
+      $$JobLineOperationsTableCreateCompanionBuilder,
+      $$JobLineOperationsTableUpdateCompanionBuilder,
+      (
+        JobLineOperation,
+        BaseReferences<
+          _$AppDatabase,
+          $JobLineOperationsTable,
+          JobLineOperation
+        >,
+      ),
+      JobLineOperation,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLineReceiptsTableCreateCompanionBuilder =
+    JobLineReceiptsCompanion Function({
+      required String receiptKey,
+      required String companyId,
+      required String operationCommitment,
+      required String commandCommitment,
+      required String receiptBytes,
+      Value<int> rowid,
+    });
+typedef $$JobLineReceiptsTableUpdateCompanionBuilder =
+    JobLineReceiptsCompanion Function({
+      Value<String> receiptKey,
+      Value<String> companyId,
+      Value<String> operationCommitment,
+      Value<String> commandCommitment,
+      Value<String> receiptBytes,
+      Value<int> rowid,
+    });
+
+class $$JobLineReceiptsTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLineReceiptsTable> {
+  $$JobLineReceiptsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLineReceiptsTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLineReceiptsTable> {
+  $$JobLineReceiptsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLineReceiptsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLineReceiptsTable> {
+  $$JobLineReceiptsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => column,
+  );
+}
+
+class $$JobLineReceiptsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLineReceiptsTable,
+          JobLineReceipt,
+          $$JobLineReceiptsTableFilterComposer,
+          $$JobLineReceiptsTableOrderingComposer,
+          $$JobLineReceiptsTableAnnotationComposer,
+          $$JobLineReceiptsTableCreateCompanionBuilder,
+          $$JobLineReceiptsTableUpdateCompanionBuilder,
+          (
+            JobLineReceipt,
+            BaseReferences<
+              _$AppDatabase,
+              $JobLineReceiptsTable,
+              JobLineReceipt
+            >,
+          ),
+          JobLineReceipt,
+          PrefetchHooks Function()
+        > {
+  $$JobLineReceiptsTableTableManager(
+    _$AppDatabase db,
+    $JobLineReceiptsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLineReceiptsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLineReceiptsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLineReceiptsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> receiptKey = const Value.absent(),
+                Value<String> companyId = const Value.absent(),
+                Value<String> operationCommitment = const Value.absent(),
+                Value<String> commandCommitment = const Value.absent(),
+                Value<String> receiptBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineReceiptsCompanion(
+                receiptKey: receiptKey,
+                companyId: companyId,
+                operationCommitment: operationCommitment,
+                commandCommitment: commandCommitment,
+                receiptBytes: receiptBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String receiptKey,
+                required String companyId,
+                required String operationCommitment,
+                required String commandCommitment,
+                required String receiptBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineReceiptsCompanion.insert(
+                receiptKey: receiptKey,
+                companyId: companyId,
+                operationCommitment: operationCommitment,
+                commandCommitment: commandCommitment,
+                receiptBytes: receiptBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLineReceiptsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLineReceiptsTable,
+      JobLineReceipt,
+      $$JobLineReceiptsTableFilterComposer,
+      $$JobLineReceiptsTableOrderingComposer,
+      $$JobLineReceiptsTableAnnotationComposer,
+      $$JobLineReceiptsTableCreateCompanionBuilder,
+      $$JobLineReceiptsTableUpdateCompanionBuilder,
+      (
+        JobLineReceipt,
+        BaseReferences<_$AppDatabase, $JobLineReceiptsTable, JobLineReceipt>,
+      ),
+      JobLineReceipt,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLineAuditsTableCreateCompanionBuilder =
+    JobLineAuditsCompanion Function({
+      required String receiptKey,
+      required String auditBytes,
+      Value<int> rowid,
+    });
+typedef $$JobLineAuditsTableUpdateCompanionBuilder =
+    JobLineAuditsCompanion Function({
+      Value<String> receiptKey,
+      Value<String> auditBytes,
+      Value<int> rowid,
+    });
+
+class $$JobLineAuditsTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLineAuditsTable> {
+  $$JobLineAuditsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLineAuditsTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLineAuditsTable> {
+  $$JobLineAuditsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLineAuditsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLineAuditsTable> {
+  $$JobLineAuditsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => column,
+  );
+}
+
+class $$JobLineAuditsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLineAuditsTable,
+          JobLineAudit,
+          $$JobLineAuditsTableFilterComposer,
+          $$JobLineAuditsTableOrderingComposer,
+          $$JobLineAuditsTableAnnotationComposer,
+          $$JobLineAuditsTableCreateCompanionBuilder,
+          $$JobLineAuditsTableUpdateCompanionBuilder,
+          (
+            JobLineAudit,
+            BaseReferences<_$AppDatabase, $JobLineAuditsTable, JobLineAudit>,
+          ),
+          JobLineAudit,
+          PrefetchHooks Function()
+        > {
+  $$JobLineAuditsTableTableManager(_$AppDatabase db, $JobLineAuditsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLineAuditsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLineAuditsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLineAuditsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> receiptKey = const Value.absent(),
+                Value<String> auditBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineAuditsCompanion(
+                receiptKey: receiptKey,
+                auditBytes: auditBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String receiptKey,
+                required String auditBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineAuditsCompanion.insert(
+                receiptKey: receiptKey,
+                auditBytes: auditBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLineAuditsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLineAuditsTable,
+      JobLineAudit,
+      $$JobLineAuditsTableFilterComposer,
+      $$JobLineAuditsTableOrderingComposer,
+      $$JobLineAuditsTableAnnotationComposer,
+      $$JobLineAuditsTableCreateCompanionBuilder,
+      $$JobLineAuditsTableUpdateCompanionBuilder,
+      (
+        JobLineAudit,
+        BaseReferences<_$AppDatabase, $JobLineAuditsTable, JobLineAudit>,
+      ),
+      JobLineAudit,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLineOutgoingTableCreateCompanionBuilder =
+    JobLineOutgoingCompanion Function({
+      required String companyId,
+      required String originGeneration,
+      required String requestId,
+      required String operationCommitment,
+      Value<int> rowid,
+    });
+typedef $$JobLineOutgoingTableUpdateCompanionBuilder =
+    JobLineOutgoingCompanion Function({
+      Value<String> companyId,
+      Value<String> originGeneration,
+      Value<String> requestId,
+      Value<String> operationCommitment,
+      Value<int> rowid,
+    });
+
+class $$JobLineOutgoingTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLineOutgoingTable> {
+  $$JobLineOutgoingTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLineOutgoingTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLineOutgoingTable> {
+  $$JobLineOutgoingTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLineOutgoingTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLineOutgoingTable> {
+  $$JobLineOutgoingTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => column,
+  );
+}
+
+class $$JobLineOutgoingTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLineOutgoingTable,
+          JobLineOutgoingData,
+          $$JobLineOutgoingTableFilterComposer,
+          $$JobLineOutgoingTableOrderingComposer,
+          $$JobLineOutgoingTableAnnotationComposer,
+          $$JobLineOutgoingTableCreateCompanionBuilder,
+          $$JobLineOutgoingTableUpdateCompanionBuilder,
+          (
+            JobLineOutgoingData,
+            BaseReferences<
+              _$AppDatabase,
+              $JobLineOutgoingTable,
+              JobLineOutgoingData
+            >,
+          ),
+          JobLineOutgoingData,
+          PrefetchHooks Function()
+        > {
+  $$JobLineOutgoingTableTableManager(
+    _$AppDatabase db,
+    $JobLineOutgoingTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLineOutgoingTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLineOutgoingTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLineOutgoingTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> originGeneration = const Value.absent(),
+                Value<String> requestId = const Value.absent(),
+                Value<String> operationCommitment = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineOutgoingCompanion(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                operationCommitment: operationCommitment,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String originGeneration,
+                required String requestId,
+                required String operationCommitment,
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineOutgoingCompanion.insert(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                operationCommitment: operationCommitment,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLineOutgoingTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLineOutgoingTable,
+      JobLineOutgoingData,
+      $$JobLineOutgoingTableFilterComposer,
+      $$JobLineOutgoingTableOrderingComposer,
+      $$JobLineOutgoingTableAnnotationComposer,
+      $$JobLineOutgoingTableCreateCompanionBuilder,
+      $$JobLineOutgoingTableUpdateCompanionBuilder,
+      (
+        JobLineOutgoingData,
+        BaseReferences<
+          _$AppDatabase,
+          $JobLineOutgoingTable,
+          JobLineOutgoingData
+        >,
+      ),
+      JobLineOutgoingData,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLineConflictsTableCreateCompanionBuilder =
+    JobLineConflictsCompanion Function({
+      required String conflictId,
+      required String companyId,
+      required String lineId,
+      required String unit,
+      required String alternativesBytes,
+      Value<int> rowid,
+    });
+typedef $$JobLineConflictsTableUpdateCompanionBuilder =
+    JobLineConflictsCompanion Function({
+      Value<String> conflictId,
+      Value<String> companyId,
+      Value<String> lineId,
+      Value<String> unit,
+      Value<String> alternativesBytes,
+      Value<int> rowid,
+    });
+
+class $$JobLineConflictsTableFilterComposer
+    extends Composer<_$AppDatabase, $JobLineConflictsTable> {
+  $$JobLineConflictsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get conflictId => $composableBuilder(
+    column: $table.conflictId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lineId => $composableBuilder(
+    column: $table.lineId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unit => $composableBuilder(
+    column: $table.unit,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get alternativesBytes => $composableBuilder(
+    column: $table.alternativesBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$JobLineConflictsTableOrderingComposer
+    extends Composer<_$AppDatabase, $JobLineConflictsTable> {
+  $$JobLineConflictsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get conflictId => $composableBuilder(
+    column: $table.conflictId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lineId => $composableBuilder(
+    column: $table.lineId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unit => $composableBuilder(
+    column: $table.unit,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get alternativesBytes => $composableBuilder(
+    column: $table.alternativesBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$JobLineConflictsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $JobLineConflictsTable> {
+  $$JobLineConflictsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get conflictId => $composableBuilder(
+    column: $table.conflictId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get lineId =>
+      $composableBuilder(column: $table.lineId, builder: (column) => column);
+
+  GeneratedColumn<String> get unit =>
+      $composableBuilder(column: $table.unit, builder: (column) => column);
+
+  GeneratedColumn<String> get alternativesBytes => $composableBuilder(
+    column: $table.alternativesBytes,
+    builder: (column) => column,
+  );
+}
+
+class $$JobLineConflictsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $JobLineConflictsTable,
+          JobLineConflict,
+          $$JobLineConflictsTableFilterComposer,
+          $$JobLineConflictsTableOrderingComposer,
+          $$JobLineConflictsTableAnnotationComposer,
+          $$JobLineConflictsTableCreateCompanionBuilder,
+          $$JobLineConflictsTableUpdateCompanionBuilder,
+          (
+            JobLineConflict,
+            BaseReferences<
+              _$AppDatabase,
+              $JobLineConflictsTable,
+              JobLineConflict
+            >,
+          ),
+          JobLineConflict,
+          PrefetchHooks Function()
+        > {
+  $$JobLineConflictsTableTableManager(
+    _$AppDatabase db,
+    $JobLineConflictsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$JobLineConflictsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$JobLineConflictsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$JobLineConflictsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> conflictId = const Value.absent(),
+                Value<String> companyId = const Value.absent(),
+                Value<String> lineId = const Value.absent(),
+                Value<String> unit = const Value.absent(),
+                Value<String> alternativesBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineConflictsCompanion(
+                conflictId: conflictId,
+                companyId: companyId,
+                lineId: lineId,
+                unit: unit,
+                alternativesBytes: alternativesBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String conflictId,
+                required String companyId,
+                required String lineId,
+                required String unit,
+                required String alternativesBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => JobLineConflictsCompanion.insert(
+                conflictId: conflictId,
+                companyId: companyId,
+                lineId: lineId,
+                unit: unit,
+                alternativesBytes: alternativesBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$JobLineConflictsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $JobLineConflictsTable,
+      JobLineConflict,
+      $$JobLineConflictsTableFilterComposer,
+      $$JobLineConflictsTableOrderingComposer,
+      $$JobLineConflictsTableAnnotationComposer,
+      $$JobLineConflictsTableCreateCompanionBuilder,
+      $$JobLineConflictsTableUpdateCompanionBuilder,
+      (
+        JobLineConflict,
+        BaseReferences<_$AppDatabase, $JobLineConflictsTable, JobLineConflict>,
+      ),
+      JobLineConflict,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -12783,4 +16767,18 @@ class $AppDatabaseManager {
       $$JobLinesTableTableManager(_db, _db.jobLines);
   $$OrderSplitsTableTableManager get orderSplits =>
       $$OrderSplitsTableTableManager(_db, _db.orderSplits);
+  $$CompanyAuthorityFactsTableTableManager get companyAuthorityFacts =>
+      $$CompanyAuthorityFactsTableTableManager(_db, _db.companyAuthorityFacts);
+  $$JobLineBaselinesTableTableManager get jobLineBaselines =>
+      $$JobLineBaselinesTableTableManager(_db, _db.jobLineBaselines);
+  $$JobLineOperationsTableTableManager get jobLineOperations =>
+      $$JobLineOperationsTableTableManager(_db, _db.jobLineOperations);
+  $$JobLineReceiptsTableTableManager get jobLineReceipts =>
+      $$JobLineReceiptsTableTableManager(_db, _db.jobLineReceipts);
+  $$JobLineAuditsTableTableManager get jobLineAudits =>
+      $$JobLineAuditsTableTableManager(_db, _db.jobLineAudits);
+  $$JobLineOutgoingTableTableManager get jobLineOutgoing =>
+      $$JobLineOutgoingTableTableManager(_db, _db.jobLineOutgoing);
+  $$JobLineConflictsTableTableManager get jobLineConflicts =>
+      $$JobLineConflictsTableTableManager(_db, _db.jobLineConflicts);
 }

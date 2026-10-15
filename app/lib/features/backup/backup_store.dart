@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 
 import '../../data/app_database.dart';
 import '../../data/sqlite_file.dart';
@@ -16,6 +17,73 @@ import 'backup_codec.dart';
 const kLastBackupAtKey = 'last_backup_at';
 const kLastBackupSourceKey = 'last_backup_source_device';
 const kBackupAlreadyInProgressMessage = 'Backup already in progress';
+
+const _companyTables = [
+  'company_authority_facts',
+  'job_line_baselines',
+  'job_line_operations',
+  'job_line_receipts',
+  'job_line_audits',
+  'job_line_outgoing',
+  'job_line_conflicts',
+];
+
+/// Current whole-shop copy has no company authorization or history recovery
+/// journal. Refuse before close, protected activation, or filesystem replacement.
+Future<void> requireLegacyBusinessStore(AppDatabase db) async {
+  for (final table in _companyTables) {
+    final rows = await db.customSelect('SELECT 1 FROM $table LIMIT 1').get();
+    if (rows.isNotEmpty) {
+      throw const BackupFormatException(
+        'Company history requires a compatible authorized backup or copy. This shop was not replaced.',
+      );
+    }
+  }
+}
+
+void requireLegacyBusinessFile(File file) {
+  if (!file.existsSync()) return;
+  final db = raw_sqlite.sqlite3.open(
+    file.path,
+    mode: raw_sqlite.OpenMode.readOnly,
+  );
+  try {
+    final names = db
+        .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .map((row) => row['name'])
+        .toSet();
+    final schema = db.select('PRAGMA user_version').single.values.first as int;
+    if (schema > kAppSchemaVersion ||
+        (schema >= 3 && !_companyTables.every(names.contains))) {
+      throw const BackupFormatException(
+        'Unsupported or incomplete company database',
+      );
+    }
+    for (final table in _companyTables.where(names.contains)) {
+      if (db.select('SELECT 1 FROM $table LIMIT 1').isNotEmpty) {
+        throw const BackupFormatException(
+          'Company history requires a compatible authorized backup or copy. This shop was not replaced.',
+        );
+      }
+    }
+  } finally {
+    db.dispose();
+  }
+}
+
+Future<void> requireLegacyBusinessPayload(BackupPayload payload) async {
+  backupSqliteSchemaVersion(payload.sqliteBytes);
+  final staging = await Directory.systemTemp.createTemp(
+    'wired-parts-copy-preflight-',
+  );
+  try {
+    final file = File(p.join(staging.path, kSqliteFileName));
+    await file.writeAsBytes(payload.sqliteBytes, flush: true);
+    requireLegacyBusinessFile(file);
+  } finally {
+    await staging.delete(recursive: true);
+  }
+}
 
 const _sqliteMagic = [
   0x53,
@@ -375,6 +443,7 @@ class BackupStore {
     try {
       await file.writeAsBytes(bytes, flush: true);
       copy = AppDatabase.forTesting(NativeDatabase(file));
+      await requireLegacyBusinessStore(copy);
       await copy.customStatement('DELETE FROM app_settings WHERE key = ?', [
         kInstallationBindingKey,
       ]);
@@ -390,7 +459,9 @@ class BackupStore {
   }
 
   Future<void> writePayload(BackupPayload payload) async {
+    await requireLegacyBusinessPayload(payload);
     final dir = await _support();
+    requireLegacyBusinessFile(File(p.join(dir.path, kSqliteFileName)));
     await dir.create(recursive: true);
     final sqlite = File(p.join(dir.path, kSqliteFileName));
     await sqlite.writeAsBytes(payload.sqliteBytes, flush: true);
@@ -422,8 +493,9 @@ class BackupStore {
     String? localInstallationBinding,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
-    backupSqliteSchemaVersion(payload.sqliteBytes);
+    await requireLegacyBusinessPayload(payload);
     final live = await _support();
+    requireLegacyBusinessFile(File(p.join(live.path, kSqliteFileName)));
     await live.create(recursive: true);
     recoverInterruptedRestore(
       supportDir: live,
