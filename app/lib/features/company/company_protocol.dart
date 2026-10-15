@@ -647,6 +647,11 @@ final class CompanyEnrollment {
         await _writeFacts(custody!, photosDirectory: photosDirectory);
       });
     } else {
+      if (custody.recoverySource != null || custody.authority != 1) {
+        throw const CompanyBootstrapRefusal(
+          'Pending authority recovery must resume through Recover',
+        );
+      }
       await _checkBinding(custody, requireActive: false);
       if (custody.name != name) {
         throw const CompanyBootstrapRefusal('Pending company name differs');
@@ -1014,6 +1019,11 @@ final class CompanyEnrollment {
     _CompanyCustody custody, {
     Directory? photosDirectory,
   }) async {
+    if (custody.recoverySource != null || custody.authority != 1) {
+      throw const CompanyBootstrapRefusal(
+        'First company facts require a Create intent',
+      );
+    }
     final existing = await (db.select(
       db.companyBootstrapWitnesses,
     )..where((t) => t.companyId.equals(custody.company))).getSingleOrNull();

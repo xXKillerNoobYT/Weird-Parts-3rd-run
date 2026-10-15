@@ -41,6 +41,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
   final _name = TextEditingController();
   final _pin = TextEditingController();
   final _passphrase = TextEditingController();
+  final _passphraseConfirmation = TextEditingController();
   final _sourcePassphrase = TextEditingController();
   CompanyBootstrapStatus? _status;
   OwnerSession? _session;
@@ -76,6 +77,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     _name.dispose();
     _pin.dispose();
     _passphrase.dispose();
+    _passphraseConfirmation.dispose();
     _sourcePassphrase.dispose();
     super.dispose();
   }
@@ -140,22 +142,39 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       }
     }
     if (!mounted) return;
+    _applyStatus(status, legacy: legacy);
+  }
+
+  void _applyStatus(CompanyBootstrapStatus status, {bool legacy = false}) {
     setState(() {
       _status = status;
       _legacy = legacy;
-      _recovering = status == CompanyBootstrapStatus.pendingRecovery;
+      if (status == CompanyBootstrapStatus.pendingRecovery) {
+        _recovering = true;
+      } else if (status == CompanyBootstrapStatus.pending) {
+        _recovering = false;
+      }
     });
   }
 
   Future<void> _continueLocalShop() async {
     final status = await _enrollment.readStatus();
     if (!mounted) return;
-    setState(() {
-      _status = status;
-      _legacy =
+    _applyStatus(
+      status,
+      legacy:
           status == CompanyBootstrapStatus.unjoined ||
-          status == CompanyBootstrapStatus.legacyUnsupported;
-    });
+          status == CompanyBootstrapStatus.legacyUnsupported,
+    );
+  }
+
+  Future<void> _refreshStatusAfterRefusal() async {
+    final status = await _enrollment.readStatus();
+    if (!mounted) return;
+    _applyStatus(
+      status,
+      legacy: status == CompanyBootstrapStatus.legacyUnsupported,
+    );
   }
 
   Future<void> _chooseSourcePath() async {
@@ -208,6 +227,11 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       );
       return;
     }
+    if (_passphrase.text.isEmpty ||
+        _passphrase.text != _passphraseConfirmation.text) {
+      setState(() => _error = 'Confirm the new recovery passphrase exactly.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -225,11 +249,13 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       if (!mounted || !_foreground || loginIntent != _loginIntentEpoch) {
         _pin.clear();
         _passphrase.clear();
+        _passphraseConfirmation.clear();
         return;
       }
       final session = await _enrollment.signIn(_pin.text);
       _pin.clear();
       _passphrase.clear();
+      _passphraseConfirmation.clear();
       if (mounted && _foreground && loginIntent == _loginIntentEpoch) {
         setState(() {
           _session = session;
@@ -240,6 +266,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         await _enrollment.signOut();
       }
     } catch (error) {
+      await _refreshStatusAfterRefusal();
       if (mounted) {
         setState(
           () => _error = error is CompanyBootstrapRefusal ? error.message : 'Company creation needs recovery or a retry with the same details.',
@@ -289,6 +316,11 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       );
       return;
     }
+    if (_passphrase.text.isEmpty ||
+        _passphrase.text != _passphraseConfirmation.text) {
+      setState(() => _error = 'Confirm the new recovery passphrase exactly.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -307,12 +339,14 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       if (!mounted || !_foreground || loginIntent != _loginIntentEpoch) {
         _pin.clear();
         _passphrase.clear();
+        _passphraseConfirmation.clear();
         _sourcePassphrase.clear();
         return;
       }
       final session = await _enrollment.signIn(_pin.text);
       _pin.clear();
       _passphrase.clear();
+      _passphraseConfirmation.clear();
       _sourcePassphrase.clear();
       if (mounted && _foreground && loginIntent == _loginIntentEpoch) {
         setState(() {
@@ -324,6 +358,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         await _enrollment.signOut();
       }
     } catch (error) {
+      await _refreshStatusAfterRefusal();
       if (mounted) {
         setState(
           () => _error = error is CompanyBootstrapRefusal ? error.message : 'Recovery refused. Check the package and retry with the same details.',
@@ -405,7 +440,12 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
               key: const Key('switch-company-recovery'),
               onPressed: _busy
                   ? null
-                  : () => setState(() => _recovering = !_recovering),
+                  : () {
+                      _passphrase.clear();
+                      _passphraseConfirmation.clear();
+                      _sourcePassphrase.clear();
+                      setState(() => _recovering = !_recovering);
+                    },
               child: Text(
                 _recovering
                     ? 'Create a new company instead'
@@ -457,6 +497,14 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
               labelText: _recovering
                   ? 'New recovery passphrase'
                   : 'Recovery passphrase',
+            ),
+          ),
+          TextField(
+            key: const Key('recovery-passphrase-confirm'),
+            controller: _passphraseConfirmation,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Confirm new recovery passphrase',
             ),
           ),
           CheckboxListTile(

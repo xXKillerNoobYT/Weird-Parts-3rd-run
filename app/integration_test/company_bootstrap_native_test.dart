@@ -331,6 +331,13 @@ Future<void> _waitFor(
 }
 
 Future<void> _tap(WidgetTester tester, Finder finder) async {
+  if (finder.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      finder,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
   _require(finder.evaluate().length == 1);
   await tester.ensureVisible(finder);
   await tester.pump();
@@ -453,6 +460,10 @@ Future<void> _createOrRecover(
   await tester.enterText(find.byKey(const Key('company-pin')), '1234');
   await tester.enterText(
     find.byKey(const Key('recovery-passphrase')),
+    recovery ? _replacementPassphrase : _passphrase,
+  );
+  await tester.enterText(
+    find.byKey(const Key('recovery-passphrase-confirm')),
     recovery ? _replacementPassphrase : _passphrase,
   );
   await _tap(tester, find.byKey(const Key('local-continuity-consent')));

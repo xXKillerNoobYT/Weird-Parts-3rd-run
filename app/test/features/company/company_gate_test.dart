@@ -55,6 +55,341 @@ final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
 }
 
 void main() {
+  testWidgets(
+    'Create requires a matching new recovery passphrase confirmation',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync('confirm-create-');
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(() async {
+        await db.close();
+        directory.deleteSync(recursive: true);
+      });
+      final store = _Store();
+      const namespace = 'synthetic.confirm-create';
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: namespace,
+      );
+      await installation.start(db);
+      final initialBase = store.states[namespace]!;
+      final destination = File(p.join(directory.path, 'authority.wpca'));
+      await tester.pumpWidget(
+        WiredPartsApp(
+          db: db,
+          pin: PinService(db.settingsDao),
+          deviceId: await db.settingsDao.ensureDeviceId(),
+          installation: installation,
+          enableCompanyBootstrap: true,
+          pickCompanyRecoveryPath: () async => destination.path,
+          reset: LocalDataReset(supportDir: directory),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('company-name')),
+        'Confirm Crew',
+      );
+      await tester.enterText(find.byKey(const Key('company-pin')), '1234');
+      await tester.enterText(
+        find.byKey(const Key('recovery-passphrase')),
+        'confirm create authority phrase',
+      );
+      await tester.tap(find.byKey(const Key('local-continuity-consent')));
+      await tester.tap(find.byKey(const Key('authority-only-consent')));
+      await tester.scrollUntilVisible(
+        find.text('Choose encrypted recovery file'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Choose encrypted recovery file'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('create-company')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.byKey(const Key('create-company')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Confirm the new recovery passphrase exactly.'),
+        findsOneWidget,
+      );
+      expect(
+        store.states.containsKey(companyCustodyNamespace(namespace)),
+        isFalse,
+      );
+      expect(store.states[namespace]!.revision, initialBase.revision);
+      expect(store.states[namespace]!.bytes, initialBase.bytes);
+      expect(await db.select(db.companyAuthorityFacts).get(), isEmpty);
+      expect(await db.select(db.companyBootstrapWitnesses).get(), isEmpty);
+      expect(destination.existsSync(), isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('replacement Recover refuses mismatched new passphrases', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('confirm-recover-');
+    final sourceDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+    );
+    final targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    addTearDown(() async {
+      await sourceDb.close();
+      await targetDb.close();
+      directory.deleteSync(recursive: true);
+    });
+    final sourceStore = _Store();
+    final sourceInstallation = InstallationSecurity(
+      store: sourceStore,
+      namespace: 'synthetic.confirm-recover-source',
+    );
+    await sourceInstallation.start(sourceDb);
+    final sourceFile = File(p.join(directory.path, 'source.wpca'));
+    await tester.runAsync(
+      () => CompanyEnrollment(installation: sourceInstallation, db: sourceDb)
+          .create(
+            companyName: 'Confirm Recovery Crew',
+            policy: CompanyContinuityPolicy.localContinuity,
+            pin: '1234',
+            recoveryPassphrase: 'confirm source authority phrase',
+            recoveryFile: sourceFile,
+          ),
+    );
+    final targetStore = _Store();
+    const targetNamespace = 'synthetic.confirm-recover-target';
+    final targetInstallation = InstallationSecurity(
+      store: targetStore,
+      namespace: targetNamespace,
+    );
+    await targetInstallation.start(targetDb);
+    final initialBase = targetStore.states[targetNamespace]!;
+    final destination = File(p.join(directory.path, 'replacement.wpca'));
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: targetDb,
+        pin: PinService(targetDb.settingsDao),
+        deviceId: await targetDb.settingsDao.ensureDeviceId(),
+        installation: targetInstallation,
+        enableCompanyBootstrap: true,
+        pickCompanySourcePath: () async => sourceFile.path,
+        pickCompanyRecoveryPath: () async => destination.path,
+        reset: LocalDataReset(supportDir: directory),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('switch-company-recovery')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('choose-source-package')));
+    await tester.enterText(
+      find.byKey(const Key('source-passphrase')),
+      'confirm source authority phrase',
+    );
+    await tester.enterText(find.byKey(const Key('company-pin')), '0123');
+    await tester.enterText(
+      find.byKey(const Key('recovery-passphrase')),
+      'confirm replacement authority phrase',
+    );
+    final confirmation = find.byKey(const Key('recovery-passphrase-confirm'));
+    if (confirmation.evaluate().isNotEmpty) {
+      await tester.enterText(confirmation, 'different replacement phrase');
+    }
+    await tester.tap(find.byKey(const Key('local-continuity-consent')));
+    await tester.tap(find.byKey(const Key('authority-only-consent')));
+    await tester.scrollUntilVisible(
+      find.text('Choose encrypted recovery file'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose encrypted recovery file'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('create-company')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const Key('create-company')));
+    for (
+      var attempt = 0;
+      attempt < 40 &&
+          find
+              .text('Confirm the new recovery passphrase exactly.')
+              .evaluate()
+              .isEmpty &&
+          !destination.existsSync();
+      attempt++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+    }
+    expect(
+      find.text('Confirm the new recovery passphrase exactly.'),
+      findsOneWidget,
+    );
+    expect(
+      targetStore.states.containsKey(companyCustodyNamespace(targetNamespace)),
+      isFalse,
+    );
+    expect(targetStore.states[targetNamespace]!.revision, initialBase.revision);
+    expect(targetStore.states[targetNamespace]!.bytes, initialBase.bytes);
+    expect(
+      await targetDb.select(targetDb.companyAuthorityFacts).get(),
+      isEmpty,
+    );
+    expect(
+      await targetDb.select(targetDb.companyBootstrapWitnesses).get(),
+      isEmpty,
+    );
+    expect(destination.existsSync(), isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('cold pending recovery reopens on Recover and can finish', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync(
+      'pending-recover-gate-',
+    );
+    final sourceDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+    );
+    var targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    addTearDown(() async {
+      await sourceDb.close();
+      await targetDb.close();
+      directory.deleteSync(recursive: true);
+    });
+    final sourceStore = _Store();
+    final sourceInstallation = InstallationSecurity(
+      store: sourceStore,
+      namespace: 'synthetic.pending-gate-source',
+    );
+    await sourceInstallation.start(sourceDb);
+    final sourceFile = File(p.join(directory.path, 'source.wpca'));
+    await tester.runAsync(
+      () => CompanyEnrollment(installation: sourceInstallation, db: sourceDb)
+          .create(
+            companyName: 'Pending Recovery Crew',
+            policy: CompanyContinuityPolicy.localContinuity,
+            pin: '1234',
+            recoveryPassphrase: 'pending gate source phrase',
+            recoveryFile: sourceFile,
+          ),
+    );
+
+    final store = _Store();
+    const namespace = 'synthetic.pending-gate-target';
+    var installation = InstallationSecurity(store: store, namespace: namespace);
+    await installation.start(targetDb);
+    final destination = File(p.join(directory.path, 'replacement.wpca'));
+    var interrupted = false;
+    store.beforeCas = (name, bytes) async {
+      if (interrupted || name != companyCustodyNamespace(namespace)) return;
+      final next = jsonDecode(utf8.decode(bytes)) as Map;
+      if (next['facts'] != null) {
+        interrupted = true;
+        throw StateError('simulated recovery facts rollback');
+      }
+    };
+    await tester.runAsync(
+      () => expectLater(
+        CompanyEnrollment(installation: installation, db: targetDb).recover(
+          policy: CompanyContinuityPolicy.localContinuity,
+          sourceFile: sourceFile,
+          sourcePassphrase: 'pending gate source phrase',
+          newPin: '0123',
+          newRecoveryPassphrase: 'pending gate replacement phrase',
+          newRecoveryFile: destination,
+        ),
+        throwsA(isA<StateError>()),
+      ),
+    );
+    expect(interrupted, isTrue);
+    store.beforeCas = null;
+    await targetDb.close();
+    targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    installation = InstallationSecurity(store: store, namespace: namespace);
+    await installation.start(targetDb);
+    expect(
+      await CompanyEnrollment(
+        installation: installation,
+        db: targetDb,
+      ).readStatus(),
+      CompanyBootstrapStatus.pendingRecovery,
+    );
+    await tester.pumpWidget(
+      WiredPartsApp(
+        db: targetDb,
+        pin: PinService(targetDb.settingsDao),
+        deviceId: await targetDb.settingsDao.ensureDeviceId(),
+        installation: installation,
+        enableCompanyBootstrap: true,
+        pickCompanySourcePath: () async => sourceFile.path,
+        pickCompanyRecoveryPath: () async => destination.path,
+        reset: LocalDataReset(supportDir: directory),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Finish authority recovery'), findsOneWidget);
+    expect(find.byKey(const Key('choose-source-package')), findsOneWidget);
+    expect(find.byKey(const Key('company-name')), findsNothing);
+    await tester.tap(find.byKey(const Key('choose-source-package')));
+    await tester.enterText(
+      find.byKey(const Key('source-passphrase')),
+      'pending gate source phrase',
+    );
+    await tester.enterText(find.byKey(const Key('company-pin')), '0123');
+    await tester.enterText(
+      find.byKey(const Key('recovery-passphrase')),
+      'pending gate replacement phrase',
+    );
+    await tester.enterText(
+      find.byKey(const Key('recovery-passphrase-confirm')),
+      'pending gate replacement phrase',
+    );
+    await tester.tap(find.byKey(const Key('local-continuity-consent')));
+    await tester.tap(find.byKey(const Key('authority-only-consent')));
+    await tester.scrollUntilVisible(
+      find.text('Choose encrypted recovery file'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Choose encrypted recovery file'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('create-company')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const Key('create-company')));
+    for (
+      var attempt = 0;
+      attempt < 50 &&
+          find.byKey(const Key('company-signout')).evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+    }
+    expect(find.byKey(const Key('company-signout')), findsOneWidget);
+    expect(destination.existsSync(), isTrue);
+    expect(find.text('Parts'), findsNothing);
+    expect(find.text('Jobs'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('unavailable desktop security never enters legacy routes', (
     tester,
   ) async {
@@ -257,12 +592,24 @@ void main() {
         find.byKey(const Key('recovery-passphrase')),
         'separate recovery phrase 123',
       );
+      await tester.enterText(
+        find.byKey(const Key('recovery-passphrase-confirm')),
+        'separate recovery phrase 123',
+      );
       await tester.tap(find.byKey(const Key('local-continuity-consent')));
       await tester.tap(find.byKey(const Key('authority-only-consent')));
-      await tester.ensureVisible(find.text('Choose encrypted recovery file'));
+      await tester.scrollUntilVisible(
+        find.text('Choose encrypted recovery file'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Choose encrypted recovery file'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('create-company')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('create-company')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.byKey(const Key('create-company')));
       await waitFor(package.existsSync);
       await waitFor(
@@ -369,12 +716,24 @@ void main() {
       find.byKey(const Key('recovery-passphrase')),
       'background recovery phrase',
     );
+    await tester.enterText(
+      find.byKey(const Key('recovery-passphrase-confirm')),
+      'background recovery phrase',
+    );
     await tester.tap(find.byKey(const Key('local-continuity-consent')));
     await tester.tap(find.byKey(const Key('authority-only-consent')));
-    await tester.ensureVisible(find.text('Choose encrypted recovery file'));
+    await tester.scrollUntilVisible(
+      find.text('Choose encrypted recovery file'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('Choose encrypted recovery file'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('create-company')));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('create-company')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.byKey(const Key('create-company')));
     for (var attempt = 0; attempt < 40 && !entered.isCompleted; attempt++) {
       await tester.runAsync(

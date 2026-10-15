@@ -603,6 +603,255 @@ void main() {
     expect(destination.existsSync(), isFalse);
   });
 
+  test(
+    'pending recovery cannot be continued as Create after facts rollback',
+    () async {
+      final directory = Directory.systemTemp.createTempSync('recovery-mode-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final sourceDb = AppDatabase.forTesting(
+        NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+      );
+      addTearDown(sourceDb.close);
+      final sourceStore = _MemoryStore();
+      final sourceInstallation = InstallationSecurity(
+        store: sourceStore,
+        namespace: 'synthetic.recovery-mode-source',
+      );
+      await sourceInstallation.start(sourceDb);
+      final sourceFile = File(p.join(directory.path, 'source.wpca'));
+      final sourceIdentity =
+          await CompanyEnrollment(
+            installation: sourceInstallation,
+            db: sourceDb,
+          ).create(
+            companyName: 'Recovery Mode Crew',
+            policy: CompanyContinuityPolicy.localContinuity,
+            pin: '1234',
+            recoveryPassphrase: 'recovery mode source phrase',
+            recoveryFile: sourceFile,
+          );
+
+      final targetFile = File(p.join(directory.path, 'target.sqlite'));
+      var targetDb = AppDatabase.forTesting(NativeDatabase(targetFile));
+      addTearDown(() => targetDb.close());
+      final targetStore = _MemoryStore();
+      const targetNamespace = 'synthetic.recovery-mode-target';
+      var targetInstallation = InstallationSecurity(
+        store: targetStore,
+        namespace: targetNamespace,
+      );
+      await targetInstallation.start(targetDb);
+      var target = CompanyEnrollment(
+        installation: targetInstallation,
+        db: targetDb,
+      );
+      final recoveryFile = File(p.join(directory.path, 'replacement.wpca'));
+      Future<CompanyIdentity> recover() => target.recover(
+        policy: CompanyContinuityPolicy.localContinuity,
+        sourceFile: sourceFile,
+        sourcePassphrase: 'recovery mode source phrase',
+        newPin: '0123',
+        newRecoveryPassphrase: 'recovery mode replacement phrase',
+        newRecoveryFile: recoveryFile,
+      );
+      var interrupted = false;
+      targetStore.beforeCas = (namespace, bytes) async {
+        if (interrupted ||
+            namespace != companyCustodyNamespace(targetNamespace)) {
+          return;
+        }
+        final next = jsonDecode(utf8.decode(bytes)) as Map;
+        if (next['facts'] != null) {
+          interrupted = true;
+          throw StateError('simulated recovery facts rollback');
+        }
+      };
+      await expectLater(recover(), throwsA(isA<StateError>()));
+      expect(interrupted, isTrue);
+      targetStore.beforeCas = null;
+      expect(
+        await targetDb.select(targetDb.companyAuthorityFacts).get(),
+        isEmpty,
+      );
+      expect(
+        await targetDb.select(targetDb.companyBootstrapWitnesses).get(),
+        isEmpty,
+      );
+      await targetDb.close();
+
+      targetDb = AppDatabase.forTesting(NativeDatabase(targetFile));
+      targetInstallation = InstallationSecurity(
+        store: targetStore,
+        namespace: targetNamespace,
+      );
+      await targetInstallation.start(targetDb);
+      target = CompanyEnrollment(
+        installation: targetInstallation,
+        db: targetDb,
+      );
+      expect(await target.readStatus(), CompanyBootstrapStatus.pendingRecovery);
+      final before = {
+        for (final entry in targetStore.states.entries)
+          entry.key: (
+            entry.value.revision,
+            Uint8List.fromList(entry.value.bytes),
+          ),
+      };
+      final wrongFile = File(p.join(directory.path, 'wrong-flow.wpca'));
+      await expectLater(
+        target.create(
+          companyName: 'Recovery Mode Crew',
+          policy: CompanyContinuityPolicy.localContinuity,
+          pin: '0123',
+          recoveryPassphrase: 'wrong flow authority phrase',
+          recoveryFile: wrongFile,
+        ),
+        throwsA(isA<CompanyBootstrapRefusal>()),
+      );
+      for (final entry in before.entries) {
+        expect(targetStore.states[entry.key]!.revision, entry.value.$1);
+        expect(targetStore.states[entry.key]!.bytes, entry.value.$2);
+      }
+      expect(
+        await targetDb.select(targetDb.companyAuthorityFacts).get(),
+        isEmpty,
+      );
+      expect(
+        await targetDb.select(targetDb.companyBootstrapWitnesses).get(),
+        isEmpty,
+      );
+      expect(wrongFile.existsSync(), isFalse);
+
+      final recovered = await recover();
+      expect(recovered.companyId, sourceIdentity.companyId);
+      expect(recovered.shopId, sourceIdentity.shopId);
+      expect(recovered.userId, sourceIdentity.userId);
+      final protected = jsonDecode(
+        utf8.decode(
+          targetStore.states[companyCustodyNamespace(targetNamespace)]!.bytes,
+        ),
+      ) as Map;
+      expect(protected['authority'], 2);
+      expect(protected['recoverySeed'], isNull);
+      expect(recoveryFile.existsSync(), isTrue);
+      expect(await target.readStatus(), CompanyBootstrapStatus.active);
+      expect((await target.signIn('0123')).isValid, isTrue);
+      expect(
+        (await targetInstallation.readCompanyTrust(targetDb))!.authorityVersion,
+        2,
+      );
+      expect(
+        targetInstallation
+            .knownSecurityFloors['authority.${sourceIdentity.companyId}'],
+        2,
+      );
+      final facts = await targetDb.select(targetDb.companyAuthorityFacts).get();
+      expect(facts, hasLength(2));
+      expect(
+        facts.map(
+          (fact) => (jsonDecode(fact.signedBytes) as Map)['body']['authority'],
+        ),
+        contains(2),
+      );
+    },
+  );
+
+  test('pending Create cannot be continued as authority recovery', () async {
+    final directory = Directory.systemTemp.createTempSync('create-mode-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final sourceDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'source.sqlite'))),
+    );
+    addTearDown(sourceDb.close);
+    final sourceStore = _MemoryStore();
+    final sourceInstallation = InstallationSecurity(
+      store: sourceStore,
+      namespace: 'synthetic.create-mode-source',
+    );
+    await sourceInstallation.start(sourceDb);
+    final sourceFile = File(p.join(directory.path, 'source.wpca'));
+    await CompanyEnrollment(
+      installation: sourceInstallation,
+      db: sourceDb,
+    ).create(
+      companyName: 'Source Crew',
+      policy: CompanyContinuityPolicy.localContinuity,
+      pin: '1234',
+      recoveryPassphrase: 'source create mode phrase',
+      recoveryFile: sourceFile,
+    );
+
+    final targetDb = AppDatabase.forTesting(
+      NativeDatabase(File(p.join(directory.path, 'target.sqlite'))),
+    );
+    addTearDown(targetDb.close);
+    final store = _MemoryStore();
+    const namespace = 'synthetic.create-mode-target';
+    final installation = InstallationSecurity(
+      store: store,
+      namespace: namespace,
+    );
+    await installation.start(targetDb);
+    final enrollment = CompanyEnrollment(
+      installation: installation,
+      db: targetDb,
+    );
+    var interrupted = false;
+    store.beforeCas = (name, bytes) async {
+      if (interrupted || name != companyCustodyNamespace(namespace)) return;
+      final next = jsonDecode(utf8.decode(bytes)) as Map;
+      if (next['facts'] != null) {
+        interrupted = true;
+        throw StateError('simulated Create facts rollback');
+      }
+    };
+    await expectLater(
+      enrollment.create(
+        companyName: 'New Crew',
+        policy: CompanyContinuityPolicy.localContinuity,
+        pin: '0123',
+        recoveryPassphrase: 'new create mode phrase',
+        recoveryFile: File(p.join(directory.path, 'create.wpca')),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(interrupted, isTrue);
+    store.beforeCas = null;
+    expect(await enrollment.readStatus(), CompanyBootstrapStatus.pending);
+    final before = {
+      for (final entry in store.states.entries)
+        entry.key: (
+          entry.value.revision,
+          Uint8List.fromList(entry.value.bytes),
+        ),
+    };
+    final wrongFile = File(p.join(directory.path, 'wrong-recovery.wpca'));
+    await expectLater(
+      enrollment.recover(
+        policy: CompanyContinuityPolicy.localContinuity,
+        sourceFile: sourceFile,
+        sourcePassphrase: 'source create mode phrase',
+        newPin: '0123',
+        newRecoveryPassphrase: 'wrong recovery mode phrase',
+        newRecoveryFile: wrongFile,
+      ),
+      throwsA(isA<CompanyBootstrapRefusal>()),
+    );
+    for (final entry in before.entries) {
+      expect(store.states[entry.key]!.revision, entry.value.$1);
+      expect(store.states[entry.key]!.bytes, entry.value.$2);
+    }
+    expect(
+      await targetDb.select(targetDb.companyAuthorityFacts).get(),
+      isEmpty,
+    );
+    expect(
+      await targetDb.select(targetDb.companyBootstrapWitnesses).get(),
+      isEmpty,
+    );
+    expect(wrongFile.existsSync(), isFalse);
+  });
+
   test('authenticated revoked admin is refused before recovery mutation', () async {
     final directory = Directory.systemTemp.createTempSync('revoked-source-');
     addTearDown(() => directory.deleteSync(recursive: true));
