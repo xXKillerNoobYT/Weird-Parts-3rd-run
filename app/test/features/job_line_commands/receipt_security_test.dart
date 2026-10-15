@@ -17,6 +17,7 @@ Map<String, Object?> snapshot(File file) {
   try {
     return {
       for (final name in [
+        'company_authority_facts',
         'job_lines',
         'order_splits',
         'job_line_baselines',
@@ -89,6 +90,116 @@ void main() {
     if (revokeReceiver) devices[1]['revoked'] = true;
     await fixture.publishFacts();
   }
+
+  for (final field in ['operation', 'authorization']) {
+    test(
+      'noncanonical $field signature refuses incoming without effects',
+      () async {
+        final authored = await fixture.commit(
+          0,
+          fixture.command(const JobLinePatch(notes: SetField('Canonical'))),
+        );
+        final value = jsonDecode(utf8.decode(authored.operationBytes)) as Map;
+        final signed = field == 'operation'
+            ? value
+            : value['authorization'] as Map;
+        signed['signature'] = (signed['signature'] as String).replaceAll(
+          '=',
+          '%3D',
+        );
+        final alternate = Uint8List.fromList(utf8.encode(canonical(value)));
+        final before = snapshot(fixture.files[1]);
+        final protected =
+            fixture.secureStores[1].states[fixture.installations[1].namespace]!;
+        await expectLater(
+          fixture.commands(1).applyIncoming(alternate),
+          throwsA(isA<JobLineRefusal>()),
+        );
+        expect(snapshot(fixture.files[1]), before);
+        expect(
+          fixture.secureStores[1].states[fixture.installations[1].namespace],
+          same(protected),
+        );
+        final saved = await fixture
+            .commands(1)
+            .applyIncoming(authored.operationBytes);
+        final admitted = snapshot(fixture.files[1]);
+        await expectLater(
+          fixture.commands(1).applyIncoming(alternate),
+          throwsA(isA<JobLineRefusal>()),
+        );
+        expect(snapshot(fixture.files[1]), admitted);
+        expect(
+          (await fixture.commands(1).applyIncoming(authored.operationBytes))
+              .bytes,
+          saved.bytes,
+        );
+        expect(snapshot(fixture.files[1]), admitted);
+      },
+    );
+  }
+
+  test(
+    'noncanonical session signature refuses before local admission',
+    () async {
+      final command = fixture.command(
+        const JobLinePatch(notes: SetField('Canonical')),
+      );
+      final proof =
+          jsonDecode(utf8.decode(await fixture.assertion(0, command))) as Map;
+      proof['signature'] = (proof['signature'] as String).replaceAll(
+        '=',
+        '%3D',
+      );
+      final before = snapshot(fixture.files[0]);
+      await expectLater(
+        fixture
+            .commands(0)
+            .authorization
+            .verify(command, Uint8List.fromList(utf8.encode(canonical(proof)))),
+        throwsA(isA<JobLineRefusal>()),
+      );
+      expect(snapshot(fixture.files[0]), before);
+      final saved = await fixture.commit(0, command);
+      expect((await fixture.commit(0, command)).bytes, saved.bytes);
+    },
+  );
+
+  test(
+    'noncanonical company facts signature refuses before session admission',
+    () async {
+      final db = fixture.databases[0];
+      final row = await db.select(db.companyAuthorityFacts).getSingle();
+      final signed = jsonDecode(row.signedBytes) as Map;
+      signed['signature'] = (signed['signature'] as String).replaceAll(
+        '=',
+        '%3D',
+      );
+      await db
+          .update(db.companyAuthorityFacts)
+          .write(
+            CompanyAuthorityFactsCompanion(
+              signedBytes: Value(canonical(signed)),
+            ),
+          );
+      final before = snapshot(fixture.files[0]);
+      final command = fixture.command(
+        const JobLinePatch(notes: SetField('Canonical')),
+      );
+      await expectLater(
+        fixture.session(0, command),
+        throwsA(isA<JobLineRefusal>()),
+      );
+      expect(snapshot(fixture.files[0]), before);
+      await db
+          .update(db.companyAuthorityFacts)
+          .write(
+            CompanyAuthorityFactsCompanion(signedBytes: Value(row.signedBytes)),
+          );
+      final saved = await fixture.commit(0, command);
+      expect((await fixture.commit(0, command)).bytes, saved.bytes);
+    },
+  );
 
   for (final character in ['x', '界']) {
     test(

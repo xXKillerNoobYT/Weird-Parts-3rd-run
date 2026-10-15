@@ -446,6 +446,7 @@ Future<void> _verifySignature(
 }) async {
   final bytes = base64Decode(encoded);
   if (bytes.length != 64 ||
+      base64Encode(bytes) != encoded ||
       !await Ed25519().verify(
         utf8.encode('$domain${_canonical(body, maximumBytes: maximumBytes)}'),
         signature: Signature(bytes, publicKey: publicKey),

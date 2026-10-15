@@ -48,13 +48,19 @@ class LocalDataReset {
     }
   }
 
-  Future<void> wipeFiles() async {
+  /// Check every store reset may delete before rotating installation identity.
+  Future<void> preflight() async {
     final dir = await _support();
     requireLegacyBusinessFile(File(p.join(dir.path, kSqliteFileName)));
     final documents = await _documents();
     if (documents != null) {
       requireLegacyBusinessFile(File(p.join(documents.path, kSqliteFileName)));
     }
+  }
+
+  Future<void> wipeFiles() async {
+    await preflight();
+    final dir = await _support();
     final marker = File(p.join(dir.path, kRestoreSwapMarkerName));
     if (await marker.exists()) {
       await marker.delete();

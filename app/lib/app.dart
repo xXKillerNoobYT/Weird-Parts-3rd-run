@@ -151,6 +151,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     _wiping = true;
     try {
       await requireLegacyBusinessStore(_db);
+      await widget.reset.preflight();
       await widget.installation?.prepareReset();
       await _db.close();
       try {
