@@ -101,6 +101,186 @@ void main() {
       await fixture.dispose();
     });
 
+    Future<JobLineCommandReceipt> adoptCatalogLine() async {
+      final adopted = await fixture.commit(
+        0,
+        fixture.command(
+          const JobLinePatch(
+            identity: CatalogJobLine(part, brandVersionId: version),
+          ),
+        ),
+      );
+      await fixture.commands(1).applyIncoming(adopted.operationBytes);
+      return adopted;
+    }
+
+    Future<void> retireCatalogPart(int i, String mode) async {
+      final db = fixture.databases[i];
+      if (mode == 'deleted') {
+        await db.partsDao.softDeletePart(part);
+      } else {
+        final current = (await db.partsDao.getPart(part))!;
+        await db.partsDao.updatePart(
+          id: part,
+          name: current.name,
+          description: current.description,
+          uom: current.uom,
+          active: false,
+        );
+      }
+    }
+
+    for (final mode in ['inactive', 'deleted']) {
+      for (final mutation in <String, JobLineMutation>{
+        'notes': const JobLinePatch(notes: SetField('Retained catalog note')),
+        'quantities': const JobLinePatch(
+          quantities: JobLineQuantities(needed: 9, shopPull: 2, unit: 'ea'),
+        ),
+        'delete': const DeleteJobLine(),
+      }.entries) {
+        test(
+          'retired $mode catalog permits ${mutation.key} locally and incoming',
+          () async {
+            final adopted = await adoptCatalogLine();
+            for (var i = 0; i < 2; i++) {
+              await retireCatalogPart(i, mode);
+            }
+            final command = fixture.command(
+              mutation.value,
+              parents: [operationKey(adopted)],
+            );
+            final local = await fixture.commit(0, command);
+            final incoming = await fixture
+                .commands(1)
+                .applyIncoming(local.operationBytes);
+            expect(local.status, 'applied');
+            expect(incoming.status, 'applied');
+            for (var i = 0; i < 2; i++) {
+              final row = await fixture.row(i);
+              expect(row.partId, part);
+              expect(row.brandVersionId, version);
+              if (mutation.key == 'delete') {
+                expect(row.deletedAt, isNotNull);
+              }
+              if (mutation.key == 'notes') {
+                expect(row.notes, 'Retained catalog note');
+              }
+              if (mutation.key == 'quantities') {
+                expect(row.neededQty, 9);
+              }
+              final before = businessRows(
+                fixture.files[i],
+                includeHistory: true,
+              );
+              final replay = i == 0
+                  ? await fixture.commit(0, command)
+                  : await fixture
+                        .commands(1)
+                        .applyIncoming(local.operationBytes);
+              expect(replay.bytes, i == 0 ? local.bytes : incoming.bytes);
+              expect(
+                businessRows(fixture.files[i], includeHistory: true),
+                before,
+              );
+            }
+          },
+        );
+      }
+      test(
+        'retired $mode catalog still refuses a new identity selection',
+        () async {
+          final selected = await fixture.commit(
+            0,
+            fixture.command(
+              const JobLinePatch(
+                identity: CatalogJobLine(part, brandVersionId: version),
+              ),
+            ),
+          );
+          await retireCatalogPart(1, mode);
+          final before = businessRows(fixture.files[1], includeHistory: true);
+          await expectLater(
+            fixture.commit(
+              1,
+              fixture.command(
+                const JobLinePatch(
+                  identity: CatalogJobLine(part, brandVersionId: version),
+                ),
+              ),
+            ),
+            throwsA(isA<JobLineRefusal>()),
+          );
+          await expectLater(
+            fixture.commands(1).applyIncoming(selected.operationBytes),
+            throwsA(isA<JobLineRefusal>()),
+          );
+          expect(businessRows(fixture.files[1], includeHistory: true), before);
+        },
+      );
+    }
+
+    test(
+      'catalog identity conflict preserves a retired common identity',
+      () async {
+        const b = '10000000-0000-4000-8000-000000000031';
+        const c = '10000000-0000-4000-8000-000000000032';
+        for (final db in fixture.databases) {
+          for (final id in [b, c]) {
+            await db.partsDao.insertGeneralPart(
+              id: id,
+              name: 'Synthetic $id',
+              deviceId: legacyDevice,
+            );
+          }
+        }
+        fixture.facts['entities'] = <Object?>[
+          ...fixture.facts['entities'] as List,
+          {'kind': 'part', 'id': b},
+          {'kind': 'part', 'id': c},
+        ];
+        await fixture.publishFacts();
+        final a = await adoptCatalogLine();
+        final selectedB = await fixture.commit(
+          0,
+          fixture.command(
+            const JobLinePatch(identity: CatalogJobLine(b)),
+            parents: [operationKey(a)],
+          ),
+        );
+        final selectedC = await fixture.commit(
+          1,
+          fixture.command(
+            const JobLinePatch(identity: CatalogJobLine(c)),
+            parents: [operationKey(a)],
+          ),
+        );
+        for (var i = 0; i < 2; i++) {
+          await retireCatalogPart(i, 'deleted');
+        }
+        expect(
+          (await fixture.commands(0).applyIncoming(selectedC.operationBytes))
+              .status,
+          'conflict',
+        );
+        expect(
+          (await fixture.commands(1).applyIncoming(selectedB.operationBytes))
+              .status,
+          'conflict',
+        );
+        final conflicts = <JobLineConflict>[];
+        for (var i = 0; i < 2; i++) {
+          final row = await fixture.row(i);
+          expect(row.partId, part);
+          expect(row.brandVersionId, version);
+          final db = fixture.databases[i];
+          conflicts.add(await db.select(db.jobLineConflicts).getSingle());
+        }
+        expect(conflicts[0].unit, 'identity');
+        expect(conflicts[0].conflictId, conflicts[1].conflictId);
+        expect(conflicts[0].alternativesBytes, conflicts[1].alternativesBytes);
+      },
+    );
+
     Future<List<OrderSplit>> seedOrderSplits(int i) async {
       final db = fixture.databases[i];
       final now = DateTime.utc(2026, 1, 1);

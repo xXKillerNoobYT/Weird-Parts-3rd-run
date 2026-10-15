@@ -77,9 +77,13 @@ Future<void> runJobLineNativeValidation(
       databases.addAll(fixture.databases);
       phase = 'commands';
       final command = fixture.command(
-        const JobLinePatch(
-          quantities: JobLineQuantities(needed: 9, shopPull: 15, unit: 'ea'),
-          notes: SetField('Native atomic line'),
+        JobLinePatch(
+          quantities: const JobLineQuantities(
+            needed: 9,
+            shopPull: 15,
+            unit: 'ea',
+          ),
+          notes: SetField('Native atomic line'.padRight(4096, '.')),
         ),
       );
       final first = await fixture.commit(0, command);

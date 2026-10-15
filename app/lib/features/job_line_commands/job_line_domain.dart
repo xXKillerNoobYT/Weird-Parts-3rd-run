@@ -30,6 +30,7 @@ Map<String, Object?> decodeJobLineReceipt(
     'store',
     if (requireSeal || value.containsKey('seal')) 'seal',
   });
+  _receiptOperationBytes(value['bytes']);
   if (_canonicalReceipt(value) != bytes) {
     throw const JobLineRefusal('unsupported or noncanonical sealed receipt');
   }
@@ -38,6 +39,28 @@ Map<String, Object?> decodeJobLineReceipt(
 
 String _canonicalReceipt(Object? value) =>
     _canonical(value, maximumBytes: kJobLineReceiptMaximumBytes);
+
+Uint8List _receiptOperationBytes(Object? encoded) {
+  const maximumEncodedLength = ((_maximumBytes + 2) ~/ 3) * 4;
+  if (encoded is! String ||
+      encoded.isEmpty ||
+      encoded.length > maximumEncodedLength) {
+    throw const JobLineRefusal('invalid receipt operation bytes');
+  }
+  try {
+    final bytes = base64Decode(encoded);
+    if (bytes.length > _maximumBytes) {
+      throw const JobLineRefusal('receipt operation exceeds byte limit');
+    }
+    if (base64Encode(bytes) != encoded) {
+      throw const JobLineRefusal('noncanonical receipt operation encoding');
+    }
+    _Operation.parse(bytes);
+    return bytes;
+  } on FormatException {
+    throw const JobLineRefusal('invalid receipt operation bytes');
+  }
+}
 
 class JobLineRefusal implements Exception {
   const JobLineRefusal(this.reason);
@@ -211,7 +234,7 @@ final class JobLineCommandReceipt {
       _string(value, 'key'),
       _string(value, 'operation'),
       _string(value, 'status'),
-      base64Decode(_string(value, 'bytes')),
+      _receiptOperationBytes(value['bytes']),
       bytes,
     );
   }

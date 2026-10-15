@@ -465,6 +465,7 @@ class JobLineCommands {
           operation,
           row,
           _LineState({..._LineState.fromRow(row).units, ...operation.units}),
+          requireActiveIdentity: operation.units.containsKey('identity'),
         );
         final operations = await _operations(operation.company, operation.line);
         final storedCount =
@@ -544,6 +545,7 @@ class JobLineCommands {
             operation,
             row,
             reduction.state,
+            requireActiveIdentity: false,
           );
         }
         final status = missing
@@ -748,8 +750,9 @@ class JobLineCommands {
     _CompanyFacts facts,
     _Operation operation,
     JobLine row,
-    _LineState state,
-  ) async {
+    _LineState state, {
+    required bool requireActiveIdentity,
+  }) async {
     final job = await (_db.select(
       _db.jobs,
     )..where((t) => t.id.equals(row.jobId))).getSingleOrNull();
@@ -769,7 +772,8 @@ class JobLineCommands {
       final part = await (_db.select(
         _db.parts,
       )..where((t) => t.id.equals(partId))).getSingleOrNull();
-      if (part == null || part.deletedAt != null || !part.active) {
+      if (part == null ||
+          (requireActiveIdentity && (part.deletedAt != null || !part.active))) {
         throw const JobLineRefusal('catalog part is not active');
       }
       if (identity['version'] case final String versionId) {
@@ -778,8 +782,8 @@ class JobLineCommands {
           _db.brandVersions,
         )..where((t) => t.id.equals(versionId))).getSingleOrNull();
         if (version == null ||
-            version.deletedAt != null ||
-            version.partId != partId) {
+            version.partId != partId ||
+            (requireActiveIdentity && version.deletedAt != null)) {
           throw const JobLineRefusal(
             'catalog version parent differs or is inactive',
           );

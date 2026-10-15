@@ -90,6 +90,106 @@ void main() {
     await fixture.publishFacts();
   }
 
+  for (final character in ['x', '界']) {
+    test(
+      'full length $character notes preserve large local incoming and replay receipts',
+      () async {
+        final notes = character * 4096;
+        final command = fixture.command(JobLinePatch(notes: SetField(notes)));
+        final local = await fixture.commit(0, command);
+        expect(local.status, 'applied');
+        final envelope = jsonDecode(local.bytes) as Map;
+        expect((envelope['bytes'] as String).length, greaterThan(4096));
+        expect(local.operationBytes.length, lessThanOrEqualTo(65536));
+        expect(
+          utf8.encode(local.bytes).length,
+          lessThanOrEqualTo(kJobLineReceiptMaximumBytes),
+        );
+        final incoming = await fixture
+            .commands(1)
+            .applyIncoming(local.operationBytes);
+        expect(incoming.status, 'applied');
+        expect(incoming.operationBytes, local.operationBytes);
+        for (var i = 0; i < 2; i++) {
+          expect((await fixture.row(i)).notes, notes);
+          final before = snapshot(fixture.files[i]);
+          await fixture.reopen(i);
+          final replay = i == 0
+              ? await fixture.commit(0, command)
+              : await fixture.commands(1).applyIncoming(local.operationBytes);
+          expect(replay.bytes, i == 0 ? local.bytes : incoming.bytes);
+          expect(replay.operationBytes, local.operationBytes);
+          expect(snapshot(fixture.files[i]), before);
+        }
+      },
+    );
+  }
+
+  test('large deferred receipt and semantic retry preserve original operation bytes', () async {
+    final parent = await fixture.commit(
+      0,
+      fixture.command(const JobLinePatch(notes: SetField('Parent'))),
+    );
+    final child = await fixture.commit(
+      0,
+      fixture.command(
+        JobLinePatch(notes: SetField('x' * 4096)),
+        parents: [operationKey(parent)],
+      ),
+    );
+    final deferred = await fixture
+        .commands(1)
+        .applyIncoming(child.operationBytes);
+    expect(deferred.status, 'deferred');
+    expect(deferred.operationBytes, child.operationBytes);
+    final body =
+        (jsonDecode(utf8.decode(child.operationBytes)) as Map)['body'] as Map;
+    Future<JobLineCommandReceipt> retry() => fixture
+        .commands(1)
+        .retryDeferred(
+          companyId: company,
+          originGeneration: body['generation'] as String,
+          requestId: body['request'] as String,
+        );
+    expect((await retry()).bytes, deferred.bytes);
+    await fixture.commands(1).applyIncoming(parent.operationBytes);
+    final applied = await retry();
+    expect(applied.status, 'applied');
+    expect(applied.operationBytes, child.operationBytes);
+    expect((await retry()).bytes, applied.bytes);
+    expect(
+      (await fixture.commands(1).applyIncoming(child.operationBytes)).bytes,
+      deferred.bytes,
+    );
+  });
+
+  for (final malformed in ['type', 'base64', 'oversized', 'noncanonical']) {
+    test(
+      'receipt embedded operation $malformed refuses before effects',
+      () async {
+        final local = await fixture.commit(
+          0,
+          fixture.command(const JobLinePatch(notes: SetField('Original'))),
+        );
+        final value = jsonDecode(local.bytes) as Map<String, dynamic>;
+        value['bytes'] = switch (malformed) {
+          'type' => 7,
+          'base64' => '???',
+          'oversized' => base64Encode(List.filled(65537, 0)),
+          _ => base64Encode(
+            utf8.encode(' ${utf8.decode(local.operationBytes)}'),
+          ),
+        };
+        final before = snapshot(fixture.files[0]);
+        expect(
+          () => decodeJobLineReceipt(canonical(value)),
+          throwsA(isA<JobLineRefusal>()),
+        );
+        expect(snapshot(fixture.files[0]), before);
+      },
+    );
+  }
+
   test('v2 receipts carry installation admission seals', () async {
     final receipt = await fixture.commit(
       0,
