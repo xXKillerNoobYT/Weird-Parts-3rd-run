@@ -33,7 +33,10 @@ final class TestSourceBinding {
        deviceId = nativeTestId(deviceId),
        peerId = nativeTestId(peerId),
        isolateId = _isolateId(isolateId) {
-    if (deviceId == peerId || !run.startsWith('nearby-')) rejectNativeTest();
+    if (deviceId == peerId ||
+        !(run.startsWith('nearby-') || run == 'company-j60-0f381-native-v1')) {
+      rejectNativeTest();
+    }
   }
   factory TestSourceBinding.fromJson(Object? value) {
     final m = nativeTestMap(value, {
