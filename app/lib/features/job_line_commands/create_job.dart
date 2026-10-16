@@ -1,6 +1,7 @@
 part of 'job_line_commands.dart';
 
 const kCompanyJobNameLimit = 100;
+const kCompanyJobNameByteLimit = 4096;
 const kCompanyJobListLimit = 512;
 
 final class CompanyJobCapacityRefusal extends JobLineRefusal {
@@ -19,7 +20,14 @@ final class CreateJob {
     for (final id in [companyId, shopId, jobId, requestId]) {
       _id(id);
     }
-    if (this.name.isEmpty || this.name.length > kCompanyJobNameLimit) {
+    if (this.name.length > kCompanyJobNameByteLimit ||
+        utf8.encode(this.name).length > kCompanyJobNameByteLimit) {
+      throw const JobLineRefusal(
+        'Job name is too large. Shorten the name and retry.',
+      );
+    }
+    if (this.name.isEmpty ||
+        this.name.characters.length > kCompanyJobNameLimit) {
       throw const JobLineRefusal('Job name must contain 1 to 100 characters');
     }
   }
@@ -410,7 +418,14 @@ Future<void> validateCreateJobCommit(
   final job = await (db.select(
     db.jobs,
   )..where((t) => t.id.equals(row.jobId))).getSingle();
-  final audit = _object(jsonDecode(row.auditBytes));
+  final expectedAudit = _canonical({
+    'operation': op.commitment,
+    'originalUser': op.body['user'],
+    'originalDevice': op.body['device'],
+    'status': 'applied',
+    'receipt': row.receiptKey,
+    'outgoing': true,
+  });
   final expectedKey = _digest({
     'company': row.companyId,
     'origin': row.originGeneration,
@@ -444,12 +459,7 @@ Future<void> validateCreateJobCommit(
       receipt['command'] != row.commandCommitment ||
       receipt['store'] != intent.storeGeneration ||
       receipt['bytes'] != base64Encode(utf8.encode(op.bytes)) ||
-      audit['operation'] != op.commitment ||
-      audit['originalUser'] != op.body['user'] ||
-      audit['originalDevice'] != op.body['device'] ||
-      audit['receipt'] != row.receiptKey ||
-      audit['status'] != 'applied' ||
-      audit['outgoing'] != true) {
+      row.auditBytes != expectedAudit) {
     throw const JobLineRefusal('create commit evidence differs');
   }
   final proof = _object(op.authorization['body']);

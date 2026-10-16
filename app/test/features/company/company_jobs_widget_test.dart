@@ -125,6 +125,53 @@ void main() {
       before,
     );
     expect(find.textContaining('delivery pending'), findsOneWidget);
+    for (final unicodeName in ['😀' * 51, '👨‍👩‍👧‍👦' * 100]) {
+      await tester.enterText(
+        find.byKey(const Key('company-job-name')),
+        unicodeName,
+      );
+      await tester.pump();
+      expect(
+        find.text(unicodeName == '😀' * 51 ? '51/100' : '100/100'),
+        findsOneWidget,
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('company-create-job')));
+        await Future<void>.delayed(const Duration(seconds: 2));
+      });
+      await waitForWidget(
+        tester,
+        find.descendant(
+          of: find.byKey(const Key('company-jobs-list')),
+          matching: find.text(unicodeName),
+        ),
+      );
+    }
+    final unicodeRows = await tester.runAsync(
+      () => db.select(db.companyJobs).get(),
+    );
+    expect(unicodeRows, hasLength(3));
+    await tester.enterText(
+      find.byKey(const Key('company-job-name')),
+      'a${'\u0301' * 4096}',
+    );
+    await tester.tap(find.byKey(const Key('company-create-job')));
+    await tester.pump();
+    expect(
+      find.text('Job name is too large. Shorten the name and retry.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry same Job'), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('company-job-name')))
+          .enabled,
+      isTrue,
+    );
+    expect(
+      await tester.runAsync(() => db.select(db.companyJobs).get()),
+      unicodeRows,
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(

@@ -203,6 +203,111 @@ void main() {
     expect(await db.select(db.jobs).get(), hasLength(1));
   });
 
+  for (final boundary in ['lost reply', 'completion clear CAS failure']) {
+    test(
+      'same-process $boundary retry clears intent and permits another Job',
+      () async {
+        final action = command();
+        final interrupted = CompanyJobCommands(
+          enrollment: enrollment,
+          afterCommit: () async {
+            if (boundary == 'lost reply') throw StateError('reply lost');
+            store.failNextCommandClear = true;
+          },
+        );
+        await expectLater(
+          interrupted.createJob(action, ownerSession: owner),
+          throwsA(isA<StateError>()),
+        );
+        final saved = (await db.select(db.companyJobs).get()).single;
+        Map<String, dynamic> protected() =>
+            jsonDecode(utf8.decode(store.states[installation.namespace]!.bytes))
+                as Map<String, dynamic>;
+        expect(protected()['pendingCommand'], isNotNull);
+        final commands = CompanyJobCommands(enrollment: enrollment);
+        expect(
+          (await commands.createJob(action, ownerSession: owner)).bytes,
+          saved.receiptBytes,
+        );
+        expect(protected()['pendingCommand'], isNull);
+        final next = command(name: 'Next Job without restart');
+        await commands.createJob(next, ownerSession: owner);
+        expect(await db.select(db.jobs).get(), hasLength(2));
+        expect(await db.select(db.companyJobs).get(), hasLength(2));
+        expect(protected()['pendingCommand'], isNull);
+      },
+    );
+  }
+
+  test(
+    'Unicode names use 100 graphemes with a bounded UTF8 resource cap',
+    () async {
+      const emoji = '😀';
+      const family = '👨‍👩‍👧‍👦';
+      final commands = CompanyJobCommands(enrollment: enrollment);
+      for (final name in [
+        emoji * 51,
+        emoji * 100,
+        family * 100,
+        'ab${'\u0301' * 2047}',
+        'Cafe\u0301 é',
+      ]) {
+        final action = command(name: name);
+        await commands.createJob(action, ownerSession: owner);
+        final row = await (db.select(
+          db.companyJobs,
+        )..where((t) => t.jobId.equals(action.jobId))).getSingle();
+        expect(jsonDecode(row.operationBytes)['body']['name'], name);
+        expect(
+          utf8.encode(row.operationBytes).length,
+          lessThanOrEqualTo(65536),
+        );
+      }
+      final before = await db.select(db.companyJobs).get();
+      for (final name in [
+        emoji * 101,
+        'a${'\u0301' * 4096}',
+        'a${'\u0301' * 2048}',
+      ]) {
+        expect(() => command(name: name), throwsA(isA<JobLineRefusal>()));
+      }
+      expect(await db.select(db.companyJobs).get(), before);
+      expect(await db.select(db.jobs).get(), hasLength(5));
+    },
+  );
+
+  test(
+    'finalized audit with extra evidence refuses list and exact retry',
+    () async {
+      final action = command();
+      final commands = CompanyJobCommands(enrollment: enrollment);
+      await commands.createJob(action, ownerSession: owner);
+      final state = store.states[installation.namespace]!;
+      expect(jsonDecode(utf8.decode(state.bytes))['pendingCommand'], isNull);
+      final original = (await db.select(db.companyJobs).get()).single;
+      final audit = jsonDecode(original.auditBytes) as Map<String, dynamic>;
+      audit['extra'] = 'unauthenticated evidence';
+      final tampered = canonicalTest(audit);
+      await db.customStatement(
+        'UPDATE company_jobs SET audit_bytes = ? WHERE job_id = ?',
+        [tampered, action.jobId],
+      );
+      final rows = await db.select(db.companyJobs).get();
+      final jobs = await db.select(db.jobs).get();
+      await expectLater(
+        commands.listJobs(ownerSession: owner),
+        throwsA(isA<JobLineRefusal>()),
+      );
+      await expectLater(
+        commands.createJob(action, ownerSession: owner),
+        throwsA(isA<JobLineRefusal>()),
+      );
+      expect(await db.select(db.companyJobs).get(), rows);
+      expect(await db.select(db.jobs).get(), jobs);
+      expect(store.states[installation.namespace]!.bytes, state.bytes);
+    },
+  );
+
   test('signed out owner and wrong scope cannot write or read', () async {
     final commands = CompanyJobCommands(enrollment: enrollment);
     for (final outside in [
