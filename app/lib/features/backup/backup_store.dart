@@ -43,7 +43,8 @@ void requireLegacyBusinessFile(File file) {
     final schema = db.select('PRAGMA user_version').single.values.first as int;
     if (schema > kAppSchemaVersion ||
         (schema >= 3 && !priorCompanyMarkerTables.every(names.contains)) ||
-        (schema >= 5 && !names.contains('company_bootstrap_witnesses'))) {
+        (schema >= 5 && !names.contains('company_bootstrap_witnesses')) ||
+        (schema >= 6 && !names.contains('company_jobs'))) {
       throw const BackupFormatException(
         'Unsupported or incomplete company database',
       );

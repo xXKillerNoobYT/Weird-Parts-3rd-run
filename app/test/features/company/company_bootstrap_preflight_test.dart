@@ -21,7 +21,7 @@ void main() {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 5);
+    expect(version.read<int>('user_version'), 6);
     await db.customStatement(
       "INSERT INTO company_bootstrap_witnesses "
       "(company_id, bootstrap_id, facts_commitment, package_id, package_digest, status) "
@@ -60,4 +60,27 @@ void main() {
       throwsA(isA<CompanyBootstrapRefusal>()),
     );
   });
+  test(
+    'orphan company Job journal blocks fresh adoption and legacy mutation',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await db.customStatement(
+        "INSERT INTO company_jobs (job_id, company_id, shop_id, origin_generation, request_id, operation_commitment, command_commitment, operation_bytes, projection_bytes, receipt_key, receipt_bytes, audit_bytes, outgoing) VALUES ('orphan', 'company', 'shop', 'origin', 'request', 'op', 'command', '{}', '{}', 'receipt', '{}', '{}', 1)",
+      );
+      await expectLater(
+        CompanyBootstrap.preflightFreshShop(db),
+        throwsA(isA<CompanyBootstrapRefusal>()),
+      );
+      await expectLater(
+        db.jobsDao.insertJob(
+          id: 'legacy',
+          name: 'must refuse',
+          deviceId: 'device',
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(await db.select(db.jobs).get(), isEmpty);
+    },
+  );
 }

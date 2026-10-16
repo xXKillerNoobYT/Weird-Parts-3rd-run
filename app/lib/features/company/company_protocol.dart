@@ -433,6 +433,95 @@ final class CompanyEnrollment {
     ).verify(command, proof);
   }
 
+  Future<VerifiedCreateJobSession> issueCreateJobAssertion(
+    CreateJob command,
+  ) async {
+    final session = currentSession;
+    final custody = await _readCustody();
+    if (session == null || custody == null || custody.status != 'active') {
+      throw const CompanyBootstrapRefusal('Administrator sign-in required');
+    }
+    await _checkBinding(custody, requireActive: true);
+    if (command.companyId != custody.company ||
+        command.shopId != custody.shop) {
+      throw const CompanyBootstrapRefusal('Command is outside this company');
+    }
+    final trust = await installation.readCompanyTrust(db);
+    if (trust == null || trust.companyId.value != custody.company) {
+      throw const CompanyBootstrapRefusal('Company trust is unavailable');
+    }
+    session.validateAuthority(trust, installation.knownSecurityFloors);
+    final facts =
+        await (db.select(db.companyAuthorityFacts)..where(
+              (t) =>
+                  t.companyId.equals(custody.company) &
+                  t.commitment.equals(trust.factsCommitment),
+            ))
+            .getSingle();
+    final signed = jsonDecode(facts.signedBytes) as Map<String, dynamic>;
+    final body = signed['body'] as Map<String, dynamic>;
+    if (body['v'] != 2) {
+      throw const CompanyBootstrapRefusal('Production facts version refused');
+    }
+    final device = (body['devices'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((d) => d['id'] == custody.device);
+    final user = (body['users'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((u) => u['id'] == custody.user);
+    final identity = installation.identity!;
+    session.validateCommand(
+      company: custody.company,
+      shop: custody.shop,
+      user: custody.user,
+      device: custody.device,
+      installation: identity.id.value,
+      generation: identity.generation.value,
+      session: session.sessionId,
+    );
+    final assertion = <String, Object?>{
+      'v': 2,
+      'company': custody.company,
+      'shop': custody.shop,
+      'job': command.jobId,
+      'request': command.requestId,
+      'command': command.commitment,
+      'user': custody.user,
+      'device': custody.device,
+      'installation': identity.id.value,
+      'generation': identity.generation.value,
+      'grant': custody.grant,
+      'credential': user['credential'],
+      'permission': user['permission'],
+      'authority': trust.authorityVersion,
+      'facts': trust.factsCommitment,
+      'session': session.sessionId,
+    };
+    if (device['grant'] != custody.grant ||
+        device['installation'] != identity.id.value ||
+        device['generation'] != identity.generation.value) {
+      throw const CompanyBootstrapRefusal('Installation grant differs');
+    }
+    final canonical = _securityCanonical(assertion);
+    final pair = await Ed25519().newKeyPairFromSeed(installation._record!.seed);
+    final signature = await Ed25519().sign(
+      utf8.encode('wiredpart.job.create.authorization@1:$canonical'),
+      keyPair: pair,
+    );
+    final proof = Uint8List.fromList(
+      utf8.encode(
+        _securityCanonical({
+          'body': assertion,
+          'signature': base64Encode(signature.bytes),
+        }),
+      ),
+    );
+    return CreateJobAuthorization(
+      db: db,
+      installation: installation,
+    ).verify(command, proof);
+  }
+
   String get _namespace => companyCustodyNamespace(installation.namespace);
 
   Future<_CompanyCustody?> _readCustody() async {
@@ -934,7 +1023,9 @@ final class CompanyEnrollment {
           'version': 1,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': List<String>.from(
+            (source.body['devices'] as List).single['capabilities'] as List,
+          ),
         },
       ],
       'users': [
@@ -944,7 +1035,7 @@ final class CompanyEnrollment {
           'permission': userPermission,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': List<String>.from(oldUser['capabilities'] as List),
         },
       ],
       'entities': <Object>[],
@@ -1069,7 +1160,12 @@ final class CompanyEnrollment {
           'version': 1,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': [
+            'patchJobLine',
+            'deleteJobLine',
+            'enrollDevice',
+            'createJob',
+          ],
         },
       ],
       'users': [
@@ -1079,7 +1175,12 @@ final class CompanyEnrollment {
           'permission': 1,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': [
+            'patchJobLine',
+            'deleteJobLine',
+            'enrollDevice',
+            'createJob',
+          ],
         },
       ],
       'entities': <Object>[],
@@ -1628,9 +1729,11 @@ void _requireRecoverableFirstOwner(Map<String, dynamic> body) {
   const capabilities = {'patchJobLine', 'deleteJobLine', 'enrollDevice'};
   bool grants(Object? value) =>
       value is List &&
-      value.length == capabilities.length &&
-      value.toSet().length == capabilities.length &&
-      value.toSet().containsAll(capabilities);
+      value.toSet().length == value.length &&
+      ((value.length == capabilities.length &&
+              value.toSet().containsAll(capabilities)) ||
+          (value.length == capabilities.length + 1 &&
+              value.toSet().containsAll({...capabilities, 'createJob'})));
   bool entities(Object? value) {
     if (value is! List || value.length > 128) return false;
     final seen = <String>{};
@@ -1710,7 +1813,9 @@ void _requireRecoverableFirstOwner(Map<String, dynamic> body) {
       (device['version'] as int) < 1 ||
       device['revoked'] is! bool ||
       !scope(device['shops'], body['shop']) ||
-      !grants(device['capabilities'])) {
+      !grants(device['capabilities']) ||
+      _securityCanonical((device['capabilities'] as List).toList()..sort()) !=
+          _securityCanonical((user['capabilities'] as List).toList()..sort())) {
     throw const CompanyBootstrapRefusal('Unsupported recovery actor semantics');
   }
 }
@@ -1895,7 +2000,22 @@ Future<Map<String, dynamic>> _verifyFactLineage({
     if (prior['company'] != body['company'] ||
         prior['shop'] != body['shop'] ||
         (prior['users'] as List).single['id'] != user['id'] ||
-        prior['authority'] != authority - 1) {
+        prior['authority'] != authority - 1 ||
+        _securityCanonical(
+              ((prior['users'] as List).single['capabilities'] as List).toList()
+                ..sort(),
+            ) !=
+            _securityCanonical(
+              (user['capabilities'] as List).toList()..sort(),
+            ) ||
+        _securityCanonical(
+              ((prior['devices'] as List).single['capabilities'] as List)
+                  .toList()
+                ..sort(),
+            ) !=
+            _securityCanonical(
+              (device['capabilities'] as List).toList()..sort(),
+            )) {
       throw const CompanyBootstrapRefusal(
         'Recovery identity continuity failed',
       );

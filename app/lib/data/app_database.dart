@@ -13,13 +13,14 @@ import 'tables/app_settings.dart';
 import 'tables/device_profile.dart';
 import 'sqlite_file.dart';
 import 'tables/jobs.dart';
+import 'tables/company_jobs.dart';
 import 'tables/job_line_history.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 5;
+const kAppSchemaVersion = 6;
 
 @DriftDatabase(
   tables: [
@@ -36,6 +37,7 @@ const kAppSchemaVersion = 5;
     BrandVersions,
     SupplierListings,
     Jobs,
+    CompanyJobs,
     JobLines,
     OrderSplits,
     CompanyBootstrapWitnesses,
@@ -132,6 +134,9 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(jobLineAudits);
           await m.createTable(jobLineOutgoing);
           await m.createTable(jobLineConflicts);
+        }
+        if (from < 6) {
+          await m.createTable(companyJobs);
         }
         if (from < 5) {
           await m.createTable(companyBootstrapWitnesses);

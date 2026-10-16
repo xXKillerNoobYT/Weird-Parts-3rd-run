@@ -192,18 +192,40 @@ void main() {
     });
   }
 
-  test('schema2 proof retains its exact count and cannot relabel schema3', () {
+  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22}.entries) {
+    test(
+      'schema${entry.key} proof retains its exact table count and cannot relabel current schema',
+      () {
+        final proof = envelope['proof'] as Map<String, dynamic>;
+        proof['schemaVersion'] = entry.key;
+        proof['tableCount'] = entry.value;
+        save();
+        final before = bytes();
+        final admitted = read();
+        if (entry.key == 6) {
+          admitted.verify(baseline);
+        } else {
+          expect(
+            () => admitted.verify(baseline),
+            throwsA(isA<NativeTestFailure>()),
+          );
+        }
+        expect(bytes(), before);
+        proof['tableCount'] = entry.value + 1;
+        save();
+        expect(read, throwsA(isA<NativeTestFailure>()));
+      },
+    );
+  }
+
+  test('unknown schema7 proof refuses without writes', () {
     final proof = envelope['proof'] as Map<String, dynamic>;
-    proof['schemaVersion'] = 2;
-    proof['tableCount'] = 13;
+    proof['schemaVersion'] = 7;
+    proof['tableCount'] = 22;
     save();
     final before = bytes();
-    final admitted = read();
-    expect(() => admitted.verify(baseline), throwsA(isA<NativeTestFailure>()));
-    expect(bytes(), before);
-    proof['tableCount'] = 20;
-    save();
     expect(read, throwsA(isA<NativeTestFailure>()));
+    expect(bytes(), before);
   });
 
   for (final key in [

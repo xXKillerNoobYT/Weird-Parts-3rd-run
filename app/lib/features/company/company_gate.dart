@@ -10,6 +10,8 @@ import '../../data/app_database.dart';
 import '../installation/installation_security.dart';
 import '../shell/home_shell.dart';
 import 'company_bootstrap.dart';
+import 'company_jobs_panel.dart';
+import '../job_line_commands/job_line_commands.dart';
 
 /// Replaces the legacy navigator root once this store has company authority.
 /// The company workspace deliberately has no legacy business writer routes.
@@ -588,7 +590,13 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       Text('Device ID: ${identity.deviceId}'),
       const SizedBox(height: 16),
       const Text(
-        'Local continuity is selected. The encrypted authority package cannot restore shop data. Parts and Jobs editing will become available after their company-authorized migration.',
+        'Local continuity is selected. The encrypted authority package cannot restore shop data. Parts and Job line editing remain unavailable until their company-authorized migration.',
+      ),
+      const SizedBox(height: 16),
+      CompanyJobsPanel(
+        key: ValueKey(session.sessionId),
+        commands: CompanyJobCommands(enrollment: _enrollment),
+        owner: session,
       ),
       const SizedBox(height: 16),
       FilledButton(

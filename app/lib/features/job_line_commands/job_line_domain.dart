@@ -55,7 +55,12 @@ Uint8List _receiptOperationBytes(Object? encoded) {
     if (base64Encode(bytes) != encoded) {
       throw const JobLineRefusal('noncanonical receipt operation encoding');
     }
-    _Operation.parse(bytes);
+    final body = _object(_object(jsonDecode(utf8.decode(bytes)))['body']);
+    if (body['contract'] == 'job.create@1') {
+      _CreateOperation.parse(bytes);
+    } else {
+      _Operation.parse(bytes);
+    }
     return bytes;
   } on FormatException {
     throw const JobLineRefusal('invalid receipt operation bytes');
@@ -207,9 +212,23 @@ final class JobLineCommandReceipt {
   static Future<void> verifyAdmissionSeal(
     String bytes,
     InstallationIdentity identity,
-    String storeGeneration,
-  ) async {
+    String storeGeneration, {
+    CompanyCommandFamily? expectedFamily,
+  }) async {
     final value = decodeJobLineReceipt(bytes);
+    final operationBody = _object(
+      _object(
+        jsonDecode(utf8.decode(_receiptOperationBytes(value['bytes']))),
+      )['body'],
+    );
+    final family = operationBody['contract'] == 'job.create@1'
+        ? CompanyCommandFamily.jobCreate
+        : CompanyCommandFamily.jobLinePatch;
+    if (expectedFamily != null && family != expectedFamily) {
+      throw const JobLineRefusal(
+        'receipt command family differs from protected intent',
+      );
+    }
     if (value['receiver'] != identity.id.value ||
         value['store'] != storeGeneration) {
       throw const JobLineRefusal('unsupported or mismatched sealed receipt');
@@ -223,7 +242,17 @@ final class JobLineCommandReceipt {
       payload,
       encodedSeal,
       SimplePublicKey(identity.publicKey, type: KeyPairType.ed25519),
-      domain: 'wiredpart.job.line.receipt@2:',
+      domain:
+          _object(
+                _object(
+                  jsonDecode(
+                    utf8.decode(_receiptOperationBytes(value['bytes'])),
+                  ),
+                )['body'],
+              )['contract'] ==
+              'job.create@1'
+          ? 'wiredpart.job.create.receipt@1:'
+          : 'wiredpart.job.line.receipt@2:',
       maximumBytes: kJobLineReceiptMaximumBytes,
     );
   }
