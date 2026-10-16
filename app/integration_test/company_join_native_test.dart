@@ -36,6 +36,7 @@ const _roleName = String.fromEnvironment('COMPANY_JOIN_NATIVE_ROLE');
 const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
+const joinNativeRun = 'j60-join-v2';
 const _pin = '1234'; // Isolated synthetic namespace only; never emitted.
 const _phrase = 'Synthetic Join owner authority only 123';
 const _nativeStore = NativeInstallationSecureStore();
@@ -56,10 +57,22 @@ void validateJoinNativeDefines({
 }) {
   _require(enabled && {'windows', 'macos'}.contains(platform));
   _require(role == (platform == 'windows' ? 'owner' : 'member'));
-  _require(RegExp(r'^j60-0f381-[a-z0-9][a-z0-9-]{0,23}$').hasMatch(run));
+  _require(run == joinNativeRun);
+  for (final nativeRole in ['owner', 'member']) {
+    joinNativeNamespace(run, nativeRole);
+  }
   _require(RegExp(r'^[a-f0-9]{40}$').hasMatch(revision));
   _require(RegExp(r'^[a-f0-9]{40}$').hasMatch(tree));
   _require(RegExp(r'^[a-f0-9]{64}$').hasMatch(adapter));
+}
+
+/// The exact base and companion namespaces must pass the real store contract.
+String joinNativeNamespace(String run, String role) {
+  _require(run == joinNativeRun && {'owner', 'member'}.contains(role));
+  final namespace = 'synthetic.company.join.$run.$role';
+  validateInstallationNamespace(namespace);
+  companyCustodyNamespace(namespace);
+  return namespace;
 }
 
 void validateJoinNativeDeadline(int elapsed, int deadline) {
@@ -130,7 +143,7 @@ bool validateJoinNativeExistingRoot(
         receipt['passed'] == true &&
         receipt['run'] == run &&
         receipt['role'] == role &&
-        receipt['namespace'] == 'synthetic.company.join.$run.$role' &&
+        receipt['namespace'] == joinNativeNamespace(run, role) &&
         receipt['sourceRevision'] == revision &&
         receipt['sourceTree'] == tree &&
         receipt['adapterSha256'] == adapter &&
@@ -202,7 +215,7 @@ final class _JoinNative with WidgetsBindingObserver {
   TestRole get role => owner ? TestRole.sender : TestRole.receiver;
   String get peerId => 'lan-${workspace.run}-${owner ? 'receiver' : 'sender'}';
   String get phase => restart ? 'restart' : 'exercise';
-  String get namespace => 'synthetic.company.join.$_run.$_roleName';
+  String get namespace => joinNativeNamespace(_run, _roleName);
   bool get pageMounted =>
       find.byType(CompanyJoinPage).evaluate().length == 1 &&
       identical(_pageState, tester.state(find.byType(CompanyJoinPage)));
@@ -1033,7 +1046,7 @@ void main() {
         role: role,
         requireExisting: restart,
       );
-      final namespace = 'synthetic.company.join.$_run.$_roleName';
+      final namespace = joinNativeNamespace(_run, _roleName);
       if (!restart) {
         _require(!workspace.initialized);
         _require(

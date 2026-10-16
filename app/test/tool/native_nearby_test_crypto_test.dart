@@ -198,7 +198,7 @@ pairProtocolFixture({String run = 'nearby-test-a'}) async {
 }
 
 void main() {
-  for (final run in ['company-j60-0f381-native-v1', 'nearby-test-a']) {
+  for (final run in ['company-j60-join-v2', 'nearby-test-a']) {
     test(
       'coordinator configures $run and verifies both real sealed comparison grants',
       () async {
@@ -247,6 +247,10 @@ void main() {
     );
   }
   for (final run in [
+    'company-j60-join-v2-extra',
+    'company-j60-join-v',
+    'company-j60-join-v3',
+    'company-j60-0f381-native-v1',
     'company-j60-0f381-native-v1-extra',
     'company-j60-0f381-native-v',
     'company-j60-0f381-native-v2',
@@ -267,7 +271,7 @@ void main() {
         expectedBindings: [
           TestSourceBinding.fromJson(sourceJson(TestRole.sender)),
           TestSourceBinding.fromJson(
-            sourceJson(TestRole.receiver, run: 'company-j60-0f381-native-v1'),
+            sourceJson(TestRole.receiver, run: 'company-j60-join-v2'),
           ),
         ],
       ),
