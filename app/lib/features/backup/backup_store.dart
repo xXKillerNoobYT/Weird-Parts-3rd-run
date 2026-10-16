@@ -44,10 +44,29 @@ void requireLegacyBusinessFile(File file) {
     if (schema > kAppSchemaVersion ||
         (schema >= 3 && !priorCompanyMarkerTables.every(names.contains)) ||
         (schema >= 5 && !names.contains('company_bootstrap_witnesses')) ||
-        (schema >= 6 && !names.contains('company_jobs'))) {
+        (schema >= 6 && !names.contains('company_jobs')) ||
+        (schema >= 7 &&
+            !const {
+              'company_membership_certificates',
+              'company_join_requests',
+              'company_join_events',
+            }.every(names.contains))) {
       throw const BackupFormatException(
         'Unsupported or incomplete company database',
       );
+    }
+    if (schema == 7) {
+      for (final table in companyJoinTableColumns.keys) {
+        final columns = db.select('PRAGMA table_info("$table")');
+        if (!companyJoinColumnsMatch(
+          table,
+          columns.map((r) => r['name'] as String),
+        )) {
+          throw const BackupFormatException(
+            'Unsupported or incomplete company enrollment schema',
+          );
+        }
+      }
     }
     for (final table in companyMarkerTables.where(names.contains)) {
       if (db.select('SELECT 1 FROM $table LIMIT 1').isNotEmpty) {

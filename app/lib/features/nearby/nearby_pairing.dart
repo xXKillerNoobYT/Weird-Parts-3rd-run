@@ -41,6 +41,7 @@ class NearbyPairContext {
     required this.hostName,
     required this.guestPort,
     required this.hostPort,
+    this.purpose,
   });
 
   factory NearbyPairContext.parse(Map<String, Object?> map) {
@@ -73,6 +74,7 @@ class NearbyPairContext {
       hostName: field('hostName'),
       guestPort: port('guestPort'),
       hostPort: port('hostPort'),
+      purpose: map['purpose'] == null ? null : field('purpose'),
     );
   }
 
@@ -83,6 +85,7 @@ class NearbyPairContext {
   final String hostName;
   final int guestPort;
   final int hostPort;
+  final String? purpose;
 
   List<Object> get fields => [
     kNearbyProtoVersion,
@@ -94,6 +97,7 @@ class NearbyPairContext {
     hostName,
     guestPort,
     hostPort,
+    ?purpose,
   ];
 
   Map<String, Object?> toJson() => {
@@ -106,6 +110,7 @@ class NearbyPairContext {
     'hostName': hostName,
     'guestPort': guestPort,
     'hostPort': hostPort,
+    if (purpose != null) 'purpose': purpose,
   };
 }
 
@@ -228,6 +233,7 @@ class NearbyPendingPair {
       guest: guest,
       sendKey: await derive(guest ? 'payload/guest' : 'payload/host'),
       receiveKey: await derive(guest ? 'payload/host' : 'payload/guest'),
+      purpose: context.purpose,
     );
     return NearbyAwaitingMatch._(
       context.id,
@@ -288,7 +294,7 @@ class NearbyRequestProof {
   final String mac;
 }
 
-class NearbySessionKeys {
+final class NearbySessionKeys {
   NearbySessionKeys._(
     this._sendAuth,
     this._receiveAuth, {
@@ -296,9 +302,11 @@ class NearbySessionKeys {
     required this.guest,
     required List<int> sendKey,
     required List<int> receiveKey,
+    this.purpose,
   }) : sendKey = SecretKey(sendKey),
        receiveKey = SecretKey(receiveKey);
   final String id;
+  final String? purpose;
   final bool guest;
   final SecretKey sendKey;
   final SecretKey receiveKey;

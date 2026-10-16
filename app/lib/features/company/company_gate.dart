@@ -11,6 +11,7 @@ import '../installation/installation_security.dart';
 import '../shell/home_shell.dart';
 import 'company_bootstrap.dart';
 import 'company_jobs_panel.dart';
+import 'company_join_page.dart';
 import '../job_line_commands/job_line_commands.dart';
 
 /// Replaces the legacy navigator root once this store has company authority.
@@ -99,6 +100,19 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     _expiryTimer?.cancel();
     if (mounted) setState(() => _session = null);
     await _enrollment.signOut();
+  }
+
+  Future<void> _joinNearby({bool reconnect = false}) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CompanyJoinPage(
+          enrollment: _enrollment,
+          approver: _session,
+          reconnect: reconnect,
+        ),
+      ),
+    );
+    if (mounted) await _load();
   }
 
   void _scheduleExpiry(OwnerSession session) {
@@ -412,6 +426,18 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         ),
       ]);
     }
+    if (_status == CompanyBootstrapStatus.pendingJoin) {
+      return _frame('Finish company Join', [
+        const Text(
+          'This installation has a consented Join awaiting completion. Pair again and ask the authorized company device to reapprove the same installation. It remains locked until activation finishes.',
+        ),
+        FilledButton(
+          key: const Key('company-join-resume'),
+          onPressed: _busy ? null : _joinNearby,
+          child: const Text('Resume nearby Join'),
+        ),
+      ]);
+    }
     if ((_status == CompanyBootstrapStatus.unjoined ||
             _status == CompanyBootstrapStatus.legacyUnsupported) &&
         _legacy) {
@@ -429,6 +455,12 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
             ? 'Recover company authority'
             : 'Create company',
         [
+          if (_status == CompanyBootstrapStatus.unjoined)
+            OutlinedButton(
+              key: const Key('company-join-open'),
+              onPressed: _busy ? null : _joinNearby,
+              child: const Text('Join an existing company nearby'),
+            ),
           if (_status == CompanyBootstrapStatus.pending)
             const Text(
               'Enter the same company name and PIN, then select the recovery file destination to finish the pending setup.',
@@ -584,6 +616,17 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     return _frame(identity.name, [
       const Text('Company authority is active on this installation.'),
       const SizedBox(height: 16),
+      if (identity.isAuthorityOwner)
+        OutlinedButton(
+          key: const Key('company-enroll-open'),
+          onPressed: _busy ? null : _joinNearby,
+          child: const Text('Approve a nearby company device'),
+        ),
+      OutlinedButton(
+        key: const Key('company-peer-open'),
+        onPressed: _busy ? null : () => _joinNearby(reconnect: true),
+        child: const Text('Verify a retained company peer'),
+      ),
       Text('Company ID: ${identity.companyId}'),
       Text('Shop ID: ${identity.shopId}'),
       Text('Administrator ID: ${identity.userId}'),

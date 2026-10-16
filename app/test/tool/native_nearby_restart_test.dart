@@ -192,7 +192,7 @@ void main() {
     });
   }
 
-  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22}.entries) {
+  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22, 7: 25}.entries) {
     test(
       'schema${entry.key} proof retains its exact table count and cannot relabel current schema',
       () {
@@ -202,7 +202,7 @@ void main() {
         save();
         final before = bytes();
         final admitted = read();
-        if (entry.key == 6) {
+        if (entry.key == kAppSchemaVersion) {
           admitted.verify(baseline);
         } else {
           expect(
@@ -218,10 +218,10 @@ void main() {
     );
   }
 
-  test('unknown schema7 proof refuses without writes', () {
+  test('unknown schema8 proof refuses without writes', () {
     final proof = envelope['proof'] as Map<String, dynamic>;
-    proof['schemaVersion'] = 7;
-    proof['tableCount'] = 22;
+    proof['schemaVersion'] = 8;
+    proof['tableCount'] = 25;
     save();
     final before = bytes();
     expect(read, throwsA(isA<NativeTestFailure>()));
