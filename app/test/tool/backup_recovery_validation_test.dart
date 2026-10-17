@@ -95,6 +95,7 @@ void main() {
         'job_lines',
         'order_splits',
         'company_jobs',
+        'company_job_peer_acks',
         'company_membership_certificates',
         'company_join_requests',
         'company_join_events',
@@ -109,6 +110,7 @@ void main() {
       });
       for (final table in [
         'company_jobs',
+        'company_job_peer_acks',
         'company_membership_certificates',
         'company_join_requests',
         'company_join_events',

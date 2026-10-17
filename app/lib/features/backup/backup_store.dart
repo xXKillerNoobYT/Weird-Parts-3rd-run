@@ -55,13 +55,16 @@ void requireLegacyBusinessFile(File file) {
         'Unsupported or incomplete company database',
       );
     }
-    if (schema == 7) {
-      for (final table in companyJoinTableColumns.keys) {
+    if (schema >= 7) {
+      final expected = {
+        ...companyJoinTableColumns,
+        if (schema >= 8) ...companySyncTableColumns,
+      };
+      for (final table in expected.keys) {
         final columns = db.select('PRAGMA table_info("$table")');
-        if (!companyJoinColumnsMatch(
-          table,
-          columns.map((r) => r['name'] as String),
-        )) {
+        final actual = columns.map((r) => r['name'] as String).toSet();
+        if (actual.length != expected[table]!.length ||
+            !actual.containsAll(expected[table]!)) {
           throw const BackupFormatException(
             'Unsupported or incomplete company enrollment schema',
           );

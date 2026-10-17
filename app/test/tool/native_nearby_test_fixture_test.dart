@@ -115,7 +115,7 @@ void main() {
       await seedValidationShop(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       expect(baseline.schemaVersion, kAppSchemaVersion);
-      expect(baseline.domain.length, 25);
+      expect(baseline.domain.length, 26);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
       expect(baseline.referencesValid, true);
@@ -151,7 +151,7 @@ void main() {
     'missing-table',
     'missing-history-table',
     'missing-company-jobs',
-    'unknown-schema8',
+    'unknown-schema9',
     'missing-column',
   ]) {
     test(
@@ -186,8 +186,8 @@ void main() {
               corrupt.execute('DROP TABLE job_line_operations');
             } else if (mutation == 'missing-company-jobs') {
               corrupt.execute('DROP TABLE company_jobs');
-            } else if (mutation == 'unknown-schema8') {
-              corrupt.execute('PRAGMA user_version = 8');
+            } else if (mutation == 'unknown-schema9') {
+              corrupt.execute('PRAGMA user_version = 9');
             } else if (mutation == 'missing-column') {
               corrupt.execute('ALTER TABLE job_lines DROP COLUMN notes');
             } else {
@@ -244,7 +244,15 @@ void main() {
     },
   );
 
-  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22, 7: 25}.entries) {
+  for (final entry in {
+    2: 13,
+    3: 20,
+    4: 20,
+    5: 21,
+    6: 22,
+    7: 25,
+    8: 26,
+  }.entries) {
     test(
       'frozen schema${entry.key} capture and preflight preserve declared proof and bytes',
       () async {
@@ -260,7 +268,8 @@ void main() {
         await seedValidationShop(db, workspace!);
         for (final table in db.allTables) {
           final name = table.actualTableName;
-          if ((entry.key < 7 &&
+          if ((entry.key < 8 && name == 'company_job_peer_acks') ||
+              (entry.key < 7 &&
                   {
                     'company_membership_certificates',
                     'company_join_requests',
@@ -308,6 +317,7 @@ void main() {
   }
 
   for (final history in [
+    'company_job_peer_acks',
     'company_jobs',
     'company_membership_certificates',
     'company_join_requests',
@@ -376,7 +386,7 @@ void main() {
   for (final mutation in [
     'missing-company-jobs',
     'missing-company-join',
-    'unknown-schema8',
+    'unknown-schema9',
   ]) {
     test('capture rejects $mutation without altering the source', () async {
       workspace = ValidationWorkspace.open(
@@ -392,7 +402,7 @@ void main() {
       } else if (mutation == 'missing-company-join') {
         await db.customStatement('DROP TABLE company_join_requests');
       } else {
-        await db.customStatement('PRAGMA user_version = 8');
+        await db.customStatement('PRAGMA user_version = 9');
       }
       final version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');

@@ -21,19 +21,19 @@ function fixture(t, options = {}) {
   const lane = createJoinControlServer(config);
   t.after(() => lane.stop());
   function request(change = {}, raw, signingKey = windows.privateKey) {
-    const payload = { version: 1, run: 'j60-join-v10', channelId, op: 'echo', nonce: Buffer.alloc(16, ++sequence).toString('base64url'), expiresAtMillis: clock + 10000, args: { challenge: 'hello' }, ...change };
+    const payload = { version: 1, run: config.run ?? 'j60-join-v10', channelId, op: 'echo', nonce: Buffer.alloc(16, ++sequence).toString('base64url'), expiresAtMillis: clock + 10000, args: { challenge: 'hello' }, ...change };
     raw ??= canonical(payload);
     return { method: 'POST', path: '/join-control', peerAddress, body: JSON.stringify({ payload: encode(raw), signature: sign(null, Buffer.from(requestPrefix + raw), signingKey).toString('base64url') }) };
   }
   async function send(req = request(), transport = {}) {
     const flushed = [];
     const reply = await lane.handle(req, { flush: async response => { flushed.push(response); }, ...transport });
-    return { reply, flushed, data: reply.statusCode === 200 ? read(reply, req) : undefined };
+    return { reply, flushed, data: reply.statusCode === 200 ? read(reply, req, config.run) : undefined };
   }
   return { lane, config, request, send, advance: milliseconds => { clock += milliseconds; } };
 }
 
-function read(reply, request) {
+function read(reply, request, run = 'j60-join-v10') {
   assert.equal(reply.statusCode, 200);
   assert.ok(Buffer.byteLength(reply.body) <= 16384);
   const envelope = JSON.parse(reply.body);
@@ -44,7 +44,7 @@ function read(reply, request) {
   assert.equal(raw, canonical(payload));
   assert.deepEqual(Object.keys(payload).sort(), ['channelId', 'nonce', 'ok', 'requestSha256', 'result', 'run', 'version']);
   assert.equal(payload.version, 1);
-  assert.equal(payload.run, 'j60-join-v10');
+  assert.equal(payload.run, run);
   assert.equal(payload.channelId, channelId);
   const requestRaw = Buffer.from(JSON.parse(request.body).payload, 'base64url');
   assert.equal(payload.nonce, JSON.parse(requestRaw).nonce);
@@ -75,6 +75,25 @@ test('signed echo authenticates peer, binds response and keeps lane fresh', asyn
   const mapped = f.request({ args: { challenge: 'mapped' } });
   mapped.peerAddress = '::ffff:192.0.2.10';
   assert.deepEqual((await f.send(mapped)).data.result, { challenge: 'mapped' });
+});
+
+test('only explicit admitted runs enter the configured signed lane', async t => {
+  const legacy = fixture(t);
+  for (const run of ['', null, 'j61-created-v1', 'j61-created-v2', 'j61-created-v3', 'j61-created-v4', 'j61-created-v5', 'j61-created-v6', 'j61-created-v7', 'j61-created-v8', 'j61-created-v9', 'j61-created-v11', 'company-j61-created-v10', 'j60-join-v10 ', ['j61-created-v10']]) {
+    assert.throws(() => createJoinControlServer({ ...legacy.config, run }), /Invalid local configuration/);
+  }
+  for (const run of ['j60-join-v10', 'j61-created-v10']) {
+    const f = fixture(t, { run });
+    assert.deepEqual((await f.send()).data.result, { challenge: 'hello' });
+    let calls = 0;
+    f.lane.arm(async () => { calls++; return { senderGrant: {}, afterReply: async () => {} }; });
+    const otherRun = run === 'j60-join-v10' ? 'j61-created-v10' : 'j60-join-v10';
+    await failure(f, f.request({ run: otherRun, op: 'compare', args: { sealedObservation: {} } }), 'refused');
+    assert.equal(calls, 0);
+    assert.equal(f.lane.state, 'armed');
+    assert.deepEqual((await f.send(f.request({ op: 'compare', args: { sealedObservation: {} } }))).data.result, { senderGrant: {} });
+    assert.equal(calls, 1);
+  }
 });
 
 test('wrong signer and mutated signatures fail authentication', async t => {

@@ -10,7 +10,7 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/company/company_store_markers.dart';
 
 void main() {
-  test('schema6 mid-DDL upgrade failure rolls back earlier schema7 tables and version', () async {
+  test('schema6 mid-DDL upgrade failure rolls back new schema8 and enrollment tables', () async {
     final directory = Directory.systemTemp.createTempSync('join-ddl-rollback-');
     addTearDown(() => directory.deleteSync(recursive: true));
     final file = File('${directory.path}/shop.sqlite');
@@ -23,7 +23,10 @@ void main() {
     await original.settingsDao.setSetting('migration-marker', 'kept');
     await original.close();
     final raw = sqlite.sqlite3.open(file.path);
-    for (final table in companyJoinTableColumns.keys) {
+    for (final table in {
+      ...companyJoinTableColumns,
+      ...companySyncTableColumns,
+    }.keys) {
       raw.execute('DROP TABLE "$table"');
     }
     // Intentional fault: the second DDL must fail after the first CREATE.
@@ -84,11 +87,17 @@ void main() {
       reason: 'failed additive migration preserves exact database bytes',
     );
   });
-  for (final table in companyJoinTableColumns.keys) {
+  for (final table in {
+    ...companyJoinTableColumns,
+    ...companySyncTableColumns,
+  }.keys) {
     test('orphan $table refuses Create Join and legacy Jobs without mutation', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
-      final columns = companyJoinTableColumns[table]!.toList();
+      final columns = {
+        ...companyJoinTableColumns,
+        ...companySyncTableColumns,
+      }[table]!.toList();
       await db.customStatement(
         'INSERT INTO "$table" (${columns.map((n) => '"$n"').join(',')}) VALUES (${columns.map((_) => '?').join(',')})',
         [
@@ -119,7 +128,7 @@ void main() {
     });
     for (final malformed in ['missing', 'wrong columns']) {
       test(
-        'schema7 $malformed $table refuses adoption and legacy writes',
+        'schema8 $malformed $table refuses adoption and legacy writes',
         () async {
           final db = AppDatabase.forTesting(NativeDatabase.memory());
           addTearDown(db.close);
@@ -175,7 +184,7 @@ void main() {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 7);
+    expect(version.read<int>('user_version'), 8);
     await db.customStatement(
       "INSERT INTO company_bootstrap_witnesses "
       "(company_id, bootstrap_id, facts_commitment, package_id, package_digest, status) "

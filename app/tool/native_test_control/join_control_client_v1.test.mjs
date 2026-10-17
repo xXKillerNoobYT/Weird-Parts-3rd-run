@@ -206,6 +206,12 @@ try {
   const identityOnly = generateClientIdentity();
   const serverOnly = generateKeyPairSync('ed25519');
   const serverSpkiOnly = serverOnly.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+  for (const run of [undefined, null, '', 'j61-created-v1', 'j61-created-v2', 'j61-created-v3', 'j61-created-v4', 'j61-created-v5', 'j61-created-v6', 'j61-created-v7', 'j61-created-v8', 'j61-created-v9', 'j61-created-v11', 'company-j61-created-v10', 'j60-join-v10 ', ['j61-created-v10']]) {
+    assert.throws(() => createClient({
+      host: '127.0.0.1', port: 1234, run, channelId: CHANNEL,
+      serverPublicKeySpki: serverSpkiOnly, identity: identityOnly,
+    }), /run must be/);
+  }
   for (const badHost of ['example.com', '8.8.8.8', '0.0.0.0', '127.0.0.2', '169.254.1.1']) {
     assert.throws(() => createClient({
       host: badHost, port: 1234, run: RUN, channelId: CHANNEL,
@@ -425,7 +431,8 @@ try {
   }
 
 
-  currentMockCase = 'actual server loopback interoperability';
+  for (const interopRun of [RUN, 'j61-created-v10']) {
+  currentMockCase = 'actual server loopback interoperability ' + interopRun;
   const interopIdentity = generateClientIdentity();
   const interopPair = generateKeyPairSync('ed25519');
   const interopPin = interopPair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
@@ -434,6 +441,7 @@ try {
   let interopFinished = 0;
   let interopAfterFlush = false;
   const actualServer = createJoinControlServer({
+    ...(interopRun === RUN ? {} : { run: interopRun }),
     channelId: CHANNEL,
     windowsPublicKeyDer: interopIdentity.publicKeySpki,
     privateKey: interopPair.privateKey,
@@ -476,7 +484,7 @@ try {
     const actualClient = createClient({
       host: '127.0.0.1',
       port: actualHttp.address().port,
-      run: RUN,
+      run: interopRun,
       channelId: CHANNEL,
       serverPublicKeySpki: interopPin,
       identity: interopIdentity,
@@ -498,10 +506,24 @@ try {
     assert.equal(interopCalls, 1);
     assert.equal(interopAfterReply, 1);
     assert.equal(interopAfterFlush, true);
+    const otherRunClient = createClient({
+      host: '127.0.0.1',
+      port: actualHttp.address().port,
+      run: interopRun === RUN ? 'j61-created-v10' : RUN,
+      channelId: CHANNEL,
+      serverPublicKeySpki: interopPin,
+      identity: interopIdentity,
+    });
+    await assert.rejects(otherRunClient.request('compare', { sealedObservation: { synthetic: true } }), error =>
+      error instanceof DirectControlError && error.code === 'invalid_response' && error.outcome === 'unknown');
+    assert.equal(otherRunClient.pending.state, 'unknown');
+    await assert.rejects(otherRunClient.request('echo', { challenge: 'cross-run-blocked' }), error =>
+      error instanceof DirectControlError && error.code === 'pending_unknown' && error.outcome === 'unknown');
+    assert.equal(interopCalls, 1);
     const wrongKeyClient = createClient({
       host: '127.0.0.1',
       port: actualHttp.address().port,
-      run: RUN,
+      run: interopRun,
       channelId: CHANNEL,
       serverPublicKeySpki: interopPin,
       identity: generateClientIdentity(),
@@ -512,6 +534,7 @@ try {
   } finally {
     actualServer.stop();
     await new Promise(resolve => actualHttp.close(resolve));
+  }
   }
 
   console.log('PASS canonicalization, private identity lifecycle, strict signed loopback echo/compare, failure and framing rejection, replay binding, timeout unknown retention, and explicit resolution');

@@ -124,7 +124,7 @@ void main() {
       await tester.runAsync(() => db.select(db.companyJobs).get()),
       before,
     );
-    expect(find.textContaining('delivery pending'), findsOneWidget);
+    expect(find.textContaining('Peer delivery status unknown'), findsOneWidget);
     for (final unicodeName in ['😀' * 51, '👨‍👩‍👧‍👦' * 100]) {
       await tester.enterText(
         find.byKey(const Key('company-job-name')),

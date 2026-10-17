@@ -637,6 +637,7 @@ void main() {
       'company_membership_certificates',
       'company_join_requests',
       'company_join_events',
+      'company_job_peer_acks',
     ]) {
       raw.execute('DROP TABLE $table');
     }
@@ -666,6 +667,64 @@ void main() {
     } finally {
       await legacy.close();
     }
+  });
+  test('actual schema7 pending local Create migrates to8 and returns its original sealed receipt', () async {
+    await db.customStatement('DROP TABLE company_job_peer_acks');
+    await db.customStatement('PRAGMA user_version = 7');
+    final action = command(name: 'Created while schema7 is active');
+    await expectLater(
+      CompanyJobCommands(
+        enrollment: enrollment,
+        afterCommit: () async {
+          throw StateError('synthetic lost reply after schema7 SQL commit');
+        },
+      ).createJob(action, ownerSession: owner),
+      throwsA(isA<StateError>()),
+    );
+    final saved = (await db.select(db.companyJobs).get()).single;
+    final pending = store.states[installation.namespace]!;
+    expect(
+      (jsonDecode(utf8.decode(pending.bytes)) as Map)['pendingCommand'],
+      isNotNull,
+    );
+    final settings = await db.select(db.appSettings).get();
+    await db.close();
+    db = AppDatabase.forTesting(
+      NativeDatabase(File('${root.path}/shop.sqlite')),
+    );
+    expect(
+      (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
+        'user_version',
+      ),
+      8,
+    );
+    expect((await db.select(db.companyJobs).get()).single, saved);
+    expect(await db.select(db.appSettings).get(), settings);
+    expect(store.states[installation.namespace]!.revision, pending.revision);
+    expect(
+      base64Encode(store.states[installation.namespace]!.bytes) ==
+          base64Encode(pending.bytes),
+      isTrue,
+    );
+    installation = InstallationSecurity(
+      store: store,
+      namespace: installation.namespace,
+    );
+    await installation.start(db);
+    enrollment = CompanyEnrollment(installation: installation, db: db);
+    owner = await enrollment.signIn('1234');
+    expect(await db.select(db.companyJobPeerAcks).get(), isEmpty);
+    final commands = CompanyJobCommands(enrollment: enrollment);
+    expect(
+      (await commands.createJob(action, ownerSession: owner)).bytes,
+      saved.receiptBytes,
+    );
+    expect((await db.select(db.companyJobs).get()).single, saved);
+    await commands.createJob(
+      command(name: 'New schema8 Job'),
+      ownerSession: owner,
+    );
+    expect(await db.select(db.companyJobs).get(), hasLength(2));
   });
   for (final mutation in ['receipt seal', 'audit extra']) {
     test(
