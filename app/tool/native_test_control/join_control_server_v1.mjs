@@ -2,7 +2,7 @@ import { createHash, createPublicKey, sign, verify } from 'node:crypto';
 import { createServer } from 'node:http';
 import { isIPv4 } from 'node:net';
 
-const RUN = 'j60-join-v9';
+const RUN = 'j60-join-v10';
 const REQUEST_PREFIX = 'wired-parts/j60-test-control/request/v1\n';
 const RESPONSE_PREFIX = 'wired-parts/j60-test-control/response/v1\n';
 const MAX_BODY = 16384;

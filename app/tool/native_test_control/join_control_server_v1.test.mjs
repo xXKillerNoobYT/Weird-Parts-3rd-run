@@ -21,7 +21,7 @@ function fixture(t, options = {}) {
   const lane = createJoinControlServer(config);
   t.after(() => lane.stop());
   function request(change = {}, raw, signingKey = windows.privateKey) {
-    const payload = { version: 1, run: 'j60-join-v9', channelId, op: 'echo', nonce: Buffer.alloc(16, ++sequence).toString('base64url'), expiresAtMillis: clock + 10000, args: { challenge: 'hello' }, ...change };
+    const payload = { version: 1, run: 'j60-join-v10', channelId, op: 'echo', nonce: Buffer.alloc(16, ++sequence).toString('base64url'), expiresAtMillis: clock + 10000, args: { challenge: 'hello' }, ...change };
     raw ??= canonical(payload);
     return { method: 'POST', path: '/join-control', peerAddress, body: JSON.stringify({ payload: encode(raw), signature: sign(null, Buffer.from(requestPrefix + raw), signingKey).toString('base64url') }) };
   }
@@ -44,7 +44,7 @@ function read(reply, request) {
   assert.equal(raw, canonical(payload));
   assert.deepEqual(Object.keys(payload).sort(), ['channelId', 'nonce', 'ok', 'requestSha256', 'result', 'run', 'version']);
   assert.equal(payload.version, 1);
-  assert.equal(payload.run, 'j60-join-v9');
+  assert.equal(payload.run, 'j60-join-v10');
   assert.equal(payload.channelId, channelId);
   const requestRaw = Buffer.from(JSON.parse(request.body).payload, 'base64url');
   assert.equal(payload.nonce, JSON.parse(requestRaw).nonce);

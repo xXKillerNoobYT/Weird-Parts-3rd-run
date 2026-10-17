@@ -12,7 +12,7 @@ import { createJoinControlServer, isResponseConnected } from './join_control_ser
 const PREFIX = Buffer.from('wired-parts/j60-test-control/request/v1\n', 'utf8');
 const RESPONSE_PREFIX = Buffer.from('wired-parts/j60-test-control/response/v1\n', 'utf8');
 const CHANNEL = Buffer.from('0123456789abcdef', 'utf8').toString('base64url');
-const RUN = 'j60-join-v9';
+const RUN = 'j60-join-v10';
 const ALLOWED_ERRORS = ['refused', 'busy', 'expired', 'replay', 'failed', 'timeout', 'closed', 'not-ready'];
 
 function b64(value) {
