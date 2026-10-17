@@ -37,7 +37,7 @@ const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
 const joinNativeRun = 'j60-join-v10';
-const createdJobNativeRun = 'j61-created-v1';
+const createdJobNativeRun = 'j61-created-v2';
 const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _createdProductRevision = String.fromEnvironment(
   'COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION',
@@ -72,6 +72,15 @@ Map<String, Object?> captureJoinNativeStartupLifecycle({
     'bindingBefore': before?.name,
     'bindingAfter': binding.lifecycleState?.name,
   };
+}
+
+Future<State> captureJoinNativePageState({
+  required WidgetTester tester,
+  required Finder page,
+  required Future<void> Function(bool Function()) waitUntilReady,
+}) async {
+  await waitUntilReady(() => page.evaluate().length == 1);
+  return tester.state(page);
 }
 
 /// Pure startup contract, tested without accessing native custody or SQLite.
@@ -706,8 +715,15 @@ final class _JoinNative with WidgetsBindingObserver {
         MaterialApp(key: ValueKey('join-native-page-$pageEpoch'), home: page()),
       );
     }
-    _pageState = tester.state(find.byType(CompanyJoinPage));
+    stage = 'join-page-wait-build';
+    _pageState = await captureJoinNativePageState(
+      tester: tester,
+      page: find.byType(CompanyJoinPage),
+      waitUntilReady: wait,
+    );
+    stage = 'join-page-wait-controller';
     await wait(() => controller != null && view.running);
+    stage = 'join-page-ready';
   }
 
   Future<String> sqlHash() async => _hash({

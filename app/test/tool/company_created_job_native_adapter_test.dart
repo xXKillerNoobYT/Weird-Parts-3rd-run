@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -30,10 +32,54 @@ void _validate({
 );
 
 void main() {
+  testWidgets(
+    'pushed page State capture waits for route build and preserves pop completion',
+    (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: Scaffold()));
+      final navigator = Navigator.of(tester.element(find.byType(Scaffold)));
+      const pageKey = Key('native-pushed-page');
+      final page = find.byKey(pageKey);
+      var routeReturned = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(
+          navigator
+              .push<void>(
+                MaterialPageRoute(
+                  builder: (_) => const Form(key: pageKey, child: SizedBox()),
+                ),
+              )
+              .then((_) => routeReturned = true),
+        );
+      });
+      await tester.pump();
+      expect(page, findsNothing);
+      var readinessPumps = 0;
+      final captured = await adapter.captureJoinNativePageState(
+        tester: tester,
+        page: page,
+        waitUntilReady: (ready) async {
+          while (!ready() && readinessPumps < 10) {
+            readinessPumps++;
+            await tester.pump(const Duration(milliseconds: 50));
+          }
+          expect(ready(), isTrue);
+        },
+      );
+      expect(readinessPumps, greaterThan(0));
+      expect(captured, same(tester.state<FormState>(page)));
+      expect(captured.mounted, isTrue);
+      expect(routeReturned, isFalse);
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(routeReturned, isTrue);
+      expect(captured.mounted, isFalse);
+    },
+  );
   test('created mode requires a fresh run and the exact full source pin', () {
     expect(() => _validate(), returnsNormally);
     expect(() => _validate(role: 'member', platform: 'macos'), returnsNormally);
     expect(() => _validate(run: adapter.joinNativeRun), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v1'), throwsA(anything));
     expect(() => _validate(productRevision: _tree), throwsA(anything));
     expect(
       () => _validate(revision: 'short', productRevision: 'short'),
@@ -73,7 +119,7 @@ void main() {
         'owner',
         createdMode: true,
       ),
-      'synthetic.company.created.j61-created-v1.owner',
+      'synthetic.company.created.j61-created-v2.owner',
     );
     expect(
       () => adapter.joinNativeNamespace(
