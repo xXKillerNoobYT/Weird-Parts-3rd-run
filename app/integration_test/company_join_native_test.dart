@@ -273,6 +273,39 @@ enum CreatedJobNativeUiState {
   unknown,
 }
 
+final class CreatedJobNativeTerminalFailure implements Exception {
+  const CreatedJobNativeTerminalFailure();
+  NativeTestCommandError get error => NativeTestCommandError.stateChanged;
+}
+
+Future<NativeTestCommandResult> waitForCreatedJobNativeSyncTerminal({
+  required Future<void> Function(bool Function()) waitUntilReady,
+  required CreatedJobNativeUiState Function() readState,
+  required bool Function() isStillCurrent,
+}) async {
+  bool terminal(CreatedJobNativeUiState state) =>
+      state == CreatedJobNativeUiState.complete ||
+      state == CreatedJobNativeUiState.incomplete ||
+      state == CreatedJobNativeUiState.error;
+  await waitUntilReady(() => !isStillCurrent() || terminal(readState()));
+  _require(isStillCurrent());
+  final state = readState();
+  _require(terminal(state));
+  if (state != CreatedJobNativeUiState.complete) {
+    throw const CreatedJobNativeTerminalFailure();
+  }
+  return const NativeTestCommandResult.effect();
+}
+
+Future<NativeTestCommandResult> waitForCreatedJobNativeCloseDrain({
+  required Future<void> Function(bool Function()) waitUntilReady,
+  required bool Function() isDrained,
+}) async {
+  await waitUntilReady(isDrained);
+  _require(isDrained());
+  return const NativeTestCommandResult.effect();
+}
+
 CreatedJobNativeUiState createdJobNativeUiState({
   required String status,
   required bool errorVisible,
@@ -975,8 +1008,9 @@ final class _JoinNative with WidgetsBindingObserver {
       createdStage = _CreatedJobStage.cancelling;
       savedPair = null;
       await tap(close);
-      return const NativeTestCommandResult.effect(
-        effect: NativeTestEffect.possible,
+      return waitForCreatedJobNativeCloseDrain(
+        waitUntilReady: wait,
+        isDrained: () => cancellationDrained,
       );
     }
     requireSnapshotSafe();
@@ -1229,9 +1263,15 @@ final class _JoinNative with WidgetsBindingObserver {
           _require(owner && buttonEnabled('company-jobs-sync-now'));
           requireBeforeEffect();
           syncStarts++;
+          final syncPage = _pageState;
           await tap(find.byKey(const Key('company-jobs-sync-now')));
-          return const NativeTestCommandResult.effect(
-            effect: NativeTestEffect.possible,
+          return waitForCreatedJobNativeSyncTerminal(
+            waitUntilReady: wait,
+            readState: () => syncUiState,
+            isStillCurrent: () =>
+                effectCurrent() &&
+                pageMounted &&
+                identical(_pageState, syncPage),
           );
         }
         _require(!restart && !finished && view.phase == NearbyPhase.paired);
@@ -1602,6 +1642,12 @@ final class _JoinNative with WidgetsBindingObserver {
         stage = 'command-${command.action.name}';
         try {
           result = await perform(command);
+        } on CreatedJobNativeTerminalFailure catch (failure) {
+          cache!.fail(
+            command,
+            failure.error,
+            effect: NativeTestEffect.completed,
+          );
         } catch (_) {
           cache!.fail(
             command,

@@ -7,16 +7,75 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:wired_parts/features/company/company_gate.dart';
 import 'package:wired_parts/features/company/company_jobs_panel.dart';
+import 'package:wired_parts/features/company/company_join_page.dart';
+import 'package:wired_parts/features/nearby/nearby_discovery.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
+import 'package:wired_parts/features/nearby/nearby_controller.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
-import '../features/company/company_join_test.dart' show JoinFixture;
+import '../../tool/native_nearby_test_commands.dart';
+import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
+import '../features/company/company_join_test.dart'
+    show JoinFixture, JoinTestDiscovery;
 import '../features/company/company_join_widget_test.dart'
     show joinWidgetSignal;
 
 final _revision = List.filled(40, 'a').join();
 final _tree = List.filled(40, 'b').join();
 final _adapterHash = List.filled(64, 'c').join();
+
+final class _HeldStopDiscovery implements NearbyDiscovery {
+  final delegate = JoinTestDiscovery();
+  final entered = Completer<void>();
+  final release = Completer<void>();
+  bool hold = false;
+  @override
+  Stream<List<NearbyPeer>> get peers => delegate.peers;
+  @override
+  Future<void> start({
+    required String deviceId,
+    required String name,
+    required int port,
+    required List<String> ips,
+  }) => delegate.start(deviceId: deviceId, name: name, port: port, ips: ips);
+  @override
+  Future<void> updateAdvertisement({
+    required String name,
+    required int port,
+    required List<String> ips,
+  }) => delegate.updateAdvertisement(name: name, port: port, ips: ips);
+  @override
+  Future<void> stop() async {
+    if (hold) {
+      if (!entered.isCompleted) entered.complete();
+      await release.future;
+    }
+    await delegate.stop();
+  }
+}
+
+Future<NativeTestCommandReply> _settleNativeCommand(
+  command_test.Fixture cache,
+  NativeTestCommand command,
+  Future<NativeTestCommandResult> operation,
+) async {
+  try {
+    return cache.cache.complete(command, await operation);
+  } on adapter.CreatedJobNativeTerminalFailure catch (failure) {
+    return cache.cache.fail(
+      command,
+      failure.error,
+      effect: NativeTestEffect.completed,
+    );
+  } catch (_) {
+    return cache.cache.fail(
+      command,
+      NativeTestCommandError.harnessFailed,
+      effect: NativeTestEffect.possible,
+    );
+  }
+}
 
 void _validate({
   bool createdMode = true,
@@ -38,6 +97,267 @@ void _validate({
 );
 
 void main() {
+  for (final terminal in [
+    adapter.CreatedJobNativeUiState.complete,
+    adapter.CreatedJobNativeUiState.incomplete,
+    adapter.CreatedJobNativeUiState.error,
+  ]) {
+    test(
+      'native Sync cache stays running until terminal ${terminal.name}',
+      () async {
+        final cache = command_test.Fixture();
+        final wire = cache.request(1, action: NativeTestAction.accept);
+        cache.cache.submitJson(wire);
+        final command = cache.cache.takeNext()!;
+        var state = adapter.CreatedJobNativeUiState.pending;
+        bool Function()? ready;
+        final waited = Completer<void>();
+        var settled = false;
+        final result =
+            _settleNativeCommand(
+              cache,
+              command,
+              adapter.waitForCreatedJobNativeSyncTerminal(
+                waitUntilReady: (predicate) {
+                  ready = predicate;
+                  return waited.future;
+                },
+                readState: () => state,
+                isStillCurrent: () => true,
+              ),
+            ).then((reply) {
+              settled = true;
+              return reply;
+            });
+        await Future<void>.value();
+        expect(settled, isFalse);
+        expect(ready!(), isFalse);
+        expect(
+          cache.cache.submitJson(wire).state,
+          NativeTestCommandState.running,
+        );
+        expect(cache.cache.takeNext(), isNull);
+        expect(
+          cache.cache.submitJson(cache.request(2)).error,
+          NativeTestCommandError.busy,
+        );
+        state = terminal;
+        expect(ready!(), isTrue);
+        waited.complete();
+        final reply = await result;
+        expect(reply.effect, NativeTestEffect.completed);
+        expect(
+          reply.state,
+          terminal == adapter.CreatedJobNativeUiState.complete
+              ? NativeTestCommandState.completed
+              : NativeTestCommandState.failed,
+        );
+        expect(
+          reply.error,
+          terminal == adapter.CreatedJobNativeUiState.complete
+              ? isNull
+              : NativeTestCommandError.stateChanged,
+        );
+        expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+        expect(cache.cache.takeNext(), isNull);
+      },
+    );
+  }
+  for (final nonterminal in [
+    adapter.CreatedJobNativeUiState.idle,
+    adapter.CreatedJobNativeUiState.pending,
+    adapter.CreatedJobNativeUiState.unknown,
+  ]) {
+    test(
+      'native Sync refuses nonterminal ${nonterminal.name} after bounded wait',
+      () async {
+        final cache = command_test.Fixture();
+        final wire = cache.request(1, action: NativeTestAction.accept);
+        cache.cache.submitJson(wire);
+        final command = cache.cache.takeNext()!;
+        final reply = await _settleNativeCommand(
+          cache,
+          command,
+          adapter.waitForCreatedJobNativeSyncTerminal(
+            waitUntilReady: (ready) async {
+              expect(ready(), isFalse);
+              cache.now = 1000;
+              cache.cache.tick();
+              expect(
+                cache.cache.submitJson(wire).state,
+                NativeTestCommandState.unknown,
+              );
+              throw StateError('bounded wait expired');
+            },
+            readState: () => nonterminal,
+            isStillCurrent: () => true,
+          ),
+        );
+        expect(reply.state, NativeTestCommandState.failed);
+        expect(reply.effect, NativeTestEffect.possible);
+        expect(reply.error, NativeTestCommandError.harnessFailed);
+      },
+    );
+  }
+  for (final expired in [false, true]) {
+    test(
+      'native Sync refuses terminal UI after ${expired ? 'deadline' : 'page or lifecycle cancellation'}',
+      () async {
+        final cache = command_test.Fixture();
+        final wire = cache.request(1, action: NativeTestAction.accept);
+        cache.cache.submitJson(wire);
+        final command = cache.cache.takeNext()!;
+        var current = true;
+        final reply = await _settleNativeCommand(
+          cache,
+          command,
+          adapter.waitForCreatedJobNativeSyncTerminal(
+            waitUntilReady: (ready) async {
+              expect(ready(), isTrue);
+              if (expired) {
+                cache.now = 1000;
+                cache.cache.tick();
+              } else {
+                current = false;
+              }
+            },
+            readState: () => adapter.CreatedJobNativeUiState.complete,
+            isStillCurrent: () => current && cache.now < command.deadlineMillis,
+          ),
+        );
+        expect(reply.state, NativeTestCommandState.failed);
+        expect(reply.effect, NativeTestEffect.possible);
+        expect(reply.error, NativeTestCommandError.harnessFailed);
+      },
+    );
+  }
+  testWidgets(
+    'native Close waits for actual route return after controller stop drains',
+    (tester) async {
+      late JoinFixture fixture;
+      await tester.runAsync(() async => fixture = await JoinFixture.create());
+      final discovery = _HeldStopDiscovery();
+      final controller = NearbyController(
+        deviceId: 'native-close',
+        deviceName: 'native-close',
+        discovery: discovery,
+        companyJoin: true,
+        bindAddress: InternetAddress.loopbackIPv4,
+        localIps: () async => ['127.0.0.1'],
+        collectPayload: () async =>
+            throw StateError('Join must not collect a shop'),
+        applyPayload: (_) async =>
+            throw StateError('Join must not replace a shop'),
+      );
+      final cache = command_test.Fixture();
+      final wire = cache.request(1, action: NativeTestAction.finish);
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      final returned = Completer<void>();
+      bool Function()? ready;
+      final waited = Completer<void>();
+      await tester.pumpWidget(const MaterialApp(home: Scaffold()));
+      final navigator = Navigator.of(tester.element(find.byType(Scaffold)));
+      unawaited(
+        navigator
+            .push<bool>(
+              MaterialPageRoute(
+                builder: (_) => CompanyJoinPage(
+                  enrollment: fixture.aEnrollment,
+                  approver: fixture.owner,
+                  reconnect: true,
+                  createController: (_) => controller,
+                ),
+              ),
+            )
+            .then((_) => returned.complete()),
+      );
+      final page = find.byType(CompanyJoinPage);
+      try {
+        final close = find.byKey(const Key('company-join-close'));
+        await joinWidgetSignal(
+          tester,
+          () =>
+              page.evaluate().length == 1 &&
+              close.evaluate().length == 1 &&
+              tester.widget<TextButton>(close).onPressed != null &&
+              controller.state.running,
+        );
+        final state = tester.state(page);
+        discovery.hold = true;
+        await tester.runAsync(() => tester.tap(close));
+        await joinWidgetSignal(tester, () => discovery.entered.isCompleted);
+        expect(
+          controller.state.running,
+          isFalse,
+          reason: 'Transport stop alone is not route/drain completion.',
+        );
+        expect(state.mounted, isTrue);
+        expect(returned.isCompleted, isFalse);
+        var settled = false;
+        final result =
+            _settleNativeCommand(
+              cache,
+              command,
+              adapter.waitForCreatedJobNativeCloseDrain(
+                waitUntilReady: (predicate) {
+                  ready = predicate;
+                  return waited.future;
+                },
+                isDrained: () =>
+                    returned.isCompleted &&
+                    !state.mounted &&
+                    !controller.state.running,
+              ),
+            ).then((reply) {
+              settled = true;
+              return reply;
+            });
+        await tester.pump();
+        expect(settled, isFalse);
+        expect(
+          cache.cache.submitJson(wire).state,
+          NativeTestCommandState.running,
+        );
+        expect(cache.cache.takeNext(), isNull);
+        expect(
+          cache.cache.submitJson(cache.request(2)).error,
+          NativeTestCommandError.busy,
+        );
+        discovery.release.complete();
+        await joinWidgetSignal(
+          tester,
+          () =>
+              returned.isCompleted &&
+              !state.mounted &&
+              !controller.state.running,
+        );
+        expect(ready!(), isTrue);
+        waited.complete();
+        await tester.pump();
+        final reply = await result;
+        expect(reply.state, NativeTestCommandState.completed);
+        expect(reply.effect, NativeTestEffect.completed);
+        expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+        expect(cache.cache.takeNext(), isNull);
+      } finally {
+        if (!discovery.release.isCompleted) discovery.release.complete();
+        await joinWidgetSignal(
+          tester,
+          () =>
+              returned.isCompleted &&
+              page.evaluate().isEmpty &&
+              !controller.state.running,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(() async {
+          await controller.dispose();
+          await discovery.delegate.controller.close();
+          await fixture.closeAndCheckOwnerData();
+        });
+      }
+    },
+  );
   testWidgets(
     'native signin waits for loaded Jobs before extra authority verification',
     (tester) async {
