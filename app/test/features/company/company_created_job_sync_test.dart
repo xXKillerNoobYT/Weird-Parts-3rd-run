@@ -841,6 +841,20 @@ void main() {
       expect(await sqlSnapshot(f.bDb), beforeB);
       expectJoinProtectedUnchanged(f.aStore, protectedA);
       expectJoinProtectedUnchanged(f.bStore, protectedB);
+
+      expect(aSync.isLive, isTrue);
+      aSync.availability.close();
+      expect(aSync.isLive, isFalse);
+      final unavailable = await aSync.syncNow();
+      expect(unavailable.complete, isFalse);
+      expect(unavailable.sent, 0);
+      expect(unavailable.received, 0);
+      expect(unavailable.message, isNot(contains('More Jobs pending')));
+      expect(unavailable.message, contains('incomplete'));
+      expect(await sqlSnapshot(f.aDb), beforeA);
+      expect(await sqlSnapshot(f.bDb), beforeB);
+      expectJoinProtectedUnchanged(f.aStore, protectedA);
+      expectJoinProtectedUnchanged(f.bStore, protectedB);
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );

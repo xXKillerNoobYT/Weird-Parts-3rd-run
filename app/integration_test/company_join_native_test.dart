@@ -146,6 +146,25 @@ void validateJoinNativeDeadline(int elapsed, int deadline) {
   _require(elapsed >= 0 && elapsed < deadline);
 }
 
+/// Completion observes an already-admitted effect; taps retain their deadline.
+Future<void> waitForJoinNativeCompletion({
+  required bool Function() ready,
+  required int Function() elapsedMillis,
+  required Future<void> Function() pump,
+  required int? commandDeadlineMillis,
+  bool enforceCommandDeadline = false,
+}) async {
+  final deadline = elapsedMillis() + const Duration(minutes: 3).inMilliseconds;
+  while (!ready() &&
+      elapsedMillis() < deadline &&
+      (!enforceCommandDeadline ||
+          commandDeadlineMillis == null ||
+          elapsedMillis() < commandDeadlineMillis)) {
+    await pump();
+  }
+  _require(ready());
+}
+
 bool joinNativeMatchWindow({
   required int elapsed,
   required int captured,
@@ -323,6 +342,10 @@ Future<NativeTestCommandResult> waitForCreatedJobNativeCloseDrain({
   return const NativeTestCommandResult.effect();
 }
 
+bool createdJobNativeUiBusy() =>
+    find.byKey(const Key('company-jobs-sync-now')).evaluate().length == 1 &&
+    find.byKey(const Key('company-join-busy')).evaluate().length == 1;
+
 CreatedJobNativeUiState createdJobNativeUiState({
   required String status,
   required bool errorVisible,
@@ -334,8 +357,10 @@ CreatedJobNativeUiState createdJobNativeUiState({
       .hasMatch(status)) {
     return CreatedJobNativeUiState.complete;
   }
-  if (status.startsWith('Confirmed sent ') &&
-      status.contains('More Jobs pending.')) {
+  if ((status.startsWith('Job sync incomplete. Confirmed sent ') &&
+          status.contains('Pair again and retry Sync Now.')) ||
+      (status.startsWith('Confirmed sent ') &&
+          status.contains('More Jobs pending.'))) {
     return CreatedJobNativeUiState.incomplete;
   }
   if ({
@@ -416,7 +441,7 @@ final class _JoinNative with WidgetsBindingObserver {
       routeReturned &&
       !pageMounted &&
       !view.running &&
-      effectCurrent();
+      lifecycleCurrent();
   bool get incomingSyncPending =>
       !owner &&
       syncUiState == CreatedJobNativeUiState.pending &&
@@ -446,9 +471,7 @@ final class _JoinNative with WidgetsBindingObserver {
         .byKey(const Key('company-join-error'))
         .evaluate()
         .isNotEmpty,
-    busy:
-        find.byKey(const Key('company-jobs-sync-now')).evaluate().length == 1 &&
-        !buttonEnabled('company-jobs-sync-now'),
+    busy: createdJobNativeUiBusy(),
   );
 
   NativeTestPhase get reportedPhase {
@@ -575,24 +598,34 @@ final class _JoinNative with WidgetsBindingObserver {
     }
   }
 
-  Future<void> wait(bool Function() ready) async {
-    final deadline = clock.elapsed + const Duration(minutes: 3);
-    while (!ready() &&
-        clock.elapsed < deadline &&
-        (activeCommand == null ||
-            clock.elapsedMilliseconds < activeCommand!.deadlineMillis)) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pump();
-    }
-    _require(ready());
+  Future<void> pumpReadiness() async {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
   }
 
+  Future<void> wait(bool Function() ready) => waitForJoinNativeCompletion(
+    ready: ready,
+    elapsedMillis: () => clock.elapsedMilliseconds,
+    pump: pumpReadiness,
+    commandDeadlineMillis: activeCommand?.deadlineMillis,
+    enforceCommandDeadline: true,
+  );
+
+  Future<void> waitForPassiveCompletion(bool Function() ready) async {
+    await waitForJoinNativeCompletion(
+      ready: () => !lifecycleCurrent() || ready(),
+      elapsedMillis: () => clock.elapsedMilliseconds,
+      pump: pumpReadiness,
+      commandDeadlineMillis: activeCommand?.deadlineMillis,
+    );
+    _require(lifecycleCurrent());
+  }
+
+  bool lifecycleCurrent() => !lifecycleCancelled && !closed && !exitRequested;
   bool effectCurrent() =>
-      !lifecycleCancelled &&
-      !closed &&
-      !exitRequested &&
+      lifecycleCurrent() &&
       (activeCommand == null ||
           clock.elapsedMilliseconds < activeCommand!.deadlineMillis);
   void requireBeforeEffect() {
@@ -973,6 +1006,7 @@ final class _JoinNative with WidgetsBindingObserver {
     _require(_createdMode && !finished);
     if (createdStage == _CreatedJobStage.cancelling) {
       _require(cancellationDrained);
+      requireBeforeEffect();
       if (cancelReason == _CreatedJobCancelReason.incomingInterruption) {
         interruptionDrains++;
       }
@@ -1026,7 +1060,7 @@ final class _JoinNative with WidgetsBindingObserver {
       savedPair = null;
       await tap(close);
       return waitForCreatedJobNativeCloseDrain(
-        waitUntilReady: wait,
+        waitUntilReady: waitForPassiveCompletion,
         isDrained: () => cancellationDrained,
       );
     }
@@ -1283,10 +1317,10 @@ final class _JoinNative with WidgetsBindingObserver {
           final syncPage = _pageState;
           await tap(find.byKey(const Key('company-jobs-sync-now')));
           return waitForCreatedJobNativeSyncTerminal(
-            waitUntilReady: wait,
+            waitUntilReady: waitForPassiveCompletion,
             readState: () => syncUiState,
             isStillCurrent: () =>
-                effectCurrent() &&
+                lifecycleCurrent() &&
                 pageMounted &&
                 identical(_pageState, syncPage),
           );

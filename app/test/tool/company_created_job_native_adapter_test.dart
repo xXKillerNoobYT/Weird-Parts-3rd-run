@@ -97,6 +97,195 @@ void _validate({
 );
 
 void main() {
+  for (final beforeEffect in [false, true]) {
+    test(
+      'native readiness keeps ${beforeEffect ? 'effect deadline' : 'three-minute passive bound'}',
+      () async {
+        var elapsed = 0;
+        var pumps = 0;
+        await expectLater(
+          adapter.waitForJoinNativeCompletion(
+            ready: () => false,
+            elapsedMillis: () => elapsed,
+            commandDeadlineMillis: 15000,
+            enforceCommandDeadline: beforeEffect,
+            pump: () async {
+              pumps++;
+              elapsed = beforeEffect ? 15000 : 180000;
+            },
+          ),
+          throwsA(anything),
+        );
+        expect(pumps, 1);
+        expect(elapsed, beforeEffect ? 15000 : 180000);
+      },
+    );
+  }
+  testWidgets(
+    'stale disabled Sync Now is not busy without actual busy indicator',
+    (tester) async {
+      Widget page({required bool busy}) => MaterialApp(
+        home: Column(
+          children: [
+            const FilledButton(
+              key: Key('company-jobs-sync-now'),
+              onPressed: null,
+              child: Text('Sync Now'),
+            ),
+            if (busy)
+              const CircularProgressIndicator(key: Key('company-join-busy')),
+          ],
+        ),
+      );
+      await tester.pumpWidget(page(busy: false));
+      expect(adapter.createdJobNativeUiBusy(), isFalse);
+      expect(
+        adapter.createdJobNativeUiState(
+          status: 'Job snapshot synced. Sent 1, received 1.',
+          errorVisible: false,
+          busy: adapter.createdJobNativeUiBusy(),
+        ),
+        adapter.CreatedJobNativeUiState.complete,
+      );
+      await tester.pumpWidget(page(busy: true));
+      expect(adapter.createdJobNativeUiBusy(), isTrue);
+      expect(
+        adapter.createdJobNativeUiState(
+          status: 'Job snapshot synced. Sent 1, received 1.',
+          errorVisible: false,
+          busy: adapter.createdJobNativeUiBusy(),
+        ),
+        adapter.CreatedJobNativeUiState.pending,
+      );
+    },
+  );
+  test(
+    'admitted Sync resolves original UNKNOWN command after late terminal UI',
+    () async {
+      final cache = command_test.Fixture();
+      final wire = cache.request(
+        1,
+        action: NativeTestAction.accept,
+        deadline: 15000,
+      );
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      var state = adapter.CreatedJobNativeUiState.pending;
+      var pumps = 0;
+      var taps = 0;
+      adapter.validateJoinNativeDeadline(cache.now, command.deadlineMillis);
+      taps++;
+      final reply = await _settleNativeCommand(
+        cache,
+        command,
+        adapter.waitForCreatedJobNativeSyncTerminal(
+          waitUntilReady: (ready) => adapter.waitForJoinNativeCompletion(
+            ready: ready,
+            elapsedMillis: () => cache.now,
+            commandDeadlineMillis: command.deadlineMillis,
+            pump: () async {
+              pumps++;
+              if (pumps == 1) {
+                cache.now = 15000;
+                expect(
+                  cache.cache.submitJson(wire).state,
+                  NativeTestCommandState.unknown,
+                );
+                expect(cache.cache.takeNext(), isNull);
+                expect(
+                  cache.cache
+                      .submitJson(cache.request(2, deadline: 30000))
+                      .error,
+                  NativeTestCommandError.busy,
+                );
+                expect(taps, 1);
+              } else {
+                cache.now = 15001;
+                state = adapter.CreatedJobNativeUiState.complete;
+              }
+            },
+          ),
+          readState: () => state,
+          isStillCurrent: () => true,
+        ),
+      );
+      expect(reply.state, NativeTestCommandState.completed);
+      expect(reply.effect, NativeTestEffect.completed);
+      expect(pumps, 2);
+      expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+      expect(cache.cache.takeNext(), isNull);
+      expect(taps, 1);
+      expect(
+        () => adapter.validateJoinNativeDeadline(
+          cache.now,
+          command.deadlineMillis,
+        ),
+        throwsA(anything),
+      );
+      final expiredNew = cache.cache.submitJson(
+        cache.request(
+          2,
+          action: NativeTestAction.accept,
+          deadline: command.deadlineMillis,
+        ),
+      );
+      expect(expiredNew.state, NativeTestCommandState.failed);
+      expect(expiredNew.error, NativeTestCommandError.deadlineExpired);
+      expect(cache.cache.takeNext(), isNull);
+      expect(taps, 1);
+    },
+  );
+  test(
+    'admitted Close resolves original UNKNOWN command only after late drain',
+    () async {
+      final cache = command_test.Fixture();
+      final wire = cache.request(
+        1,
+        action: NativeTestAction.finish,
+        deadline: 15000,
+      );
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      var drained = false;
+      var pumps = 0;
+      final reply = await _settleNativeCommand(
+        cache,
+        command,
+        adapter.waitForCreatedJobNativeCloseDrain(
+          waitUntilReady: (ready) => adapter.waitForJoinNativeCompletion(
+            ready: ready,
+            elapsedMillis: () => cache.now,
+            commandDeadlineMillis: command.deadlineMillis,
+            pump: () async {
+              pumps++;
+              cache.now = pumps == 1 ? 15000 : 15001;
+              if (pumps == 1) {
+                expect(
+                  cache.cache.submitJson(wire).state,
+                  NativeTestCommandState.unknown,
+                );
+                expect(cache.cache.takeNext(), isNull);
+                expect(
+                  cache.cache
+                      .submitJson(cache.request(2, deadline: 30000))
+                      .error,
+                  NativeTestCommandError.busy,
+                );
+              } else {
+                drained = true;
+              }
+            },
+          ),
+          isDrained: () => drained,
+        ),
+      );
+      expect(reply.state, NativeTestCommandState.completed);
+      expect(reply.effect, NativeTestEffect.completed);
+      expect(pumps, 2);
+      expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+      expect(cache.cache.takeNext(), isNull);
+    },
+  );
   test('created native Pair retries failed state once through cache', () async {
     final cache = command_test.Fixture();
     final wire = cache.request(1, action: NativeTestAction.pair);
@@ -276,38 +465,42 @@ void main() {
       },
     );
   }
-  for (final expired in [false, true]) {
-    test(
-      'native Sync refuses terminal UI after ${expired ? 'deadline' : 'page or lifecycle cancellation'}',
-      () async {
-        final cache = command_test.Fixture();
-        final wire = cache.request(1, action: NativeTestAction.accept);
-        cache.cache.submitJson(wire);
-        final command = cache.cache.takeNext()!;
-        var current = true;
-        final reply = await _settleNativeCommand(
-          cache,
-          command,
-          adapter.waitForCreatedJobNativeSyncTerminal(
-            waitUntilReady: (ready) async {
-              expect(ready(), isTrue);
-              if (expired) {
-                cache.now = 1000;
-                cache.cache.tick();
-              } else {
-                current = false;
-              }
+  test(
+    'native Sync refuses late terminal UI after page or lifecycle cancellation',
+    () async {
+      final cache = command_test.Fixture();
+      final wire = cache.request(1, action: NativeTestAction.accept);
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      var current = true;
+      var state = adapter.CreatedJobNativeUiState.pending;
+      final reply = await _settleNativeCommand(
+        cache,
+        command,
+        adapter.waitForCreatedJobNativeSyncTerminal(
+          waitUntilReady: (ready) => adapter.waitForJoinNativeCompletion(
+            ready: ready,
+            elapsedMillis: () => cache.now,
+            commandDeadlineMillis: command.deadlineMillis,
+            pump: () async {
+              cache.now = 1000;
+              expect(
+                cache.cache.submitJson(wire).state,
+                NativeTestCommandState.unknown,
+              );
+              current = false;
+              state = adapter.CreatedJobNativeUiState.complete;
             },
-            readState: () => adapter.CreatedJobNativeUiState.complete,
-            isStillCurrent: () => current && cache.now < command.deadlineMillis,
           ),
-        );
-        expect(reply.state, NativeTestCommandState.failed);
-        expect(reply.effect, NativeTestEffect.possible);
-        expect(reply.error, NativeTestCommandError.harnessFailed);
-      },
-    );
-  }
+          readState: () => state,
+          isStillCurrent: () => current,
+        ),
+      );
+      expect(reply.state, NativeTestCommandState.failed);
+      expect(reply.effect, NativeTestEffect.possible);
+      expect(reply.error, NativeTestCommandError.harnessFailed);
+    },
+  );
   testWidgets(
     'native Close waits for actual route return after controller stop drains',
     (tester) async {
@@ -686,6 +879,12 @@ void main() {
     expect(
       state(
         'Confirmed sent 0, received 0. More Jobs pending. Pair again and retry Sync Now.',
+      ),
+      adapter.CreatedJobNativeUiState.incomplete,
+    );
+    expect(
+      state(
+        'Job sync incomplete. Confirmed sent 0, received 0. Pair again and retry Sync Now.',
       ),
       adapter.CreatedJobNativeUiState.incomplete,
     );

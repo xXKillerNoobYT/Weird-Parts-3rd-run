@@ -39,6 +39,8 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   VerifiedJoinRequest? _request;
   VerifiedPeerMembership? _peerMembership;
   CompanyCreatedJobSync? _jobSync;
+  Timer? _jobAvailabilityTimer;
+  String? _lastConfirmedJobSync;
   CompanyJoinPreview? _preview;
   String? _error;
   String _status = 'Pair and compare the code on both devices.';
@@ -85,6 +87,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     pair.requireCurrent();
     if (identical(pair, _pair)) return _channelPending!;
     _channel?.close();
+    _jobAvailabilityTimer?.cancel();
     _jobSync?.close();
     _jobSync = null;
     _peerMembership = null;
@@ -224,11 +227,29 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
       available.close();
       return;
     }
-    _jobSync = CompanyCreatedJobSync(
+    final sync = _jobSync = CompanyCreatedJobSync(
       availability: available,
       controller: _controller,
       onStatus: (status) {
-        if (mounted && !_closed) setState(() => _status = status);
+        if (mounted && !_closed) {
+          setState(() {
+            _status = status;
+            if (status.startsWith('Job snapshot synced.')) {
+              _lastConfirmedJobSync = status;
+            }
+          });
+        }
+      },
+    );
+    _jobAvailabilityTimer?.cancel();
+    final remaining =
+        _controller.pairedJoinSession?.timeUntilExpiry ?? Duration.zero;
+    _jobAvailabilityTimer = Timer(
+      remaining + const Duration(milliseconds: 1),
+      () {
+        if (mounted && !_closed && identical(_jobSync, sync)) {
+          setState(() {});
+        }
       },
     );
     setState(
@@ -338,6 +359,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   }
 
   Future<void> _cancel() async {
+    _jobAvailabilityTimer?.cancel();
     await _jobSync?.closeAndDrain();
     _channel?.close();
     await _controller.stop();
@@ -347,6 +369,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
+      _jobAvailabilityTimer?.cancel();
       _jobSync?.close();
       _channel?.close();
       _controller.stop();
@@ -364,6 +387,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
 
   @override
   void dispose() {
+    _jobAvailabilityTimer?.cancel();
     _jobSync?.close();
     WidgetsBinding.instance.removeObserver(this);
     _channel?.close();
@@ -387,6 +411,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
       );
     }
     final state = _controller.state;
+    final jobsLive = _jobSync?.isLive ?? false;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -404,6 +429,18 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
             'Use the same Wi-Fi. Match establishes a private channel; company access still requires approval and consent.',
           ),
           Text(_status, key: const Key('company-join-status')),
+          if (_busy)
+            const LinearProgressIndicator(key: Key('company-join-busy')),
+          if (_lastConfirmedJobSync case final confirmed?)
+            if (_status != confirmed || !jobsLive)
+              Text(
+                'Last successful exchange: $confirmed',
+                key: const Key('company-jobs-last-confirmed'),
+              ),
+          if (_jobSync != null && !jobsLive)
+            const Text(
+              'This connection is no longer available. Pair again and verify the company device.',
+            ),
           if (_error ?? state.error case final error?)
             Text(error, key: const Key('company-join-error')),
           if (state.verifyCode case final code?) ...[
@@ -461,7 +498,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
             if (_jobSync != null)
               FilledButton(
                 key: const Key('company-jobs-sync-now'),
-                onPressed: _busy ? null : () => _run(_syncJobs),
+                onPressed: _busy || !jobsLive ? null : () => _run(_syncJobs),
                 child: const Text('Sync Now'),
               ),
           ],

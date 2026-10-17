@@ -50,30 +50,29 @@ void main() {
       final beforeB = await tester.runAsync(() => sqlSnapshot(f.bDb));
       await tester.binding.setSurfaceSize(const Size(1600, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Row(
-            children: [
-              Expanded(
-                child: CompanyJoinPage(
-                  enrollment: f.aEnrollment,
-                  approver: f.owner,
-                  reconnect: true,
-                  createController: (_) => a,
-                ),
+      Widget connectedPeers() => MaterialApp(
+        home: Row(
+          children: [
+            Expanded(
+              child: CompanyJoinPage(
+                enrollment: f.aEnrollment,
+                approver: f.owner,
+                reconnect: true,
+                createController: (_) => a,
               ),
-              Expanded(
-                child: CompanyJoinPage(
-                  enrollment: f.bEnrollment,
-                  approver: member,
-                  reconnect: true,
-                  createController: (_) => b,
-                ),
+            ),
+            Expanded(
+              child: CompanyJoinPage(
+                enrollment: f.bEnrollment,
+                approver: member,
+                reconnect: true,
+                createController: (_) => b,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
+      await tester.pumpWidget(connectedPeers());
       final peer = find.byKey(
         ValueKey('company-peer-${f.owner.identity.deviceId}'),
       );
@@ -113,13 +112,15 @@ void main() {
       expect(find.textContaining('Ready to exchange Jobs'), findsNWidgets(2));
       stdout.writeln('Job sync widget: both manually available');
       await tester.runAsync(() => tester.tap(sync.at(0)));
+      await tester.pump();
+      expect(find.byKey(const Key('company-join-busy')), findsOneWidget);
       await joinWidgetSignal(
         tester,
         () =>
             find.textContaining('Job snapshot synced.').evaluate().length ==
                 2 ||
             find.byKey(const Key('company-join-error')).evaluate().isNotEmpty ||
-            find.textContaining('More Jobs pending.').evaluate().isNotEmpty,
+            find.textContaining('Job sync incomplete.').evaluate().isNotEmpty,
         attempts: 8000,
       );
       expect(
@@ -149,6 +150,20 @@ void main() {
       );
       expect(aJobs!.map((j) => j.id).toSet(), bJobs!.map((j) => j.id).toSet());
       expect(aJobs, hasLength(2));
+      final confirmedA = await tester.runAsync(() => sqlSnapshot(f.aDb));
+      final confirmedB = await tester.runAsync(() => sqlSnapshot(f.bDb));
+      (a.companySyncDisclosure as CompanyJobSyncAvailability).close();
+      await tester.pumpWidget(connectedPeers());
+      await tester.pump();
+      expect(tester.widget<FilledButton>(sync.at(0)).onPressed, isNull);
+      expect(find.byKey(const Key('company-join-busy')), findsNothing);
+      expect(
+        find.byKey(const Key('company-jobs-last-confirmed')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Pair again and verify'), findsOneWidget);
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
+      expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
       stdout.writeln(
         'Job sync widget: one Sync Now produced both production Job lists',
       );

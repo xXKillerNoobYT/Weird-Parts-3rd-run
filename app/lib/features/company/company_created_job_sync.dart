@@ -266,7 +266,7 @@ final class CreatedJobSyncResult {
   final int unsupported;
   String get message => complete
       ? 'Job snapshot synced. Sent $sent, received $received.'
-      : 'Confirmed sent $sent, received $received. More Jobs pending. Pair again and retry Sync Now.${unsupported > 0 ? ' Unsupported author scope remains pending.' : ''}';
+      : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${unsupported > 0 ? ' Unsupported author scope remains pending.' : ''}';
 }
 
 final class CompanyCreatedJobSync {
@@ -357,6 +357,17 @@ final class CompanyCreatedJobSync {
   final void Function(String)? onStatus;
   final int chunkBytes;
   Object? lastFailure;
+
+  bool get isLive {
+    if (_closed) return false;
+    try {
+      availability.requireLive();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   CompanyJobCommands get _commands =>
       CompanyJobCommands(enrollment: availability.enrollment);
   AppDatabase get _db => availability.enrollment.db;
