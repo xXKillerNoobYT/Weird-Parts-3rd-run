@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' show AppExitResponse, PlatformDispatcher;
 
 import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
@@ -36,13 +36,37 @@ const _roleName = String.fromEnvironment('COMPANY_JOIN_NATIVE_ROLE');
 const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
-const joinNativeRun = 'j60-join-v4';
+const joinNativeRun = 'j60-join-v5';
 const _pin = '1234'; // Isolated synthetic namespace only; never emitted.
 const _phrase = 'Synthetic Join owner authority only 123';
 const _nativeStore = NativeInstallationSecureStore();
 
 void _require(bool value) {
   if (!value) rejectNativeTest('join-native-refused');
+}
+
+Map<String, Object?> captureJoinNativeStartupLifecycle({
+  required TestWidgetsFlutterBinding binding,
+  required String Function() readNativeInitialLifecycleState,
+}) {
+  final before = binding.lifecycleState;
+  String? nativeInitial;
+  if (before == null) {
+    nativeInitial = readNativeInitialLifecycleState();
+    final previousTestValue = binding.platformDispatcher.initialLifecycleState;
+    try {
+      binding.platformDispatcher.initialLifecycleStateTestValue = nativeInitial;
+      binding.readTestInitialLifecycleStateFromNativeWindow();
+    } finally {
+      binding.platformDispatcher.initialLifecycleStateTestValue =
+          previousTestValue;
+    }
+  }
+  return {
+    'nativeInitial': nativeInitial,
+    'bindingBefore': before?.name,
+    'bindingAfter': binding.lifecycleState?.name,
+  };
 }
 
 /// Pure startup contract, tested without accessing native custody or SQLite.
@@ -271,6 +295,18 @@ final class _JoinNative with WidgetsBindingObserver {
         jsonEncode({'format': 1, 'startup': _lifecycleDetails(state)}),
         flush: true,
       );
+    } catch (_) {
+      // Diagnostics must not affect lifecycle cancellation or startup guards.
+    }
+  }
+
+  void writeStartupLifecycleEvidence(Map<String, Object?> evidence) {
+    try {
+      writeOnce('join-$phase-lifecycle-startup-$pid.json', {
+        'stage': stage,
+        'elapsedMillis': clock.elapsedMilliseconds,
+        ...evidence,
+      });
     } catch (_) {
       // Diagnostics must not affect lifecycle cancellation or startup guards.
     }
@@ -1132,11 +1168,17 @@ void main() {
       if (!restart) workspace.markInitialized();
       resident = _JoinNative(tester, workspace, db, security, restart);
       resident.stage = 'awaiting-startup-resumed';
-      await resident.wait(
-        () =>
-            WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+      final lifecycleEvidence = captureJoinNativeStartupLifecycle(
+        binding: binding,
+        readNativeInitialLifecycleState: () =>
+            PlatformDispatcher.instance.initialLifecycleState,
       );
-      final startupState = WidgetsBinding.instance.lifecycleState;
+      resident.writeStartupLifecycleEvidence(lifecycleEvidence);
+      await resident.wait(
+        () => binding.lifecycleState == AppLifecycleState.resumed,
+      );
+      final startupState = binding.lifecycleState;
       if (startupState != AppLifecycleState.resumed) {
         throw const NativeTestFailure('startup-lifecycle-not-resumed');
       }
