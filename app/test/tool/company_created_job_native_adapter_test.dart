@@ -5,8 +5,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:wired_parts/features/company/company_gate.dart';
+import 'package:wired_parts/features/company/company_jobs_panel.dart';
+import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
+import '../features/company/company_join_test.dart' show JoinFixture;
+import '../features/company/company_join_widget_test.dart'
+    show joinWidgetSignal;
 
 final _revision = List.filled(40, 'a').join();
 final _tree = List.filled(40, 'b').join();
@@ -32,6 +38,122 @@ void _validate({
 );
 
 void main() {
+  testWidgets(
+    'native signin waits for loaded Jobs before extra authority verification',
+    (tester) async {
+      late JoinFixture fixture;
+      await tester.runAsync(() async {
+        fixture = await JoinFixture.create();
+        await fixture.aEnrollment.signOut();
+      });
+      final originalJobs = (await tester.runAsync(
+        () => fixture.aDb.select(fixture.aDb.jobs).get(),
+      ))!;
+      final originalHistory = (await tester.runAsync(
+        () => fixture.aDb.select(fixture.aDb.companyJobs).get(),
+      ))!;
+      final entered = Completer<void>();
+      final released = Completer<void>();
+      await tester.binding.setSurfaceSize(const Size(1500, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CompanyBootstrapGate(
+              db: fixture.aDb,
+              installation: fixture.a,
+            ),
+          ),
+        );
+        await joinWidgetSignal(
+          tester,
+          () =>
+              find.byKey(const Key('company-signin-pin')).evaluate().length ==
+              1,
+        );
+        fixture.aStore.beforeRead = (namespace) {
+          if (!entered.isCompleted &&
+              namespace == fixture.a.namespace &&
+              find.byType(CompanyJobsPanel).evaluate().length == 1) {
+            entered.complete();
+            return released.future;
+          }
+          return null;
+        };
+        await tester.enterText(
+          find.byKey(const Key('company-signin-pin')),
+          '1234',
+        );
+        await tester.runAsync(
+          () => tester.tap(find.byKey(const Key('company-signin'))),
+        );
+        await joinWidgetSignal(tester, () => entered.isCompleted);
+        expect(find.byKey(const Key('company-peer-open')), findsOneWidget);
+        expect(find.text('Loading company Jobs...'), findsOneWidget);
+        expect(find.byKey(const Key('company-jobs-list')), findsNothing);
+        var readyForExtraSignIn = false;
+        final readiness = adapter
+            .waitForJoinNativeSignInReady(
+              waitUntilReady: (ready) async {
+                if (!ready()) {
+                  await released.future;
+                  await joinWidgetSignal(tester, ready);
+                }
+              },
+            )
+            .then((_) => readyForExtraSignIn = true);
+        await tester.pump();
+        expect(
+          readyForExtraSignIn,
+          isFalse,
+          reason: 'The signed-in shell must not authorize another protected read while Jobs load.',
+        );
+        released.complete();
+        await readiness;
+        expect(readyForExtraSignIn, isTrue);
+        final original = originalJobs.single;
+        final renderedRow = find.byKey(Key('company-job-${original.id}'));
+        expect(renderedRow, findsOneWidget);
+        expect(
+          find.descendant(of: renderedRow, matching: find.text(original.name)),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('company-job-error')), findsNothing);
+        await tester.runAsync(() async {
+          final extra = await fixture.aEnrollment.signIn('1234');
+          final commands = CompanyJobCommands(enrollment: fixture.aEnrollment);
+          final listed = await commands.listJobs(ownerSession: extra);
+          expect(listed.map((job) => job.id), [original.id]);
+          final verified = await commands.verifySyncRecord(original.id, extra);
+          expect(verified, originalHistory.single);
+          expect(
+            await fixture.aDb.select(fixture.aDb.jobs).get(),
+            originalJobs,
+          );
+          expect(
+            await fixture.aDb.select(fixture.aDb.companyJobs).get(),
+            originalHistory,
+          );
+          await fixture.aEnrollment.signOut();
+        });
+        expect(find.byKey(const Key('company-job-error')), findsNothing);
+      } finally {
+        fixture.aStore.beforeRead = null;
+        if (!released.isCompleted) released.complete();
+        await joinWidgetSignal(
+          tester,
+          () =>
+              find
+                  .byKey(const Key('company-jobs-list'))
+                  .evaluate()
+                  .isNotEmpty ||
+              find.byKey(const Key('company-job-error')).evaluate().isNotEmpty,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(fixture.closeAndCheckOwnerData);
+      }
+    },
+  );
   testWidgets(
     'pushed page State capture waits for route build and preserves pop completion',
     (tester) async {

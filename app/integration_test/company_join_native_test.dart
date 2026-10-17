@@ -83,6 +83,16 @@ Future<State> captureJoinNativePageState({
   return tester.state(page);
 }
 
+Future<void> waitForJoinNativeSignInReady({
+  required Future<void> Function(bool Function()) waitUntilReady,
+}) => waitUntilReady(
+  () =>
+      find.byKey(const Key('company-peer-open')).evaluate().length == 1 &&
+      find.byKey(const Key('company-jobs-list')).evaluate().length == 1 &&
+      find.text('Loading company Jobs...').evaluate().isEmpty &&
+      find.byKey(const Key('company-job-error')).evaluate().isEmpty,
+);
+
 /// Pure startup contract, tested without accessing native custody or SQLite.
 void validateJoinNativeDefines({
   required bool enabled,
@@ -598,9 +608,7 @@ final class _JoinNative with WidgetsBindingObserver {
     _require(find.text('Company locked').evaluate().length == 1);
     await enter('company-signin-pin', _pin);
     await tap(find.byKey(const Key('company-signin')));
-    await wait(
-      () => find.byKey(const Key('company-peer-open')).evaluate().isNotEmpty,
-    );
+    await waitForJoinNativeSignInReady(waitUntilReady: wait);
   }
 
   Future<void> signOutUi() async {
