@@ -8,7 +8,7 @@ const RESPONSE_PREFIX = Buffer.from('wired-parts/j60-test-control/response/v1\n'
 const MAX_RAW = 8192;
 const MAX_BODY = 16384;
 const REQUEST_TIMEOUT_MS = 12000;
-const ALLOWED_RUNS = new Set(['j60-join-v10', 'j61-created-v8']);
+const ALLOWED_RUNS = new Set(['j60-join-v10', 'j61-created-v9']);
 const FAILURE_CODES = new Set(['refused', 'busy', 'expired', 'replay', 'failed', 'timeout', 'closed', 'not-ready']);
 
 export class DirectControlError extends Error {
@@ -314,7 +314,7 @@ function isAllowedHost(host) {
 export function createClient({ host, port, run, channelId, serverPublicKeySpki, identity }) {
   if (!isAllowedHost(host)) throw new TypeError('host must be a pinned RFC1918 IPv4 or 127.0.0.1');
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new TypeError('port must be a valid TCP port');
-  if (!ALLOWED_RUNS.has(run)) throw new TypeError('run must be j60-join-v10 or j61-created-v8');
+  if (!ALLOWED_RUNS.has(run)) throw new TypeError('run must be j60-join-v10 or j61-created-v9');
   const channelBytes = decodeBase64Url(channelId, 'channelId');
   if (channelBytes.length !== 16) throw new TypeError('channelId must encode 16 bytes');
   const normalizedIdentity = normalizeIdentity(identity);

@@ -79,15 +79,15 @@ test('signed echo authenticates peer, binds response and keeps lane fresh', asyn
 
 test('only explicit admitted runs enter the configured signed lane', async t => {
   const legacy = fixture(t);
-  for (const run of ['', null, 'j61-created-v1', 'j61-created-v2', 'j61-created-v3', 'j61-created-v4', 'j61-created-v5', 'j61-created-v6', 'j61-created-v7', 'j61-created-v9', 'company-j61-created-v8', 'j60-join-v10 ', ['j61-created-v8']]) {
+  for (const run of ['', null, 'j61-created-v1', 'j61-created-v2', 'j61-created-v3', 'j61-created-v4', 'j61-created-v5', 'j61-created-v6', 'j61-created-v7', 'j61-created-v8', 'j61-created-v10', 'company-j61-created-v9', 'j60-join-v10 ', ['j61-created-v9']]) {
     assert.throws(() => createJoinControlServer({ ...legacy.config, run }), /Invalid local configuration/);
   }
-  for (const run of ['j60-join-v10', 'j61-created-v8']) {
+  for (const run of ['j60-join-v10', 'j61-created-v9']) {
     const f = fixture(t, { run });
     assert.deepEqual((await f.send()).data.result, { challenge: 'hello' });
     let calls = 0;
     f.lane.arm(async () => { calls++; return { senderGrant: {}, afterReply: async () => {} }; });
-    const otherRun = run === 'j60-join-v10' ? 'j61-created-v8' : 'j60-join-v10';
+    const otherRun = run === 'j60-join-v10' ? 'j61-created-v9' : 'j60-join-v10';
     await failure(f, f.request({ run: otherRun, op: 'compare', args: { sealedObservation: {} } }), 'refused');
     assert.equal(calls, 0);
     assert.equal(f.lane.state, 'armed');
