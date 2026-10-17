@@ -573,38 +573,42 @@ void main() {
     },
   );
 
-  test('closed schema6 fixture contains real signed Job history', () async {
-    final action = command(name: 'Synthetic schema6 downgrade proof');
-    await CompanyJobCommands(enrollment: enrollment)
-        .createJob(action, ownerSession: owner);
-    final rows = await db.select(db.companyJobs).get();
-    expect(rows, hasLength(1));
-    final destination = Platform.environment['COMPANY_JOB_DOWNGRADE_FIXTURE'];
-    if (destination != null) {
-      expect(File(destination).isAbsolute, isTrue);
-      expect(File(destination).existsSync(), isFalse);
-      await enrollment.signOut();
-      await db.close();
-      final fixture = await File('${root.path}/shop.sqlite').copy(destination);
-      final bytes = await fixture.readAsBytes();
-      File('$destination.expected.json').writeAsStringSync(
-        jsonEncode({
-          'schema': 6,
-          'jobId': action.jobId,
-          'companyId': identity.companyId,
-          'jobs': 1,
-          'companyJobs': 1,
-          'outgoing': 1,
-          'jobLines': 0,
-          'sha256': hashes.sha256.convert(bytes).toString(),
-          'byteLength': bytes.length,
-        }),
-      );
-      db = AppDatabase.forTesting(
-        NativeDatabase(File('${root.path}/shop.sqlite')),
-      );
-    }
-  });
+  test(
+    'closed current-schema fixture contains real signed Job history',
+    () async {
+      final action = command(name: 'Synthetic schema6 downgrade proof');
+      await CompanyJobCommands(enrollment: enrollment)
+          .createJob(action, ownerSession: owner);
+      final rows = await db.select(db.companyJobs).get();
+      expect(rows, hasLength(1));
+      final destination = Platform.environment['COMPANY_JOB_DOWNGRADE_FIXTURE'];
+      if (destination != null) {
+        expect(File(destination).isAbsolute, isTrue);
+        expect(File(destination).existsSync(), isFalse);
+        await enrollment.signOut();
+        await db.close();
+        final fixture = await File('${root.path}/shop.sqlite')
+            .copy(destination);
+        final bytes = await fixture.readAsBytes();
+        File('$destination.expected.json').writeAsStringSync(
+          jsonEncode({
+            'schema': kAppSchemaVersion,
+            'jobId': action.jobId,
+            'companyId': identity.companyId,
+            'jobs': 1,
+            'companyJobs': 1,
+            'outgoing': 1,
+            'jobLines': 0,
+            'sha256': hashes.sha256.convert(bytes).toString(),
+            'byteLength': bytes.length,
+          }),
+        );
+        db = AppDatabase.forTesting(
+          NativeDatabase(File('${root.path}/shop.sqlite')),
+        );
+      }
+    },
+  );
   test('additive schema5 upgrade preserves legacy rows settings and protected identity', () async {
     final file = File('${root.path}/legacy.sqlite');
     var legacy = AppDatabase.forTesting(NativeDatabase(file));
@@ -629,6 +633,13 @@ void main() {
     await legacy.close();
     final raw = sqlite.sqlite3.open(file.path);
     raw.execute('DROP TABLE company_jobs');
+    for (final table in [
+      'company_membership_certificates',
+      'company_join_requests',
+      'company_join_events',
+    ]) {
+      raw.execute('DROP TABLE $table');
+    }
     raw.execute('PRAGMA user_version = 5');
     raw.dispose();
     legacy = AppDatabase.forTesting(NativeDatabase(file));
@@ -650,7 +661,7 @@ void main() {
       expect(
         (await legacy.customSelect('PRAGMA user_version').getSingle())
             .read<int>('user_version'),
-        6,
+        kAppSchemaVersion,
       );
     } finally {
       await legacy.close();

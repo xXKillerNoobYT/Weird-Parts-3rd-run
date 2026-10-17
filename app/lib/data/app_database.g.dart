@@ -12282,6 +12282,1392 @@ class JobLineConflictsCompanion extends UpdateCompanion<JobLineConflict> {
   }
 }
 
+class $CompanyMembershipCertificatesTable extends CompanyMembershipCertificates
+    with
+        TableInfo<
+          $CompanyMembershipCertificatesTable,
+          CompanyMembershipCertificate
+        > {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyMembershipCertificatesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _grantIdMeta = const VerificationMeta(
+    'grantId',
+  );
+  @override
+  late final GeneratedColumn<String> grantId = GeneratedColumn<String>(
+    'grant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _proofCommitmentMeta = const VerificationMeta(
+    'proofCommitment',
+  );
+  @override
+  late final GeneratedColumn<String> proofCommitment = GeneratedColumn<String>(
+    'proof_commitment',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _proofBytesMeta = const VerificationMeta(
+    'proofBytes',
+  );
+  @override
+  late final GeneratedColumn<String> proofBytes = GeneratedColumn<String>(
+    'proof_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _issuerDeviceIdMeta = const VerificationMeta(
+    'issuerDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> issuerDeviceId = GeneratedColumn<String>(
+    'issuer_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _issuerSequenceMeta = const VerificationMeta(
+    'issuerSequence',
+  );
+  @override
+  late final GeneratedColumn<int> issuerSequence = GeneratedColumn<int>(
+    'issuer_sequence',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    grantId,
+    companyId,
+    proofCommitment,
+    proofBytes,
+    issuerDeviceId,
+    issuerSequence,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_membership_certificates';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyMembershipCertificate> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('grant_id')) {
+      context.handle(
+        _grantIdMeta,
+        grantId.isAcceptableOrUnknown(data['grant_id']!, _grantIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_grantIdMeta);
+    }
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('proof_commitment')) {
+      context.handle(
+        _proofCommitmentMeta,
+        proofCommitment.isAcceptableOrUnknown(
+          data['proof_commitment']!,
+          _proofCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_proofCommitmentMeta);
+    }
+    if (data.containsKey('proof_bytes')) {
+      context.handle(
+        _proofBytesMeta,
+        proofBytes.isAcceptableOrUnknown(data['proof_bytes']!, _proofBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_proofBytesMeta);
+    }
+    if (data.containsKey('issuer_device_id')) {
+      context.handle(
+        _issuerDeviceIdMeta,
+        issuerDeviceId.isAcceptableOrUnknown(
+          data['issuer_device_id']!,
+          _issuerDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_issuerDeviceIdMeta);
+    }
+    if (data.containsKey('issuer_sequence')) {
+      context.handle(
+        _issuerSequenceMeta,
+        issuerSequence.isAcceptableOrUnknown(
+          data['issuer_sequence']!,
+          _issuerSequenceMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_issuerSequenceMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {grantId};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {issuerDeviceId, issuerSequence},
+  ];
+  @override
+  CompanyMembershipCertificate map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyMembershipCertificate(
+      grantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}grant_id'],
+      )!,
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      proofCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}proof_commitment'],
+      )!,
+      proofBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}proof_bytes'],
+      )!,
+      issuerDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}issuer_device_id'],
+      )!,
+      issuerSequence: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}issuer_sequence'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyMembershipCertificatesTable createAlias(String alias) {
+    return $CompanyMembershipCertificatesTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyMembershipCertificate extends DataClass
+    implements Insertable<CompanyMembershipCertificate> {
+  final String grantId;
+  final String companyId;
+  final String proofCommitment;
+  final String proofBytes;
+  final String issuerDeviceId;
+  final int issuerSequence;
+  const CompanyMembershipCertificate({
+    required this.grantId,
+    required this.companyId,
+    required this.proofCommitment,
+    required this.proofBytes,
+    required this.issuerDeviceId,
+    required this.issuerSequence,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['grant_id'] = Variable<String>(grantId);
+    map['company_id'] = Variable<String>(companyId);
+    map['proof_commitment'] = Variable<String>(proofCommitment);
+    map['proof_bytes'] = Variable<String>(proofBytes);
+    map['issuer_device_id'] = Variable<String>(issuerDeviceId);
+    map['issuer_sequence'] = Variable<int>(issuerSequence);
+    return map;
+  }
+
+  CompanyMembershipCertificatesCompanion toCompanion(bool nullToAbsent) {
+    return CompanyMembershipCertificatesCompanion(
+      grantId: Value(grantId),
+      companyId: Value(companyId),
+      proofCommitment: Value(proofCommitment),
+      proofBytes: Value(proofBytes),
+      issuerDeviceId: Value(issuerDeviceId),
+      issuerSequence: Value(issuerSequence),
+    );
+  }
+
+  factory CompanyMembershipCertificate.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyMembershipCertificate(
+      grantId: serializer.fromJson<String>(json['grantId']),
+      companyId: serializer.fromJson<String>(json['companyId']),
+      proofCommitment: serializer.fromJson<String>(json['proofCommitment']),
+      proofBytes: serializer.fromJson<String>(json['proofBytes']),
+      issuerDeviceId: serializer.fromJson<String>(json['issuerDeviceId']),
+      issuerSequence: serializer.fromJson<int>(json['issuerSequence']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'grantId': serializer.toJson<String>(grantId),
+      'companyId': serializer.toJson<String>(companyId),
+      'proofCommitment': serializer.toJson<String>(proofCommitment),
+      'proofBytes': serializer.toJson<String>(proofBytes),
+      'issuerDeviceId': serializer.toJson<String>(issuerDeviceId),
+      'issuerSequence': serializer.toJson<int>(issuerSequence),
+    };
+  }
+
+  CompanyMembershipCertificate copyWith({
+    String? grantId,
+    String? companyId,
+    String? proofCommitment,
+    String? proofBytes,
+    String? issuerDeviceId,
+    int? issuerSequence,
+  }) => CompanyMembershipCertificate(
+    grantId: grantId ?? this.grantId,
+    companyId: companyId ?? this.companyId,
+    proofCommitment: proofCommitment ?? this.proofCommitment,
+    proofBytes: proofBytes ?? this.proofBytes,
+    issuerDeviceId: issuerDeviceId ?? this.issuerDeviceId,
+    issuerSequence: issuerSequence ?? this.issuerSequence,
+  );
+  CompanyMembershipCertificate copyWithCompanion(
+    CompanyMembershipCertificatesCompanion data,
+  ) {
+    return CompanyMembershipCertificate(
+      grantId: data.grantId.present ? data.grantId.value : this.grantId,
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      proofCommitment: data.proofCommitment.present
+          ? data.proofCommitment.value
+          : this.proofCommitment,
+      proofBytes: data.proofBytes.present
+          ? data.proofBytes.value
+          : this.proofBytes,
+      issuerDeviceId: data.issuerDeviceId.present
+          ? data.issuerDeviceId.value
+          : this.issuerDeviceId,
+      issuerSequence: data.issuerSequence.present
+          ? data.issuerSequence.value
+          : this.issuerSequence,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyMembershipCertificate(')
+          ..write('grantId: $grantId, ')
+          ..write('companyId: $companyId, ')
+          ..write('proofCommitment: $proofCommitment, ')
+          ..write('proofBytes: $proofBytes, ')
+          ..write('issuerDeviceId: $issuerDeviceId, ')
+          ..write('issuerSequence: $issuerSequence')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    grantId,
+    companyId,
+    proofCommitment,
+    proofBytes,
+    issuerDeviceId,
+    issuerSequence,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyMembershipCertificate &&
+          other.grantId == this.grantId &&
+          other.companyId == this.companyId &&
+          other.proofCommitment == this.proofCommitment &&
+          other.proofBytes == this.proofBytes &&
+          other.issuerDeviceId == this.issuerDeviceId &&
+          other.issuerSequence == this.issuerSequence);
+}
+
+class CompanyMembershipCertificatesCompanion
+    extends UpdateCompanion<CompanyMembershipCertificate> {
+  final Value<String> grantId;
+  final Value<String> companyId;
+  final Value<String> proofCommitment;
+  final Value<String> proofBytes;
+  final Value<String> issuerDeviceId;
+  final Value<int> issuerSequence;
+  final Value<int> rowid;
+  const CompanyMembershipCertificatesCompanion({
+    this.grantId = const Value.absent(),
+    this.companyId = const Value.absent(),
+    this.proofCommitment = const Value.absent(),
+    this.proofBytes = const Value.absent(),
+    this.issuerDeviceId = const Value.absent(),
+    this.issuerSequence = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyMembershipCertificatesCompanion.insert({
+    required String grantId,
+    required String companyId,
+    required String proofCommitment,
+    required String proofBytes,
+    required String issuerDeviceId,
+    required int issuerSequence,
+    this.rowid = const Value.absent(),
+  }) : grantId = Value(grantId),
+       companyId = Value(companyId),
+       proofCommitment = Value(proofCommitment),
+       proofBytes = Value(proofBytes),
+       issuerDeviceId = Value(issuerDeviceId),
+       issuerSequence = Value(issuerSequence);
+  static Insertable<CompanyMembershipCertificate> custom({
+    Expression<String>? grantId,
+    Expression<String>? companyId,
+    Expression<String>? proofCommitment,
+    Expression<String>? proofBytes,
+    Expression<String>? issuerDeviceId,
+    Expression<int>? issuerSequence,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (grantId != null) 'grant_id': grantId,
+      if (companyId != null) 'company_id': companyId,
+      if (proofCommitment != null) 'proof_commitment': proofCommitment,
+      if (proofBytes != null) 'proof_bytes': proofBytes,
+      if (issuerDeviceId != null) 'issuer_device_id': issuerDeviceId,
+      if (issuerSequence != null) 'issuer_sequence': issuerSequence,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyMembershipCertificatesCompanion copyWith({
+    Value<String>? grantId,
+    Value<String>? companyId,
+    Value<String>? proofCommitment,
+    Value<String>? proofBytes,
+    Value<String>? issuerDeviceId,
+    Value<int>? issuerSequence,
+    Value<int>? rowid,
+  }) {
+    return CompanyMembershipCertificatesCompanion(
+      grantId: grantId ?? this.grantId,
+      companyId: companyId ?? this.companyId,
+      proofCommitment: proofCommitment ?? this.proofCommitment,
+      proofBytes: proofBytes ?? this.proofBytes,
+      issuerDeviceId: issuerDeviceId ?? this.issuerDeviceId,
+      issuerSequence: issuerSequence ?? this.issuerSequence,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (grantId.present) {
+      map['grant_id'] = Variable<String>(grantId.value);
+    }
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (proofCommitment.present) {
+      map['proof_commitment'] = Variable<String>(proofCommitment.value);
+    }
+    if (proofBytes.present) {
+      map['proof_bytes'] = Variable<String>(proofBytes.value);
+    }
+    if (issuerDeviceId.present) {
+      map['issuer_device_id'] = Variable<String>(issuerDeviceId.value);
+    }
+    if (issuerSequence.present) {
+      map['issuer_sequence'] = Variable<int>(issuerSequence.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyMembershipCertificatesCompanion(')
+          ..write('grantId: $grantId, ')
+          ..write('companyId: $companyId, ')
+          ..write('proofCommitment: $proofCommitment, ')
+          ..write('proofBytes: $proofBytes, ')
+          ..write('issuerDeviceId: $issuerDeviceId, ')
+          ..write('issuerSequence: $issuerSequence, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CompanyJoinRequestsTable extends CompanyJoinRequests
+    with TableInfo<$CompanyJoinRequestsTable, CompanyJoinRequest> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyJoinRequestsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sideMeta = const VerificationMeta('side');
+  @override
+  late final GeneratedColumn<String> side = GeneratedColumn<String>(
+    'side',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestCommitmentMeta = const VerificationMeta(
+    'requestCommitment',
+  );
+  @override
+  late final GeneratedColumn<String> requestCommitment =
+      GeneratedColumn<String>(
+        'request_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _requestBytesMeta = const VerificationMeta(
+    'requestBytes',
+  );
+  @override
+  late final GeneratedColumn<String> requestBytes = GeneratedColumn<String>(
+    'request_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _recipientInstallationMeta =
+      const VerificationMeta('recipientInstallation');
+  @override
+  late final GeneratedColumn<String> recipientInstallation =
+      GeneratedColumn<String>(
+        'recipient_installation',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _recipientGenerationMeta =
+      const VerificationMeta('recipientGeneration');
+  @override
+  late final GeneratedColumn<String> recipientGeneration =
+      GeneratedColumn<String>(
+        'recipient_generation',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _recipientKeyMeta = const VerificationMeta(
+    'recipientKey',
+  );
+  @override
+  late final GeneratedColumn<String> recipientKey = GeneratedColumn<String>(
+    'recipient_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _certificateCommitmentMeta =
+      const VerificationMeta('certificateCommitment');
+  @override
+  late final GeneratedColumn<String> certificateCommitment =
+      GeneratedColumn<String>(
+        'certificate_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _stageMeta = const VerificationMeta('stage');
+  @override
+  late final GeneratedColumn<String> stage = GeneratedColumn<String>(
+    'stage',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    requestId,
+    side,
+    requestCommitment,
+    requestBytes,
+    recipientInstallation,
+    recipientGeneration,
+    recipientKey,
+    certificateCommitment,
+    stage,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_join_requests';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyJoinRequest> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('side')) {
+      context.handle(
+        _sideMeta,
+        side.isAcceptableOrUnknown(data['side']!, _sideMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sideMeta);
+    }
+    if (data.containsKey('request_commitment')) {
+      context.handle(
+        _requestCommitmentMeta,
+        requestCommitment.isAcceptableOrUnknown(
+          data['request_commitment']!,
+          _requestCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_requestCommitmentMeta);
+    }
+    if (data.containsKey('request_bytes')) {
+      context.handle(
+        _requestBytesMeta,
+        requestBytes.isAcceptableOrUnknown(
+          data['request_bytes']!,
+          _requestBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_requestBytesMeta);
+    }
+    if (data.containsKey('recipient_installation')) {
+      context.handle(
+        _recipientInstallationMeta,
+        recipientInstallation.isAcceptableOrUnknown(
+          data['recipient_installation']!,
+          _recipientInstallationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_recipientInstallationMeta);
+    }
+    if (data.containsKey('recipient_generation')) {
+      context.handle(
+        _recipientGenerationMeta,
+        recipientGeneration.isAcceptableOrUnknown(
+          data['recipient_generation']!,
+          _recipientGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_recipientGenerationMeta);
+    }
+    if (data.containsKey('recipient_key')) {
+      context.handle(
+        _recipientKeyMeta,
+        recipientKey.isAcceptableOrUnknown(
+          data['recipient_key']!,
+          _recipientKeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_recipientKeyMeta);
+    }
+    if (data.containsKey('certificate_commitment')) {
+      context.handle(
+        _certificateCommitmentMeta,
+        certificateCommitment.isAcceptableOrUnknown(
+          data['certificate_commitment']!,
+          _certificateCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_certificateCommitmentMeta);
+    }
+    if (data.containsKey('stage')) {
+      context.handle(
+        _stageMeta,
+        stage.isAcceptableOrUnknown(data['stage']!, _stageMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_stageMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {requestId};
+  @override
+  CompanyJoinRequest map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyJoinRequest(
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      side: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}side'],
+      )!,
+      requestCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_commitment'],
+      )!,
+      requestBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_bytes'],
+      )!,
+      recipientInstallation: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}recipient_installation'],
+      )!,
+      recipientGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}recipient_generation'],
+      )!,
+      recipientKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}recipient_key'],
+      )!,
+      certificateCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}certificate_commitment'],
+      )!,
+      stage: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}stage'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyJoinRequestsTable createAlias(String alias) {
+    return $CompanyJoinRequestsTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyJoinRequest extends DataClass
+    implements Insertable<CompanyJoinRequest> {
+  final String requestId;
+  final String side;
+  final String requestCommitment;
+  final String requestBytes;
+  final String recipientInstallation;
+  final String recipientGeneration;
+  final String recipientKey;
+  final String certificateCommitment;
+  final String stage;
+  const CompanyJoinRequest({
+    required this.requestId,
+    required this.side,
+    required this.requestCommitment,
+    required this.requestBytes,
+    required this.recipientInstallation,
+    required this.recipientGeneration,
+    required this.recipientKey,
+    required this.certificateCommitment,
+    required this.stage,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['request_id'] = Variable<String>(requestId);
+    map['side'] = Variable<String>(side);
+    map['request_commitment'] = Variable<String>(requestCommitment);
+    map['request_bytes'] = Variable<String>(requestBytes);
+    map['recipient_installation'] = Variable<String>(recipientInstallation);
+    map['recipient_generation'] = Variable<String>(recipientGeneration);
+    map['recipient_key'] = Variable<String>(recipientKey);
+    map['certificate_commitment'] = Variable<String>(certificateCommitment);
+    map['stage'] = Variable<String>(stage);
+    return map;
+  }
+
+  CompanyJoinRequestsCompanion toCompanion(bool nullToAbsent) {
+    return CompanyJoinRequestsCompanion(
+      requestId: Value(requestId),
+      side: Value(side),
+      requestCommitment: Value(requestCommitment),
+      requestBytes: Value(requestBytes),
+      recipientInstallation: Value(recipientInstallation),
+      recipientGeneration: Value(recipientGeneration),
+      recipientKey: Value(recipientKey),
+      certificateCommitment: Value(certificateCommitment),
+      stage: Value(stage),
+    );
+  }
+
+  factory CompanyJoinRequest.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyJoinRequest(
+      requestId: serializer.fromJson<String>(json['requestId']),
+      side: serializer.fromJson<String>(json['side']),
+      requestCommitment: serializer.fromJson<String>(json['requestCommitment']),
+      requestBytes: serializer.fromJson<String>(json['requestBytes']),
+      recipientInstallation: serializer.fromJson<String>(
+        json['recipientInstallation'],
+      ),
+      recipientGeneration: serializer.fromJson<String>(
+        json['recipientGeneration'],
+      ),
+      recipientKey: serializer.fromJson<String>(json['recipientKey']),
+      certificateCommitment: serializer.fromJson<String>(
+        json['certificateCommitment'],
+      ),
+      stage: serializer.fromJson<String>(json['stage']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'requestId': serializer.toJson<String>(requestId),
+      'side': serializer.toJson<String>(side),
+      'requestCommitment': serializer.toJson<String>(requestCommitment),
+      'requestBytes': serializer.toJson<String>(requestBytes),
+      'recipientInstallation': serializer.toJson<String>(recipientInstallation),
+      'recipientGeneration': serializer.toJson<String>(recipientGeneration),
+      'recipientKey': serializer.toJson<String>(recipientKey),
+      'certificateCommitment': serializer.toJson<String>(certificateCommitment),
+      'stage': serializer.toJson<String>(stage),
+    };
+  }
+
+  CompanyJoinRequest copyWith({
+    String? requestId,
+    String? side,
+    String? requestCommitment,
+    String? requestBytes,
+    String? recipientInstallation,
+    String? recipientGeneration,
+    String? recipientKey,
+    String? certificateCommitment,
+    String? stage,
+  }) => CompanyJoinRequest(
+    requestId: requestId ?? this.requestId,
+    side: side ?? this.side,
+    requestCommitment: requestCommitment ?? this.requestCommitment,
+    requestBytes: requestBytes ?? this.requestBytes,
+    recipientInstallation: recipientInstallation ?? this.recipientInstallation,
+    recipientGeneration: recipientGeneration ?? this.recipientGeneration,
+    recipientKey: recipientKey ?? this.recipientKey,
+    certificateCommitment: certificateCommitment ?? this.certificateCommitment,
+    stage: stage ?? this.stage,
+  );
+  CompanyJoinRequest copyWithCompanion(CompanyJoinRequestsCompanion data) {
+    return CompanyJoinRequest(
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      side: data.side.present ? data.side.value : this.side,
+      requestCommitment: data.requestCommitment.present
+          ? data.requestCommitment.value
+          : this.requestCommitment,
+      requestBytes: data.requestBytes.present
+          ? data.requestBytes.value
+          : this.requestBytes,
+      recipientInstallation: data.recipientInstallation.present
+          ? data.recipientInstallation.value
+          : this.recipientInstallation,
+      recipientGeneration: data.recipientGeneration.present
+          ? data.recipientGeneration.value
+          : this.recipientGeneration,
+      recipientKey: data.recipientKey.present
+          ? data.recipientKey.value
+          : this.recipientKey,
+      certificateCommitment: data.certificateCommitment.present
+          ? data.certificateCommitment.value
+          : this.certificateCommitment,
+      stage: data.stage.present ? data.stage.value : this.stage,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJoinRequest(')
+          ..write('requestId: $requestId, ')
+          ..write('side: $side, ')
+          ..write('requestCommitment: $requestCommitment, ')
+          ..write('requestBytes: $requestBytes, ')
+          ..write('recipientInstallation: $recipientInstallation, ')
+          ..write('recipientGeneration: $recipientGeneration, ')
+          ..write('recipientKey: $recipientKey, ')
+          ..write('certificateCommitment: $certificateCommitment, ')
+          ..write('stage: $stage')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    requestId,
+    side,
+    requestCommitment,
+    requestBytes,
+    recipientInstallation,
+    recipientGeneration,
+    recipientKey,
+    certificateCommitment,
+    stage,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyJoinRequest &&
+          other.requestId == this.requestId &&
+          other.side == this.side &&
+          other.requestCommitment == this.requestCommitment &&
+          other.requestBytes == this.requestBytes &&
+          other.recipientInstallation == this.recipientInstallation &&
+          other.recipientGeneration == this.recipientGeneration &&
+          other.recipientKey == this.recipientKey &&
+          other.certificateCommitment == this.certificateCommitment &&
+          other.stage == this.stage);
+}
+
+class CompanyJoinRequestsCompanion extends UpdateCompanion<CompanyJoinRequest> {
+  final Value<String> requestId;
+  final Value<String> side;
+  final Value<String> requestCommitment;
+  final Value<String> requestBytes;
+  final Value<String> recipientInstallation;
+  final Value<String> recipientGeneration;
+  final Value<String> recipientKey;
+  final Value<String> certificateCommitment;
+  final Value<String> stage;
+  final Value<int> rowid;
+  const CompanyJoinRequestsCompanion({
+    this.requestId = const Value.absent(),
+    this.side = const Value.absent(),
+    this.requestCommitment = const Value.absent(),
+    this.requestBytes = const Value.absent(),
+    this.recipientInstallation = const Value.absent(),
+    this.recipientGeneration = const Value.absent(),
+    this.recipientKey = const Value.absent(),
+    this.certificateCommitment = const Value.absent(),
+    this.stage = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyJoinRequestsCompanion.insert({
+    required String requestId,
+    required String side,
+    required String requestCommitment,
+    required String requestBytes,
+    required String recipientInstallation,
+    required String recipientGeneration,
+    required String recipientKey,
+    required String certificateCommitment,
+    required String stage,
+    this.rowid = const Value.absent(),
+  }) : requestId = Value(requestId),
+       side = Value(side),
+       requestCommitment = Value(requestCommitment),
+       requestBytes = Value(requestBytes),
+       recipientInstallation = Value(recipientInstallation),
+       recipientGeneration = Value(recipientGeneration),
+       recipientKey = Value(recipientKey),
+       certificateCommitment = Value(certificateCommitment),
+       stage = Value(stage);
+  static Insertable<CompanyJoinRequest> custom({
+    Expression<String>? requestId,
+    Expression<String>? side,
+    Expression<String>? requestCommitment,
+    Expression<String>? requestBytes,
+    Expression<String>? recipientInstallation,
+    Expression<String>? recipientGeneration,
+    Expression<String>? recipientKey,
+    Expression<String>? certificateCommitment,
+    Expression<String>? stage,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (requestId != null) 'request_id': requestId,
+      if (side != null) 'side': side,
+      if (requestCommitment != null) 'request_commitment': requestCommitment,
+      if (requestBytes != null) 'request_bytes': requestBytes,
+      if (recipientInstallation != null)
+        'recipient_installation': recipientInstallation,
+      if (recipientGeneration != null)
+        'recipient_generation': recipientGeneration,
+      if (recipientKey != null) 'recipient_key': recipientKey,
+      if (certificateCommitment != null)
+        'certificate_commitment': certificateCommitment,
+      if (stage != null) 'stage': stage,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyJoinRequestsCompanion copyWith({
+    Value<String>? requestId,
+    Value<String>? side,
+    Value<String>? requestCommitment,
+    Value<String>? requestBytes,
+    Value<String>? recipientInstallation,
+    Value<String>? recipientGeneration,
+    Value<String>? recipientKey,
+    Value<String>? certificateCommitment,
+    Value<String>? stage,
+    Value<int>? rowid,
+  }) {
+    return CompanyJoinRequestsCompanion(
+      requestId: requestId ?? this.requestId,
+      side: side ?? this.side,
+      requestCommitment: requestCommitment ?? this.requestCommitment,
+      requestBytes: requestBytes ?? this.requestBytes,
+      recipientInstallation:
+          recipientInstallation ?? this.recipientInstallation,
+      recipientGeneration: recipientGeneration ?? this.recipientGeneration,
+      recipientKey: recipientKey ?? this.recipientKey,
+      certificateCommitment:
+          certificateCommitment ?? this.certificateCommitment,
+      stage: stage ?? this.stage,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (side.present) {
+      map['side'] = Variable<String>(side.value);
+    }
+    if (requestCommitment.present) {
+      map['request_commitment'] = Variable<String>(requestCommitment.value);
+    }
+    if (requestBytes.present) {
+      map['request_bytes'] = Variable<String>(requestBytes.value);
+    }
+    if (recipientInstallation.present) {
+      map['recipient_installation'] = Variable<String>(
+        recipientInstallation.value,
+      );
+    }
+    if (recipientGeneration.present) {
+      map['recipient_generation'] = Variable<String>(recipientGeneration.value);
+    }
+    if (recipientKey.present) {
+      map['recipient_key'] = Variable<String>(recipientKey.value);
+    }
+    if (certificateCommitment.present) {
+      map['certificate_commitment'] = Variable<String>(
+        certificateCommitment.value,
+      );
+    }
+    if (stage.present) {
+      map['stage'] = Variable<String>(stage.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJoinRequestsCompanion(')
+          ..write('requestId: $requestId, ')
+          ..write('side: $side, ')
+          ..write('requestCommitment: $requestCommitment, ')
+          ..write('requestBytes: $requestBytes, ')
+          ..write('recipientInstallation: $recipientInstallation, ')
+          ..write('recipientGeneration: $recipientGeneration, ')
+          ..write('recipientKey: $recipientKey, ')
+          ..write('certificateCommitment: $certificateCommitment, ')
+          ..write('stage: $stage, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CompanyJoinEventsTable extends CompanyJoinEvents
+    with TableInfo<$CompanyJoinEventsTable, CompanyJoinEvent> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyJoinEventsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ordinalMeta = const VerificationMeta(
+    'ordinal',
+  );
+  @override
+  late final GeneratedColumn<int> ordinal = GeneratedColumn<int>(
+    'ordinal',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _evidenceBytesMeta = const VerificationMeta(
+    'evidenceBytes',
+  );
+  @override
+  late final GeneratedColumn<String> evidenceBytes = GeneratedColumn<String>(
+    'evidence_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    requestId,
+    ordinal,
+    kind,
+    evidenceBytes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_join_events';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyJoinEvent> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('ordinal')) {
+      context.handle(
+        _ordinalMeta,
+        ordinal.isAcceptableOrUnknown(data['ordinal']!, _ordinalMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ordinalMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('evidence_bytes')) {
+      context.handle(
+        _evidenceBytesMeta,
+        evidenceBytes.isAcceptableOrUnknown(
+          data['evidence_bytes']!,
+          _evidenceBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_evidenceBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {requestId, ordinal};
+  @override
+  CompanyJoinEvent map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyJoinEvent(
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      ordinal: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}ordinal'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      evidenceBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}evidence_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyJoinEventsTable createAlias(String alias) {
+    return $CompanyJoinEventsTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyJoinEvent extends DataClass
+    implements Insertable<CompanyJoinEvent> {
+  final String requestId;
+  final int ordinal;
+  final String kind;
+  final String evidenceBytes;
+  const CompanyJoinEvent({
+    required this.requestId,
+    required this.ordinal,
+    required this.kind,
+    required this.evidenceBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['request_id'] = Variable<String>(requestId);
+    map['ordinal'] = Variable<int>(ordinal);
+    map['kind'] = Variable<String>(kind);
+    map['evidence_bytes'] = Variable<String>(evidenceBytes);
+    return map;
+  }
+
+  CompanyJoinEventsCompanion toCompanion(bool nullToAbsent) {
+    return CompanyJoinEventsCompanion(
+      requestId: Value(requestId),
+      ordinal: Value(ordinal),
+      kind: Value(kind),
+      evidenceBytes: Value(evidenceBytes),
+    );
+  }
+
+  factory CompanyJoinEvent.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyJoinEvent(
+      requestId: serializer.fromJson<String>(json['requestId']),
+      ordinal: serializer.fromJson<int>(json['ordinal']),
+      kind: serializer.fromJson<String>(json['kind']),
+      evidenceBytes: serializer.fromJson<String>(json['evidenceBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'requestId': serializer.toJson<String>(requestId),
+      'ordinal': serializer.toJson<int>(ordinal),
+      'kind': serializer.toJson<String>(kind),
+      'evidenceBytes': serializer.toJson<String>(evidenceBytes),
+    };
+  }
+
+  CompanyJoinEvent copyWith({
+    String? requestId,
+    int? ordinal,
+    String? kind,
+    String? evidenceBytes,
+  }) => CompanyJoinEvent(
+    requestId: requestId ?? this.requestId,
+    ordinal: ordinal ?? this.ordinal,
+    kind: kind ?? this.kind,
+    evidenceBytes: evidenceBytes ?? this.evidenceBytes,
+  );
+  CompanyJoinEvent copyWithCompanion(CompanyJoinEventsCompanion data) {
+    return CompanyJoinEvent(
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      ordinal: data.ordinal.present ? data.ordinal.value : this.ordinal,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      evidenceBytes: data.evidenceBytes.present
+          ? data.evidenceBytes.value
+          : this.evidenceBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJoinEvent(')
+          ..write('requestId: $requestId, ')
+          ..write('ordinal: $ordinal, ')
+          ..write('kind: $kind, ')
+          ..write('evidenceBytes: $evidenceBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(requestId, ordinal, kind, evidenceBytes);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyJoinEvent &&
+          other.requestId == this.requestId &&
+          other.ordinal == this.ordinal &&
+          other.kind == this.kind &&
+          other.evidenceBytes == this.evidenceBytes);
+}
+
+class CompanyJoinEventsCompanion extends UpdateCompanion<CompanyJoinEvent> {
+  final Value<String> requestId;
+  final Value<int> ordinal;
+  final Value<String> kind;
+  final Value<String> evidenceBytes;
+  final Value<int> rowid;
+  const CompanyJoinEventsCompanion({
+    this.requestId = const Value.absent(),
+    this.ordinal = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.evidenceBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyJoinEventsCompanion.insert({
+    required String requestId,
+    required int ordinal,
+    required String kind,
+    required String evidenceBytes,
+    this.rowid = const Value.absent(),
+  }) : requestId = Value(requestId),
+       ordinal = Value(ordinal),
+       kind = Value(kind),
+       evidenceBytes = Value(evidenceBytes);
+  static Insertable<CompanyJoinEvent> custom({
+    Expression<String>? requestId,
+    Expression<int>? ordinal,
+    Expression<String>? kind,
+    Expression<String>? evidenceBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (requestId != null) 'request_id': requestId,
+      if (ordinal != null) 'ordinal': ordinal,
+      if (kind != null) 'kind': kind,
+      if (evidenceBytes != null) 'evidence_bytes': evidenceBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyJoinEventsCompanion copyWith({
+    Value<String>? requestId,
+    Value<int>? ordinal,
+    Value<String>? kind,
+    Value<String>? evidenceBytes,
+    Value<int>? rowid,
+  }) {
+    return CompanyJoinEventsCompanion(
+      requestId: requestId ?? this.requestId,
+      ordinal: ordinal ?? this.ordinal,
+      kind: kind ?? this.kind,
+      evidenceBytes: evidenceBytes ?? this.evidenceBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (ordinal.present) {
+      map['ordinal'] = Variable<int>(ordinal.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (evidenceBytes.present) {
+      map['evidence_bytes'] = Variable<String>(evidenceBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJoinEventsCompanion(')
+          ..write('requestId: $requestId, ')
+          ..write('ordinal: $ordinal, ')
+          ..write('kind: $kind, ')
+          ..write('evidenceBytes: $evidenceBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -12322,6 +13708,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $JobLineConflictsTable jobLineConflicts = $JobLineConflictsTable(
     this,
   );
+  late final $CompanyMembershipCertificatesTable companyMembershipCertificates =
+      $CompanyMembershipCertificatesTable(this);
+  late final $CompanyJoinRequestsTable companyJoinRequests =
+      $CompanyJoinRequestsTable(this);
+  late final $CompanyJoinEventsTable companyJoinEvents =
+      $CompanyJoinEventsTable(this);
   late final SettingsDao settingsDao = SettingsDao(this as AppDatabase);
   late final TaxonomyDao taxonomyDao = TaxonomyDao(this as AppDatabase);
   late final PartsDao partsDao = PartsDao(this as AppDatabase);
@@ -12355,6 +13747,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     jobLineAudits,
     jobLineOutgoing,
     jobLineConflicts,
+    companyMembershipCertificates,
+    companyJoinRequests,
+    companyJoinEvents,
   ];
 }
 
@@ -12622,12 +14017,11 @@ class $$AppSettingsTableTableManager
               $$AppSettingsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
               $$AppSettingsTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback:
-              ({
-                Value<String> key = const Value.absent(),
-                Value<String> value = const Value.absent(),
-                Value<int> rowid = const Value.absent(),
-              }) => AppSettingsCompanion(key: key, value: value, rowid: rowid),
+          updateCompanionCallback: ({
+            Value<String> key = const Value.absent(),
+            Value<String> value = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) => AppSettingsCompanion(key: key, value: value, rowid: rowid),
           createCompanionCallback:
               ({
                 required String key,
@@ -12663,28 +14057,26 @@ typedef $$AppSettingsTableProcessedTableManager =
       AppSetting,
       PrefetchHooks Function()
     >;
-typedef $$CategoriesTableCreateCompanionBuilder =
-    CategoriesCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String name,
-      Value<int> rowid,
-    });
-typedef $$CategoriesTableUpdateCompanionBuilder =
-    CategoriesCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> name,
-      Value<int> rowid,
-    });
+typedef $$CategoriesTableCreateCompanionBuilder = CategoriesCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String name,
+  Value<int> rowid,
+});
+typedef $$CategoriesTableUpdateCompanionBuilder = CategoriesCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> name,
+  Value<int> rowid,
+});
 
 class $$CategoriesTableFilterComposer
     extends Composer<_$AppDatabase, $CategoriesTable> {
@@ -12899,30 +14291,28 @@ typedef $$CategoriesTableProcessedTableManager =
       Category,
       PrefetchHooks Function()
     >;
-typedef $$StylesTableCreateCompanionBuilder =
-    StylesCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String categoryId,
-      required String name,
-      Value<int> rowid,
-    });
-typedef $$StylesTableUpdateCompanionBuilder =
-    StylesCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> categoryId,
-      Value<String> name,
-      Value<int> rowid,
-    });
+typedef $$StylesTableCreateCompanionBuilder = StylesCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String categoryId,
+  required String name,
+  Value<int> rowid,
+});
+typedef $$StylesTableUpdateCompanionBuilder = StylesCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> categoryId,
+  Value<String> name,
+  Value<int> rowid,
+});
 
 class $$StylesTableFilterComposer
     extends Composer<_$AppDatabase, $StylesTable> {
@@ -13156,30 +14546,28 @@ typedef $$StylesTableProcessedTableManager =
       Style,
       PrefetchHooks Function()
     >;
-typedef $$TypesTableCreateCompanionBuilder =
-    TypesCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String styleId,
-      required String name,
-      Value<int> rowid,
-    });
-typedef $$TypesTableUpdateCompanionBuilder =
-    TypesCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> styleId,
-      Value<String> name,
-      Value<int> rowid,
-    });
+typedef $$TypesTableCreateCompanionBuilder = TypesCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String styleId,
+  required String name,
+  Value<int> rowid,
+});
+typedef $$TypesTableUpdateCompanionBuilder = TypesCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> styleId,
+  Value<String> name,
+  Value<int> rowid,
+});
 
 class $$TypesTableFilterComposer extends Composer<_$AppDatabase, $TypesTable> {
   $$TypesTableFilterComposer({
@@ -13410,28 +14798,26 @@ typedef $$TypesTableProcessedTableManager =
       Type,
       PrefetchHooks Function()
     >;
-typedef $$DevicesTableCreateCompanionBuilder =
-    DevicesCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String name,
-      Value<int> rowid,
-    });
-typedef $$DevicesTableUpdateCompanionBuilder =
-    DevicesCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> name,
-      Value<int> rowid,
-    });
+typedef $$DevicesTableCreateCompanionBuilder = DevicesCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String name,
+  Value<int> rowid,
+});
+typedef $$DevicesTableUpdateCompanionBuilder = DevicesCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> name,
+  Value<int> rowid,
+});
 
 class $$DevicesTableFilterComposer
     extends Composer<_$AppDatabase, $DevicesTable> {
@@ -13646,28 +15032,26 @@ typedef $$DevicesTableProcessedTableManager =
       Device,
       PrefetchHooks Function()
     >;
-typedef $$BrandsTableCreateCompanionBuilder =
-    BrandsCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String name,
-      Value<int> rowid,
-    });
-typedef $$BrandsTableUpdateCompanionBuilder =
-    BrandsCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> name,
-      Value<int> rowid,
-    });
+typedef $$BrandsTableCreateCompanionBuilder = BrandsCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String name,
+  Value<int> rowid,
+});
+typedef $$BrandsTableUpdateCompanionBuilder = BrandsCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> name,
+  Value<int> rowid,
+});
 
 class $$BrandsTableFilterComposer
     extends Composer<_$AppDatabase, $BrandsTable> {
@@ -13882,28 +15266,26 @@ typedef $$BrandsTableProcessedTableManager =
       Brand,
       PrefetchHooks Function()
     >;
-typedef $$SuppliersTableCreateCompanionBuilder =
-    SuppliersCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String name,
-      Value<int> rowid,
-    });
-typedef $$SuppliersTableUpdateCompanionBuilder =
-    SuppliersCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> name,
-      Value<int> rowid,
-    });
+typedef $$SuppliersTableCreateCompanionBuilder = SuppliersCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String name,
+  Value<int> rowid,
+});
+typedef $$SuppliersTableUpdateCompanionBuilder = SuppliersCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> name,
+  Value<int> rowid,
+});
 
 class $$SuppliersTableFilterComposer
     extends Composer<_$AppDatabase, $SuppliersTable> {
@@ -14118,48 +15500,46 @@ typedef $$SuppliersTableProcessedTableManager =
       Supplier,
       PrefetchHooks Function()
     >;
-typedef $$PartsTableCreateCompanionBuilder =
-    PartsCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String name,
-      Value<String> description,
-      Value<String?> categoryId,
-      Value<String?> styleId,
-      Value<String?> typeId,
-      Value<String> uom,
-      Value<String> specs,
-      Value<String> keywords,
-      Value<String?> photoPath,
-      Value<bool> active,
-      Value<String?> defaultSupplierId,
-      Value<int> rowid,
-    });
-typedef $$PartsTableUpdateCompanionBuilder =
-    PartsCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> name,
-      Value<String> description,
-      Value<String?> categoryId,
-      Value<String?> styleId,
-      Value<String?> typeId,
-      Value<String> uom,
-      Value<String> specs,
-      Value<String> keywords,
-      Value<String?> photoPath,
-      Value<bool> active,
-      Value<String?> defaultSupplierId,
-      Value<int> rowid,
-    });
+typedef $$PartsTableCreateCompanionBuilder = PartsCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String name,
+  Value<String> description,
+  Value<String?> categoryId,
+  Value<String?> styleId,
+  Value<String?> typeId,
+  Value<String> uom,
+  Value<String> specs,
+  Value<String> keywords,
+  Value<String?> photoPath,
+  Value<bool> active,
+  Value<String?> defaultSupplierId,
+  Value<int> rowid,
+});
+typedef $$PartsTableUpdateCompanionBuilder = PartsCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> name,
+  Value<String> description,
+  Value<String?> categoryId,
+  Value<String?> styleId,
+  Value<String?> typeId,
+  Value<String> uom,
+  Value<String> specs,
+  Value<String> keywords,
+  Value<String?> photoPath,
+  Value<bool> active,
+  Value<String?> defaultSupplierId,
+  Value<int> rowid,
+});
 
 class $$PartsTableFilterComposer extends Composer<_$AppDatabase, $PartsTable> {
   $$PartsTableFilterComposer({
@@ -15540,38 +16920,36 @@ typedef $$SupplierListingsTableProcessedTableManager =
       SupplierListing,
       PrefetchHooks Function()
     >;
-typedef $$JobsTableCreateCompanionBuilder =
-    JobsCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String name,
-      Value<String?> customer,
-      Value<String?> location,
-      Value<String?> jobNumber,
-      Value<String> status,
-      Value<String?> notes,
-      Value<int> rowid,
-    });
-typedef $$JobsTableUpdateCompanionBuilder =
-    JobsCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> name,
-      Value<String?> customer,
-      Value<String?> location,
-      Value<String?> jobNumber,
-      Value<String> status,
-      Value<String?> notes,
-      Value<int> rowid,
-    });
+typedef $$JobsTableCreateCompanionBuilder = JobsCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String name,
+  Value<String?> customer,
+  Value<String?> location,
+  Value<String?> jobNumber,
+  Value<String> status,
+  Value<String?> notes,
+  Value<int> rowid,
+});
+typedef $$JobsTableUpdateCompanionBuilder = JobsCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> name,
+  Value<String?> customer,
+  Value<String?> location,
+  Value<String?> jobNumber,
+  Value<String> status,
+  Value<String?> notes,
+  Value<int> rowid,
+});
 
 class $$JobsTableFilterComposer extends Composer<_$AppDatabase, $JobsTable> {
   $$JobsTableFilterComposer({
@@ -16237,44 +17615,42 @@ typedef $$CompanyJobsTableProcessedTableManager =
       CompanyJob,
       PrefetchHooks Function()
     >;
-typedef $$JobLinesTableCreateCompanionBuilder =
-    JobLinesCompanion Function({
-      required String id,
-      required String originDeviceId,
-      required DateTime createdAt,
-      required DateTime modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      required String jobId,
-      Value<String?> partId,
-      Value<String?> customName,
-      Value<String?> customNotes,
-      Value<String?> brandVersionId,
-      required double neededQty,
-      Value<double> shopPullQty,
-      Value<String?> uom,
-      Value<String?> notes,
-      Value<int> rowid,
-    });
-typedef $$JobLinesTableUpdateCompanionBuilder =
-    JobLinesCompanion Function({
-      Value<String> id,
-      Value<String> originDeviceId,
-      Value<DateTime> createdAt,
-      Value<DateTime> modifiedAt,
-      Value<int> revision,
-      Value<DateTime?> deletedAt,
-      Value<String> jobId,
-      Value<String?> partId,
-      Value<String?> customName,
-      Value<String?> customNotes,
-      Value<String?> brandVersionId,
-      Value<double> neededQty,
-      Value<double> shopPullQty,
-      Value<String?> uom,
-      Value<String?> notes,
-      Value<int> rowid,
-    });
+typedef $$JobLinesTableCreateCompanionBuilder = JobLinesCompanion Function({
+  required String id,
+  required String originDeviceId,
+  required DateTime createdAt,
+  required DateTime modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  required String jobId,
+  Value<String?> partId,
+  Value<String?> customName,
+  Value<String?> customNotes,
+  Value<String?> brandVersionId,
+  required double neededQty,
+  Value<double> shopPullQty,
+  Value<String?> uom,
+  Value<String?> notes,
+  Value<int> rowid,
+});
+typedef $$JobLinesTableUpdateCompanionBuilder = JobLinesCompanion Function({
+  Value<String> id,
+  Value<String> originDeviceId,
+  Value<DateTime> createdAt,
+  Value<DateTime> modifiedAt,
+  Value<int> revision,
+  Value<DateTime?> deletedAt,
+  Value<String> jobId,
+  Value<String?> partId,
+  Value<String?> customName,
+  Value<String?> customNotes,
+  Value<String?> brandVersionId,
+  Value<double> neededQty,
+  Value<double> shopPullQty,
+  Value<String?> uom,
+  Value<String?> notes,
+  Value<int> rowid,
+});
 
 class $$JobLinesTableFilterComposer
     extends Composer<_$AppDatabase, $JobLinesTable> {
@@ -18598,6 +19974,752 @@ typedef $$JobLineConflictsTableProcessedTableManager =
       JobLineConflict,
       PrefetchHooks Function()
     >;
+typedef $$CompanyMembershipCertificatesTableCreateCompanionBuilder =
+    CompanyMembershipCertificatesCompanion Function({
+      required String grantId,
+      required String companyId,
+      required String proofCommitment,
+      required String proofBytes,
+      required String issuerDeviceId,
+      required int issuerSequence,
+      Value<int> rowid,
+    });
+typedef $$CompanyMembershipCertificatesTableUpdateCompanionBuilder =
+    CompanyMembershipCertificatesCompanion Function({
+      Value<String> grantId,
+      Value<String> companyId,
+      Value<String> proofCommitment,
+      Value<String> proofBytes,
+      Value<String> issuerDeviceId,
+      Value<int> issuerSequence,
+      Value<int> rowid,
+    });
+
+class $$CompanyMembershipCertificatesTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyMembershipCertificatesTable> {
+  $$CompanyMembershipCertificatesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get grantId => $composableBuilder(
+    column: $table.grantId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get proofCommitment => $composableBuilder(
+    column: $table.proofCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get proofBytes => $composableBuilder(
+    column: $table.proofBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get issuerDeviceId => $composableBuilder(
+    column: $table.issuerDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get issuerSequence => $composableBuilder(
+    column: $table.issuerSequence,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyMembershipCertificatesTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyMembershipCertificatesTable> {
+  $$CompanyMembershipCertificatesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get grantId => $composableBuilder(
+    column: $table.grantId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get proofCommitment => $composableBuilder(
+    column: $table.proofCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get proofBytes => $composableBuilder(
+    column: $table.proofBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get issuerDeviceId => $composableBuilder(
+    column: $table.issuerDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get issuerSequence => $composableBuilder(
+    column: $table.issuerSequence,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyMembershipCertificatesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyMembershipCertificatesTable> {
+  $$CompanyMembershipCertificatesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get grantId =>
+      $composableBuilder(column: $table.grantId, builder: (column) => column);
+
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get proofCommitment => $composableBuilder(
+    column: $table.proofCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get proofBytes => $composableBuilder(
+    column: $table.proofBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get issuerDeviceId => $composableBuilder(
+    column: $table.issuerDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get issuerSequence => $composableBuilder(
+    column: $table.issuerSequence,
+    builder: (column) => column,
+  );
+}
+
+class $$CompanyMembershipCertificatesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyMembershipCertificatesTable,
+          CompanyMembershipCertificate,
+          $$CompanyMembershipCertificatesTableFilterComposer,
+          $$CompanyMembershipCertificatesTableOrderingComposer,
+          $$CompanyMembershipCertificatesTableAnnotationComposer,
+          $$CompanyMembershipCertificatesTableCreateCompanionBuilder,
+          $$CompanyMembershipCertificatesTableUpdateCompanionBuilder,
+          (
+            CompanyMembershipCertificate,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyMembershipCertificatesTable,
+              CompanyMembershipCertificate
+            >,
+          ),
+          CompanyMembershipCertificate,
+          PrefetchHooks Function()
+        > {
+  $$CompanyMembershipCertificatesTableTableManager(
+    _$AppDatabase db,
+    $CompanyMembershipCertificatesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyMembershipCertificatesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CompanyMembershipCertificatesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CompanyMembershipCertificatesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> grantId = const Value.absent(),
+                Value<String> companyId = const Value.absent(),
+                Value<String> proofCommitment = const Value.absent(),
+                Value<String> proofBytes = const Value.absent(),
+                Value<String> issuerDeviceId = const Value.absent(),
+                Value<int> issuerSequence = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyMembershipCertificatesCompanion(
+                grantId: grantId,
+                companyId: companyId,
+                proofCommitment: proofCommitment,
+                proofBytes: proofBytes,
+                issuerDeviceId: issuerDeviceId,
+                issuerSequence: issuerSequence,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String grantId,
+                required String companyId,
+                required String proofCommitment,
+                required String proofBytes,
+                required String issuerDeviceId,
+                required int issuerSequence,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyMembershipCertificatesCompanion.insert(
+                grantId: grantId,
+                companyId: companyId,
+                proofCommitment: proofCommitment,
+                proofBytes: proofBytes,
+                issuerDeviceId: issuerDeviceId,
+                issuerSequence: issuerSequence,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyMembershipCertificatesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyMembershipCertificatesTable,
+      CompanyMembershipCertificate,
+      $$CompanyMembershipCertificatesTableFilterComposer,
+      $$CompanyMembershipCertificatesTableOrderingComposer,
+      $$CompanyMembershipCertificatesTableAnnotationComposer,
+      $$CompanyMembershipCertificatesTableCreateCompanionBuilder,
+      $$CompanyMembershipCertificatesTableUpdateCompanionBuilder,
+      (
+        CompanyMembershipCertificate,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyMembershipCertificatesTable,
+          CompanyMembershipCertificate
+        >,
+      ),
+      CompanyMembershipCertificate,
+      PrefetchHooks Function()
+    >;
+typedef $$CompanyJoinRequestsTableCreateCompanionBuilder =
+    CompanyJoinRequestsCompanion Function({
+      required String requestId,
+      required String side,
+      required String requestCommitment,
+      required String requestBytes,
+      required String recipientInstallation,
+      required String recipientGeneration,
+      required String recipientKey,
+      required String certificateCommitment,
+      required String stage,
+      Value<int> rowid,
+    });
+typedef $$CompanyJoinRequestsTableUpdateCompanionBuilder =
+    CompanyJoinRequestsCompanion Function({
+      Value<String> requestId,
+      Value<String> side,
+      Value<String> requestCommitment,
+      Value<String> requestBytes,
+      Value<String> recipientInstallation,
+      Value<String> recipientGeneration,
+      Value<String> recipientKey,
+      Value<String> certificateCommitment,
+      Value<String> stage,
+      Value<int> rowid,
+    });
+
+class $$CompanyJoinRequestsTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyJoinRequestsTable> {
+  $$CompanyJoinRequestsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get side => $composableBuilder(
+    column: $table.side,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestCommitment => $composableBuilder(
+    column: $table.requestCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestBytes => $composableBuilder(
+    column: $table.requestBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get recipientInstallation => $composableBuilder(
+    column: $table.recipientInstallation,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get recipientGeneration => $composableBuilder(
+    column: $table.recipientGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get recipientKey => $composableBuilder(
+    column: $table.recipientKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get certificateCommitment => $composableBuilder(
+    column: $table.certificateCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get stage => $composableBuilder(
+    column: $table.stage,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyJoinRequestsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyJoinRequestsTable> {
+  $$CompanyJoinRequestsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get side => $composableBuilder(
+    column: $table.side,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestCommitment => $composableBuilder(
+    column: $table.requestCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestBytes => $composableBuilder(
+    column: $table.requestBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get recipientInstallation => $composableBuilder(
+    column: $table.recipientInstallation,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get recipientGeneration => $composableBuilder(
+    column: $table.recipientGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get recipientKey => $composableBuilder(
+    column: $table.recipientKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get certificateCommitment => $composableBuilder(
+    column: $table.certificateCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get stage => $composableBuilder(
+    column: $table.stage,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyJoinRequestsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyJoinRequestsTable> {
+  $$CompanyJoinRequestsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get side =>
+      $composableBuilder(column: $table.side, builder: (column) => column);
+
+  GeneratedColumn<String> get requestCommitment => $composableBuilder(
+    column: $table.requestCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestBytes => $composableBuilder(
+    column: $table.requestBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get recipientInstallation => $composableBuilder(
+    column: $table.recipientInstallation,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get recipientGeneration => $composableBuilder(
+    column: $table.recipientGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get recipientKey => $composableBuilder(
+    column: $table.recipientKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get certificateCommitment => $composableBuilder(
+    column: $table.certificateCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get stage =>
+      $composableBuilder(column: $table.stage, builder: (column) => column);
+}
+
+class $$CompanyJoinRequestsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyJoinRequestsTable,
+          CompanyJoinRequest,
+          $$CompanyJoinRequestsTableFilterComposer,
+          $$CompanyJoinRequestsTableOrderingComposer,
+          $$CompanyJoinRequestsTableAnnotationComposer,
+          $$CompanyJoinRequestsTableCreateCompanionBuilder,
+          $$CompanyJoinRequestsTableUpdateCompanionBuilder,
+          (
+            CompanyJoinRequest,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyJoinRequestsTable,
+              CompanyJoinRequest
+            >,
+          ),
+          CompanyJoinRequest,
+          PrefetchHooks Function()
+        > {
+  $$CompanyJoinRequestsTableTableManager(
+    _$AppDatabase db,
+    $CompanyJoinRequestsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyJoinRequestsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CompanyJoinRequestsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CompanyJoinRequestsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> requestId = const Value.absent(),
+                Value<String> side = const Value.absent(),
+                Value<String> requestCommitment = const Value.absent(),
+                Value<String> requestBytes = const Value.absent(),
+                Value<String> recipientInstallation = const Value.absent(),
+                Value<String> recipientGeneration = const Value.absent(),
+                Value<String> recipientKey = const Value.absent(),
+                Value<String> certificateCommitment = const Value.absent(),
+                Value<String> stage = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJoinRequestsCompanion(
+                requestId: requestId,
+                side: side,
+                requestCommitment: requestCommitment,
+                requestBytes: requestBytes,
+                recipientInstallation: recipientInstallation,
+                recipientGeneration: recipientGeneration,
+                recipientKey: recipientKey,
+                certificateCommitment: certificateCommitment,
+                stage: stage,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String requestId,
+                required String side,
+                required String requestCommitment,
+                required String requestBytes,
+                required String recipientInstallation,
+                required String recipientGeneration,
+                required String recipientKey,
+                required String certificateCommitment,
+                required String stage,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJoinRequestsCompanion.insert(
+                requestId: requestId,
+                side: side,
+                requestCommitment: requestCommitment,
+                requestBytes: requestBytes,
+                recipientInstallation: recipientInstallation,
+                recipientGeneration: recipientGeneration,
+                recipientKey: recipientKey,
+                certificateCommitment: certificateCommitment,
+                stage: stage,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyJoinRequestsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyJoinRequestsTable,
+      CompanyJoinRequest,
+      $$CompanyJoinRequestsTableFilterComposer,
+      $$CompanyJoinRequestsTableOrderingComposer,
+      $$CompanyJoinRequestsTableAnnotationComposer,
+      $$CompanyJoinRequestsTableCreateCompanionBuilder,
+      $$CompanyJoinRequestsTableUpdateCompanionBuilder,
+      (
+        CompanyJoinRequest,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyJoinRequestsTable,
+          CompanyJoinRequest
+        >,
+      ),
+      CompanyJoinRequest,
+      PrefetchHooks Function()
+    >;
+typedef $$CompanyJoinEventsTableCreateCompanionBuilder =
+    CompanyJoinEventsCompanion Function({
+      required String requestId,
+      required int ordinal,
+      required String kind,
+      required String evidenceBytes,
+      Value<int> rowid,
+    });
+typedef $$CompanyJoinEventsTableUpdateCompanionBuilder =
+    CompanyJoinEventsCompanion Function({
+      Value<String> requestId,
+      Value<int> ordinal,
+      Value<String> kind,
+      Value<String> evidenceBytes,
+      Value<int> rowid,
+    });
+
+class $$CompanyJoinEventsTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyJoinEventsTable> {
+  $$CompanyJoinEventsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get ordinal => $composableBuilder(
+    column: $table.ordinal,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get evidenceBytes => $composableBuilder(
+    column: $table.evidenceBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyJoinEventsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyJoinEventsTable> {
+  $$CompanyJoinEventsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get ordinal => $composableBuilder(
+    column: $table.ordinal,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get evidenceBytes => $composableBuilder(
+    column: $table.evidenceBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyJoinEventsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyJoinEventsTable> {
+  $$CompanyJoinEventsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<int> get ordinal =>
+      $composableBuilder(column: $table.ordinal, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get evidenceBytes => $composableBuilder(
+    column: $table.evidenceBytes,
+    builder: (column) => column,
+  );
+}
+
+class $$CompanyJoinEventsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyJoinEventsTable,
+          CompanyJoinEvent,
+          $$CompanyJoinEventsTableFilterComposer,
+          $$CompanyJoinEventsTableOrderingComposer,
+          $$CompanyJoinEventsTableAnnotationComposer,
+          $$CompanyJoinEventsTableCreateCompanionBuilder,
+          $$CompanyJoinEventsTableUpdateCompanionBuilder,
+          (
+            CompanyJoinEvent,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyJoinEventsTable,
+              CompanyJoinEvent
+            >,
+          ),
+          CompanyJoinEvent,
+          PrefetchHooks Function()
+        > {
+  $$CompanyJoinEventsTableTableManager(
+    _$AppDatabase db,
+    $CompanyJoinEventsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyJoinEventsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CompanyJoinEventsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CompanyJoinEventsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> requestId = const Value.absent(),
+                Value<int> ordinal = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> evidenceBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJoinEventsCompanion(
+                requestId: requestId,
+                ordinal: ordinal,
+                kind: kind,
+                evidenceBytes: evidenceBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String requestId,
+                required int ordinal,
+                required String kind,
+                required String evidenceBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJoinEventsCompanion.insert(
+                requestId: requestId,
+                ordinal: ordinal,
+                kind: kind,
+                evidenceBytes: evidenceBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyJoinEventsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyJoinEventsTable,
+      CompanyJoinEvent,
+      $$CompanyJoinEventsTableFilterComposer,
+      $$CompanyJoinEventsTableOrderingComposer,
+      $$CompanyJoinEventsTableAnnotationComposer,
+      $$CompanyJoinEventsTableCreateCompanionBuilder,
+      $$CompanyJoinEventsTableUpdateCompanionBuilder,
+      (
+        CompanyJoinEvent,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyJoinEventsTable,
+          CompanyJoinEvent
+        >,
+      ),
+      CompanyJoinEvent,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -18652,4 +20774,14 @@ class $AppDatabaseManager {
       $$JobLineOutgoingTableTableManager(_db, _db.jobLineOutgoing);
   $$JobLineConflictsTableTableManager get jobLineConflicts =>
       $$JobLineConflictsTableTableManager(_db, _db.jobLineConflicts);
+  $$CompanyMembershipCertificatesTableTableManager
+  get companyMembershipCertificates =>
+      $$CompanyMembershipCertificatesTableTableManager(
+        _db,
+        _db.companyMembershipCertificates,
+      );
+  $$CompanyJoinRequestsTableTableManager get companyJoinRequests =>
+      $$CompanyJoinRequestsTableTableManager(_db, _db.companyJoinRequests);
+  $$CompanyJoinEventsTableTableManager get companyJoinEvents =>
+      $$CompanyJoinEventsTableTableManager(_db, _db.companyJoinEvents);
 }

@@ -225,8 +225,9 @@ class CreateJobAuthorization {
       throw const JobLineRefusal('authorization byte limit');
     }
     final proof = _object(jsonDecode(utf8.decode(signedAssertion)));
-    _keys(proof, {'body', 'signature'});
     final a = _object(proof['body']);
+    final memberProof = a['v'] == 3;
+    _keys(proof, {'body', 'signature', if (memberProof) 'membership'});
     _keys(a, {
       'v',
       'company',
@@ -244,6 +245,7 @@ class CreateJobAuthorization {
       'authority',
       'facts',
       'session',
+      if (memberProof) 'membership',
     });
     final receiver =
         await JobLineAuthorization(
@@ -256,7 +258,7 @@ class CreateJobAuthorization {
         );
     final trust = receiver.trust;
     final facts = receiver.facts;
-    if (a['v'] != 2 ||
+    if ((!memberProof && a['v'] != 2) ||
         facts.body['v'] != 2 ||
         a['company'] != command.companyId ||
         a['shop'] != command.shopId ||
@@ -279,8 +281,22 @@ class CreateJobAuthorization {
     ]) {
       _id(_string(a, field));
     }
-    final device = facts._entry('devices', _string(a, 'device'));
-    final user = facts._entry('users', _string(a, 'user'));
+    final membership = memberProof
+        ? await resolveCompanyMembership(
+            db: db,
+            installation: installation,
+            certificateBytes: _string(proof, 'membership'),
+          )
+        : null;
+    final device =
+        membership?.device ?? facts._entry('devices', _string(a, 'device'));
+    final user = membership?.user ?? facts._entry('users', _string(a, 'user'));
+    if (memberProof &&
+        (a['membership'] != membership!.proofCommitment ||
+            a['device'] != device['id'] ||
+            a['user'] != user['id'])) {
+      throw const JobLineRefusal('member authorization proof differs');
+    }
     bool allows(Map<String, Object?> entry, String key, String value) =>
         entry[key] is List && (entry[key] as List).contains(value);
     if (device['revoked'] != false ||
@@ -332,7 +348,9 @@ class CreateJobAuthorization {
       a,
       _string(proof, 'signature'),
       publicKey,
-      domain: 'wiredpart.job.create.authorization@1:',
+      domain: memberProof
+          ? 'wiredpart.job.create.authorization@2:'
+          : 'wiredpart.job.create.authorization@1:',
     );
     return VerifiedCreateJobSession._(
       command,
@@ -386,6 +404,10 @@ final class VerifiedCreateJobReceiptAdmission
     final op = _CreateOperation.parse(
       Uint8List.fromList(utf8.encode(row.operationBytes)),
     );
+    if (op.authorization['membership'] != _session._proof['membership'] ||
+        _object(op.authorization['body'])['v'] != _session._assertion['v']) {
+      throw const JobLineRefusal('saved membership proof differs');
+    }
     if (_canonical(op.authorization) != _canonical(_session._proof)) {
       throw const JobLineRefusal('create receipt proof changed');
     }
@@ -464,7 +486,7 @@ Future<void> validateCreateJobCommit(
   }
   final proof = _object(op.authorization['body']);
   final a = _object(op.authorization);
-  _keys(a, {'body', 'signature'});
+  _keys(a, {'body', 'signature', if (proof['v'] == 3) 'membership'});
   for (final field in [
     'company',
     'shop',
@@ -739,6 +761,10 @@ class CompanyJobCommands {
     final op = _CreateOperation.parse(
       Uint8List.fromList(utf8.encode(row.operationBytes)),
     );
+    if (op.authorization['membership'] != session._proof['membership'] ||
+        _object(op.authorization['body'])['v'] != session._assertion['v']) {
+      throw const JobLineRefusal('saved membership proof differs');
+    }
     session.validateOperationSigningContent(
       Uint8List.fromList(utf8.encode(_canonical(op.body))),
       _installation.identity!,
@@ -753,7 +779,9 @@ class CompanyJobCommands {
       _object(op.authorization['body']),
       _string(op.authorization, 'signature'),
       session._publicKey,
-      domain: 'wiredpart.job.create.authorization@1:',
+      domain: session._assertion['v'] == 3
+          ? 'wiredpart.job.create.authorization@2:'
+          : 'wiredpart.job.create.authorization@1:',
     );
     return _verifyRecord(row);
   }

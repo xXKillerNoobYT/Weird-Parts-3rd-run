@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/company/company_store_markers.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'nearby_lan_workspace.dart';
@@ -78,7 +79,8 @@ void _validateExistingDatabase(File file, String deviceId) {
         version != 3 &&
         version != 4 &&
         version != 5 &&
-        version != 6) {
+        version != 6 &&
+        version != 7) {
       rejectNativeTest('fixture-rejected');
     }
     final tables = db
@@ -89,7 +91,8 @@ void _validateExistingDatabase(File file, String deviceId) {
       ..._schema2Columns,
       if (version >= 3) ..._companyColumns,
       if (version >= 5) ..._schema5Columns,
-      if (version == 6) ..._schema6Columns,
+      if (version >= 6) ..._schema6Columns,
+      if (version == 7) ..._schema7Columns,
     };
     if (tables.length != expectedTables.length ||
         !tables.containsAll(expectedTables.keys)) {
@@ -113,6 +116,7 @@ void _validateExistingDatabase(File file, String deviceId) {
       ..._companyColumns.keys,
       ..._schema5Columns.keys,
       ..._schema6Columns.keys,
+      if (version == 7) ..._schema7Columns.keys,
     }.where(tables.contains)) {
       if (db.select('SELECT 1 FROM "$table" LIMIT 1').isNotEmpty) {
         rejectNativeTest('fixture-rejected');
@@ -198,6 +202,8 @@ const _schema5Columns = {
     'status',
   },
 };
+const _schema7Columns = companyJoinTableColumns;
+
 const _schema6Columns = {
   'company_jobs': {
     'job_id',
@@ -352,7 +358,8 @@ final class NativeFixtureSnapshot {
           version != 3 &&
           version != 4 &&
           version != 5 &&
-          version != 6) {
+          version != 6 &&
+          version != 7) {
         rejectNativeTest('fixture-rejected');
       }
       final names =
@@ -367,7 +374,8 @@ final class NativeFixtureSnapshot {
         ..._schema2Columns.keys,
         if (version >= 3) ..._companyColumns.keys,
         if (version >= 5) ..._schema5Columns.keys,
-        if (version == 6) ..._schema6Columns.keys,
+        if (version >= 6) ..._schema6Columns.keys,
+        if (version == 7) ..._schema7Columns.keys,
       };
       if (names.length != expectedNames.length ||
           !names.containsAll(expectedNames)) {
@@ -377,6 +385,7 @@ final class NativeFixtureSnapshot {
         ..._companyColumns.keys,
         ..._schema5Columns.keys,
         ..._schema6Columns.keys,
+        if (version == 7) ..._schema7Columns.keys,
       }.where(names.contains)) {
         if ((await db.customSelect('SELECT 1 FROM "$table" LIMIT 1').get())
             .isNotEmpty) {
@@ -390,6 +399,7 @@ final class NativeFixtureSnapshot {
         if (version == 2 && !_schema2Columns.containsKey(name)) continue;
         if (version < 5 && _schema5Columns.containsKey(name)) continue;
         if (version < 6 && _schema6Columns.containsKey(name)) continue;
+        if (version < 7 && _schema7Columns.containsKey(name)) continue;
         final order = table.$primaryKey
             .map((column) => '"${column.$name}"')
             .join(',');

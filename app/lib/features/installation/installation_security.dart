@@ -15,6 +15,8 @@ import 'package:uuid/uuid.dart';
 import '../../data/app_database.dart';
 import '../company/company_bootstrap.dart';
 import '../company/company_store_markers.dart';
+import '../nearby/nearby_pairing.dart';
+import '../nearby/nearby_controller.dart' show NearbyPairedJoinSession;
 import '../job_line_commands/job_line_commands.dart'
     show
         JobLineCommand,
@@ -30,6 +32,10 @@ import '../job_line_commands/job_line_commands.dart'
         decodeJobLineReceipt;
 
 part '../company/company_protocol.dart';
+part '../company/company_join.dart';
+part '../company/company_membership.dart';
+part '../company/company_peer_authentication.dart';
+part '../nearby/nearby_join_envelope.dart';
 
 const kInstallationBindingKey = 'local_installation_binding_v1';
 const kInstallationStateLimit = 2048;
@@ -732,6 +738,8 @@ class InstallationSecurity {
   String? failure;
   ProtectedInstallationState? _persisted;
   _InstallationRecord? _record;
+  String? _membershipCommitment;
+  NearbyJoinChannel? _activeCompanyChannel;
 
   // Enrollment is a separate protocol. A ready local key conveys no authority.
   // This describes the installed company's active trust; an individual local
@@ -1033,12 +1041,18 @@ class InstallationSecurity {
 
   Future<void> reconcile(AppDatabase db) async {
     readiness = InstallationReadiness.needsRecovery;
+    _membershipCommitment = null;
     final persisted = await store.readState(namespace);
     if (persisted == null) throw StateError('Protected identity is missing');
     _persisted = persisted;
     final record = _InstallationRecord.decode(persisted.bytes);
     _record = record;
     identity = record.identity;
+    if (!await _reconcileCompanyJoin(this, db)) return;
+    final refreshed = await store.readState(namespace);
+    if (refreshed != null && refreshed.revision != persisted.revision) {
+      return reconcile(db);
+    }
     if (record.companyTrust != null &&
         record.storePathFingerprint != await _companyStorePath(db)) {
       throw StateError('Company store path does not match protected binding');

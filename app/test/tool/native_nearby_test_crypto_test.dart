@@ -11,7 +11,11 @@ Map<String, dynamic> copyJson(Map<String, Object> value) =>
     jsonDecode(jsonEncode(value)) as Map<String, dynamic>;
 final failure = throwsA(isA<NativeTestFailure>());
 
-Map<String, Object> sourceJson(TestRole role, {String? host}) => {
+Map<String, Object> sourceJson(
+  TestRole role, {
+  String? host,
+  String run = 'nearby-test-a',
+}) => {
   'bindingId': role.name,
   'hostSessionId': host ?? 'host-${role.name}',
   'candidateHash': 'a' * 40,
@@ -19,7 +23,7 @@ Map<String, Object> sourceJson(TestRole role, {String? host}) => {
   'kernelHash': 'c' * 64,
   'pid': role == TestRole.sender ? 1 : 2,
   'startedAt': 1000,
-  'run': 'nearby-test-a',
+  'run': run,
   'role': role.name,
   'deviceId': 'device-${role.name}',
   'peerId': 'device-${role == TestRole.sender ? 'receiver' : 'sender'}',
@@ -149,14 +153,17 @@ Future<
     List<Map<String, Object>> observations,
   })
 >
-pairProtocolFixture() async {
+pairProtocolFixture({String run = 'nearby-test-a'}) async {
   final protocol = NativeNearbyCoordinatorProtocol();
   final initialized = await protocol.handle(
     jsonEncode({
       'operation': 'initialize',
-      'sources': [for (final role in TestRole.values) sourceJson(role)],
+      'sources': [
+        for (final role in TestRole.values) sourceJson(role, run: run),
+      ],
     }),
   );
+  expect(initialized['outcome'], 'initialized');
   final sessions = {
     for (final role in TestRole.values)
       role: TestSession.fromJson((initialized['sessions'] as Map)[role.name]),
@@ -191,6 +198,89 @@ pairProtocolFixture() async {
 }
 
 void main() {
+  for (final run in ['company-j60-join-v10', 'nearby-test-a']) {
+    test(
+      'coordinator configures $run and verifies both real sealed comparison grants',
+      () async {
+        final f = await pairProtocolFixture(run: run);
+        final reply = await f.protocol.handle(
+          jsonEncode({
+            'operation': 'acceptObservedPairAndMatch',
+            'observations': f.observations,
+          }),
+        );
+        expect(reply['outcome'], 'grants-issued');
+        for (final role in TestRole.values) {
+          final session = f.sessions[role]!;
+          expect(session.run, run);
+          final grant = MatchGrant.fromJson(
+            (reply['grants'] as Map)[role.name],
+            session,
+          );
+          final sealed = SealedObservation.fromJson(
+            f.observations.singleWhere(
+              (o) => o['sourceBindingId'] == role.name,
+            )['sealed'],
+          );
+          await MatchGrantVerifier(session).consume(
+            grant: grant,
+            savedObservation: sealed,
+            challenge: f.challenge,
+            savedPlaintext: RenderedObservation(
+              renderedCode: '739281',
+              attemptId: 'attempt-a',
+              localExpiresAtMillis: 1000000,
+              remainingMillis: 120000,
+              deviceId: session.deviceId,
+              peerId: session.peerId,
+            ),
+            activeAttemptId: 'attempt-a',
+            currentRenderedCode: '739281',
+            localExpiresAtMillis: 1000000,
+            observationCapturedElapsedMillis: 0,
+            nowElapsedMillis: 1,
+            nowMillis: 1,
+            isStillCurrent: () => true,
+          );
+        }
+      },
+    );
+  }
+  for (final run in [
+    'company-j60-join-v10-extra',
+    'company-j60-join-v4',
+    'company-j60-join-v4-extra',
+    'company-j60-join-v',
+    'company-j60-join-v3',
+    'company-j60-join-v2',
+    'company-j60-0f381-native-v1',
+    'company-j60-0f381-native-v1-extra',
+    'company-j60-0f381-native-v',
+    'company-j60-0f381-native-v2',
+    'company-other',
+    'j60-0f381-native-v1',
+    'unrelated',
+  ]) {
+    test('source binding refuses non-admitted run $run', () {
+      expect(
+        () => TestSourceBinding.fromJson(sourceJson(TestRole.sender, run: run)),
+        failure,
+      );
+    });
+  }
+  test('coordinator refuses mixed legacy and Join run provenance', () async {
+    await expectLater(
+      NativeNearbyTestCoordinator.create(
+        expectedBindings: [
+          TestSourceBinding.fromJson(sourceJson(TestRole.sender)),
+          TestSourceBinding.fromJson(
+            sourceJson(TestRole.receiver, run: 'company-j60-join-v10'),
+          ),
+        ],
+      ),
+      failure,
+    );
+  });
   test('rendered observation constructor accepts a five-minute window', () {
     final observation = RenderedObservation(
       renderedCode: '739281',

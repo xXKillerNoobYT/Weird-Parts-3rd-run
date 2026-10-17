@@ -472,6 +472,17 @@ class JobLineAuthorization {
     );
     final facts = _CompanyFacts(factsBody);
     final floors = installation.knownSecurityFloors;
+    if (v2) {
+      final membership = await resolveCompanyMembership(
+        db: db,
+        installation: installation,
+      );
+      if (!(membership.device['shops'] as List).contains(shop)) {
+        throw const JobLineRefusal('receiving installation shop denied');
+      }
+      if (command != null) facts.entity('jobLine', command.lineId, shop: shop);
+      return _ReceiverAuthority(facts, trust, Map.unmodifiable(floors));
+    }
     bool allows(Map<String, Object?> value, String key, String item) =>
         value[key] is List && (value[key] as List).contains(item);
     final localIdentity = installation.identity!;

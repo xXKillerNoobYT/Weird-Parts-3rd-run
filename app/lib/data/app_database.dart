@@ -14,13 +14,14 @@ import 'tables/device_profile.dart';
 import 'sqlite_file.dart';
 import 'tables/jobs.dart';
 import 'tables/company_jobs.dart';
+import 'tables/company_membership.dart';
 import 'tables/job_line_history.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 6;
+const kAppSchemaVersion = 7;
 
 @DriftDatabase(
   tables: [
@@ -48,6 +49,9 @@ const kAppSchemaVersion = 6;
     JobLineAudits,
     JobLineOutgoing,
     JobLineConflicts,
+    CompanyMembershipCertificates,
+    CompanyJoinRequests,
+    CompanyJoinEvents,
   ],
   daos: [SettingsDao, TaxonomyDao, PartsDao, JobsDao],
 )
@@ -122,6 +126,11 @@ class AppDatabase extends _$AppDatabase {
         }
       }
       await transaction(() async {
+        if (from < 7) {
+          await m.createTable(companyMembershipCertificates);
+          await m.createTable(companyJoinRequests);
+          await m.createTable(companyJoinEvents);
+        }
         if (from < 2) {
           await m.addColumn(brandVersions, brandVersions.varianceName);
           await m.addColumn(brandVersions, brandVersions.isMain);

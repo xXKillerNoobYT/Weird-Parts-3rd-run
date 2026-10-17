@@ -115,7 +115,7 @@ void main() {
       await seedValidationShop(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       expect(baseline.schemaVersion, kAppSchemaVersion);
-      expect(baseline.domain.length, 22);
+      expect(baseline.domain.length, 25);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
       expect(baseline.referencesValid, true);
@@ -151,7 +151,7 @@ void main() {
     'missing-table',
     'missing-history-table',
     'missing-company-jobs',
-    'unknown-schema7',
+    'unknown-schema8',
     'missing-column',
   ]) {
     test(
@@ -186,8 +186,8 @@ void main() {
               corrupt.execute('DROP TABLE job_line_operations');
             } else if (mutation == 'missing-company-jobs') {
               corrupt.execute('DROP TABLE company_jobs');
-            } else if (mutation == 'unknown-schema7') {
-              corrupt.execute('PRAGMA user_version = 7');
+            } else if (mutation == 'unknown-schema8') {
+              corrupt.execute('PRAGMA user_version = 8');
             } else if (mutation == 'missing-column') {
               corrupt.execute('ALTER TABLE job_lines DROP COLUMN notes');
             } else {
@@ -244,7 +244,7 @@ void main() {
     },
   );
 
-  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22}.entries) {
+  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22, 7: 25}.entries) {
     test(
       'frozen schema${entry.key} capture and preflight preserve declared proof and bytes',
       () async {
@@ -260,7 +260,13 @@ void main() {
         await seedValidationShop(db, workspace!);
         for (final table in db.allTables) {
           final name = table.actualTableName;
-          if ((entry.key < 6 && name == 'company_jobs') ||
+          if ((entry.key < 7 &&
+                  {
+                    'company_membership_certificates',
+                    'company_join_requests',
+                    'company_join_events',
+                  }.contains(name)) ||
+              (entry.key < 6 && name == 'company_jobs') ||
               (entry.key < 5 && name == 'company_bootstrap_witnesses') ||
               (entry.key < 3 &&
                   (name.startsWith('job_line_') ||
@@ -303,6 +309,9 @@ void main() {
 
   for (final history in [
     'company_jobs',
+    'company_membership_certificates',
+    'company_join_requests',
+    'company_join_events',
     'company_bootstrap_witnesses',
     'company_authority_facts',
     'job_line_baselines',
@@ -364,7 +373,11 @@ void main() {
     });
   }
 
-  for (final mutation in ['missing-company-jobs', 'unknown-schema7']) {
+  for (final mutation in [
+    'missing-company-jobs',
+    'missing-company-join',
+    'unknown-schema8',
+  ]) {
     test('capture rejects $mutation without altering the source', () async {
       workspace = ValidationWorkspace.open(
         run: 'unit',
@@ -376,8 +389,10 @@ void main() {
       await seedValidationShop(db, workspace!);
       if (mutation == 'missing-company-jobs') {
         await db.customStatement('DROP TABLE company_jobs');
+      } else if (mutation == 'missing-company-join') {
+        await db.customStatement('DROP TABLE company_join_requests');
       } else {
-        await db.customStatement('PRAGMA user_version = 7');
+        await db.customStatement('PRAGMA user_version = 8');
       }
       final version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');

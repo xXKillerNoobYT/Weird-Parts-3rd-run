@@ -61,34 +61,82 @@ class NearbyViewState {
 }
 
 typedef NearbyApplyPayload = Future<void> Function(BackupPayload payload);
+typedef NearbyCollectPayload =
+    Future<({BackupPayload payload, NearbyOffer offer})> Function();
 
 class NearbyController {
   NearbyController({
     required this.deviceId,
     required this.deviceName,
     required this.discovery,
-    required this.collectPayload,
-    required this.applyPayload,
+    NearbyCollectPayload? collectPayload,
+    NearbyApplyPayload? applyPayload,
     this.bindAddress,
     this.localIps,
     this.codec,
     this.peerAllowed,
     this.readNetwork = readNearbyWifiNetwork,
     this.now,
-  });
+    this.companyJoin = false,
+  }) : _collectPayload =
+           collectPayload ??
+           (() async =>
+               throw const NearbyException('Shop copy is unavailable')),
+       _applyPayload =
+           applyPayload ??
+           ((_) async =>
+               throw const NearbyException('Shop copy is unavailable'));
 
   final String deviceId;
   String deviceName;
   final NearbyDiscovery discovery;
-  final Future<({BackupPayload payload, NearbyOffer offer})> Function()
-  collectPayload;
-  final NearbyApplyPayload applyPayload;
+  final NearbyCollectPayload _collectPayload;
+  final NearbyApplyPayload _applyPayload;
+  NearbyCollectPayload get collectPayload => _collectPayload;
+  NearbyApplyPayload get applyPayload => _applyPayload;
+  Future<Map<String, Object?>> Function(
+    NearbyPairedJoinSession pair,
+    Map<String, Object?> wire,
+  )?
+  onJoinMessage;
+  Future<void> _joinSending = Future<void>.value();
+
+  Future<void> sendJoinMessage(Map<String, Object?> wire) {
+    final result = _joinSending.then((_) async {
+      final session = _session;
+      final pair = pairedJoinSession;
+      if (session == null || pair == null) {
+        throw const NearbyException('Pair for company Join first');
+      }
+      pair.requireCurrent();
+      if (utf8.encode(jsonEncode(wire)).length > 65536) {
+        throw const NearbyException('Join message is too large');
+      }
+      final reply = await _jsonPost(
+        session.peer,
+        '/v2/join',
+        wire,
+        session: session,
+      );
+      pair.requireCurrent();
+      if (reply.length != 1 || reply['ok'] != true) {
+        throw const NearbyException('Join message was not admitted');
+      }
+    });
+    _joinSending = result.catchError((Object _) {});
+    return result;
+  }
+
   final InternetAddress? bindAddress;
   final Future<List<String>> Function()? localIps;
   final NearbyCodec? codec;
   final bool Function(String host)? peerAllowed;
   final Future<NearbyWifiNetwork> Function() readNetwork;
   final DateTime Function()? now;
+  final bool companyJoin;
+
+  NearbyPairedJoinSession? get pairedJoinSession =>
+      companyJoin ? _session?.joinSession : null;
 
   NearbyCodec get _codec => codec ?? NearbyCodec();
 
@@ -340,6 +388,7 @@ class NearbyController {
         hostName: peer.name,
         guestPort: _server!.port,
         hostPort: peer.port,
+        purpose: companyJoin ? 'company-join@1' : null,
       );
       final agreement = await NearbyPendingPair.create(context, guest: true);
       if (generation != _pairGeneration) return;
@@ -422,6 +471,9 @@ class NearbyController {
     _hostMatch = null;
     attempt.ended.complete();
     _session = _Session(attempt.peer, keys);
+    if (companyJoin) {
+      _session!.joinSession = NearbyPairedJoinSession._(this, _session!);
+    }
     _emit(
       NearbyViewState(
         phase: NearbyPhase.paired,
@@ -524,6 +576,11 @@ class NearbyController {
   }
 
   Future<void> sendTo(NearbyPeer peer) async {
+    if (companyJoin) {
+      throw const NearbyException(
+        'Shop copy is unavailable during company Join',
+      );
+    }
     final session = _session;
     if (session == null || peer != session.peer) {
       _fail('Pair first, then send.');
@@ -622,12 +679,32 @@ class NearbyController {
         return;
       }
       final path = request.uri.path;
+      if (request.method == 'POST' && path == '/v2/join') {
+        final pair = pairedJoinSession;
+        if (!companyJoin ||
+            pair == null ||
+            onJoinMessage == null ||
+            !_authed(request)) {
+          request.response.statusCode = HttpStatus.forbidden;
+          await _writeJson(request, {'error': 'Join unavailable'});
+          return;
+        }
+        pair.requireCurrent();
+        final wire = await _readJson(request);
+        pair.requireCurrent();
+        // Only the company layer opens ciphertext or decides membership.
+        await onJoinMessage!(pair, wire);
+        pair.requireCurrent();
+        await _writeJson(request, {'ok': true});
+        return;
+      }
       if (request.method == 'GET' && path == '/v2/hello') {
         await _writeJson(request, {
           'proto': kNearbyProto,
           'v': kNearbyProtoVersion,
           'deviceId': deviceId,
           'name': deviceName,
+          if (companyJoin) 'purpose': 'company-join@1',
         });
         return;
       }
@@ -648,10 +725,20 @@ class NearbyController {
         return;
       }
       if (request.method == 'POST' && path == '/v2/offer') {
+        if (companyJoin) {
+          throw const NearbyException(
+            'Shop copy is unavailable during company Join',
+          );
+        }
         await _onOffer(request);
         return;
       }
       if (request.method == 'PUT' && path == '/v2/transfer') {
+        if (companyJoin) {
+          throw const NearbyException(
+            'Shop copy is unavailable during company Join',
+          );
+        }
         await _onTransfer(request);
         return;
       }
@@ -660,7 +747,9 @@ class NearbyController {
     } catch (e) {
       try {
         request.response.statusCode = HttpStatus.internalServerError;
-        await _writeJson(request, {'error': '$e'});
+        await _writeJson(request, {
+          'error': companyJoin ? 'Join refused' : '$e',
+        });
       } catch (_) {}
     }
   }
@@ -668,6 +757,9 @@ class NearbyController {
   Future<void> _onPairStart(HttpRequest request) async {
     final body = await _readJson(request);
     final context = NearbyPairContext.parse(body);
+    if (context.purpose != (companyJoin ? 'company-join@1' : null)) {
+      throw const NearbyException('Pair purposes differ. Update both devices.');
+    }
     if (context.hostId != deviceId ||
         context.guestId == deviceId ||
         context.hostPort != _server?.port ||
@@ -1268,6 +1360,39 @@ class NearbyController {
   }
 }
 
+final class NearbyPairedJoinSession {
+  NearbyPairedJoinSession._(this._owner, this._session);
+  final NearbyController _owner;
+  final _Session _session;
+  final Stopwatch _clock = Stopwatch()..start();
+  final Set<String> _nonces = {};
+  bool _revoked = false;
+  Duration get timeUntilExpiry => const Duration(minutes: 5) - _clock.elapsed;
+  void revoke() => _revoked = true;
+  void requireCurrent() {
+    if (!_owner.companyJoin ||
+        !identical(_owner._session, _session) ||
+        _owner._disposed ||
+        _revoked ||
+        timeUntilExpiry <= Duration.zero ||
+        _session.keys.purpose != 'company-join@1') {
+      throw const NearbyException('The approved pairing is no longer current');
+    }
+  }
+
+  void reserveReceivedNonce(String nonce) {
+    requireCurrent();
+    if (_nonces.length >= 128 || !_nonces.add(nonce)) {
+      throw const NearbyException('Join replay or channel capacity reached');
+    }
+  }
+
+  NearbySessionKeys get keys {
+    requireCurrent();
+    return _session.keys;
+  }
+}
+
 class _PairAttempt {
   _PairAttempt(this.peer, this.agreement, {required this.expiresAt});
   final NearbyPeer peer;
@@ -1279,6 +1404,7 @@ class _PairAttempt {
 }
 
 class _Session {
+  NearbyPairedJoinSession? joinSession;
   _Session(this.peer, this.keys);
   final NearbyPeer peer;
   final NearbySessionKeys keys;
