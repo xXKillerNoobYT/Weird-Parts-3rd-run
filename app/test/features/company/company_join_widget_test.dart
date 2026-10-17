@@ -110,8 +110,7 @@ void main() {
       await tester.runAsync(() async {
         await a.dispose();
         await b.dispose();
-        await f.aDb.close();
-        await f.bDb.close();
+        await f.closeAndCheckOwnerData();
       });
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
@@ -250,8 +249,7 @@ void main() {
       expect(find.byKey(const Key('company-enroll-open')), findsNothing);
       expect(find.byKey(const Key('create-company')), findsNothing);
       await tester.runAsync(() async {
-        await f.aDb.close();
-        await f.bDb.close();
+        await f.closeAndCheckOwnerData();
       });
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 25));

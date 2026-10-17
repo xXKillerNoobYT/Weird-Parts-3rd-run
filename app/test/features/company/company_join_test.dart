@@ -117,10 +117,18 @@ String canonicalJoinTest(Object? value) {
   return jsonEncode(sorted(value));
 }
 
+enum JoinStoreCapacityFault { issuerReservation, recipientReservation }
+
+final class TestProtectedStoreCapacityRefusal implements Exception {
+  const TestProtectedStoreCapacityRefusal();
+}
+
 final class JoinActivationStore
     implements InstallationSecureStore, RecoveryFilePublisher {
   final delegate = JobTestStore();
   Map<String, ProtectedInstallationState> get states => delegate.states;
+  JoinStoreCapacityFault? refuseNextCapacityAt;
+  int capacityRefusalCount = 0;
   @override
   Future<ProtectedInstallationState?> readState(String namespace) =>
       delegate.readState(namespace);
@@ -138,6 +146,23 @@ final class JoinActivationStore
   }) async {
     if (bytes.length > maximumBytes) maximumBytes = bytes.length;
     final after = jsonDecode(utf8.decode(bytes)) as Map;
+    final issuerEnrollment = after['enrollment'];
+    final recipientActivation = after['activation'];
+    final issuerReservation =
+        issuerEnrollment is Map && issuerEnrollment['pending'] is Map;
+    final recipientReservation =
+        after['v'] == 2 &&
+        after['status'] == 'pending' &&
+        recipientActivation is Map &&
+        recipientActivation['after'] == null;
+    if ((refuseNextCapacityAt == JoinStoreCapacityFault.issuerReservation &&
+            issuerReservation) ||
+        (refuseNextCapacityAt == JoinStoreCapacityFault.recipientReservation &&
+            recipientReservation)) {
+      refuseNextCapacityAt = null;
+      capacityRefusalCount++;
+      throw const TestProtectedStoreCapacityRefusal();
+    }
     final prior = states[namespace];
     final wasUnjoined =
         prior != null &&
@@ -157,6 +182,12 @@ final class JoinActivationStore
     return result;
   }
 }
+
+typedef OwnerDataSnapshot = ({
+  List<Job> jobs,
+  List<CompanyJob> history,
+  String packageSha256,
+});
 
 final class JoinFixture {
   JoinFixture(
@@ -181,6 +212,8 @@ final class JoinFixture {
   final CompanyEnrollment aEnrollment;
   CompanyEnrollment bEnrollment;
   final OwnerSession owner;
+  OwnerDataSnapshot? _ownerData;
+  Future<void>? _closing;
   static Future<JoinFixture> create() async {
     final root = Directory.systemTemp.createTempSync('join-durable-');
     final aDb = AppDatabase.forTesting(
@@ -222,12 +255,23 @@ final class JoinFixture {
       be,
       await ae.signIn('1234'),
     );
-    addTearDown(() async {
-      await aDb.close();
-      await fixture.bDb.close();
-      await root.delete(recursive: true);
-    });
+    addTearDown(fixture.closeAndCheckOwnerData);
+    await seedExistingOwnerJob(fixture);
+    fixture._ownerData = await captureOwnerData(fixture);
     return fixture;
+  }
+
+  Future<void> closeAndCheckOwnerData() => _closing ??= _close();
+
+  Future<void> _close() async {
+    try {
+      final ownerData = _ownerData;
+      if (ownerData != null) await expectOwnerDataUnchanged(this, ownerData);
+    } finally {
+      await aDb.close();
+      await bDb.close();
+      await root.delete(recursive: true);
+    }
   }
 
   Future<void> reopenB() async {
@@ -270,6 +314,39 @@ Future<void> activateFixtureB(JoinFixture f) async {
   );
   bc.close();
   ac.close();
+}
+
+Future<void> seedExistingOwnerJob(JoinFixture f) async {
+  await CompanyJobCommands(enrollment: f.aEnrollment).createJob(
+    CreateJob(
+      companyId: f.owner.identity.companyId,
+      shopId: f.owner.identity.shopId,
+      jobId: const Uuid().v4(),
+      requestId: const Uuid().v4(),
+      name: 'Original owner Job',
+    ),
+    ownerSession: f.owner,
+  );
+}
+
+Future<OwnerDataSnapshot> captureOwnerData(JoinFixture f) async => (
+  jobs: await f.aDb.select(f.aDb.jobs).get(),
+  history: await f.aDb.select(f.aDb.companyJobs).get(),
+  packageSha256: hashes.sha256
+      .convert(await File('${f.root.path}/a.wpca').readAsBytes())
+      .toString(),
+);
+
+Future<void> expectOwnerDataUnchanged(
+  JoinFixture f,
+  OwnerDataSnapshot before,
+) async {
+  expect(await f.aDb.select(f.aDb.jobs).get(), before.jobs);
+  expect(await f.aDb.select(f.aDb.companyJobs).get(), before.history);
+  final packageSha256 = hashes.sha256
+      .convert(await File('${f.root.path}/a.wpca').readAsBytes())
+      .toString();
+  expect(packageSha256, before.packageSha256);
 }
 
 void expectJoinProtectedUnchanged(
@@ -631,6 +708,102 @@ void main() {
       ac.close();
     }
     expect(f.aStore.maximumBytes, lessThanOrEqualTo(kInstallationStateLimit));
+  });
+
+  test('issuer capacity refusal preserves owner data and retries the same request once', () async {
+    final f = await JoinFixture.create();
+    final ownerData = await captureOwnerData(f);
+    expect(ownerData.jobs, hasLength(1));
+    expect(ownerData.history, hasLength(1));
+
+    final aj = CompanyJoin(enrollment: f.aEnrollment);
+    final bj = CompanyJoin(enrollment: f.bEnrollment);
+    final (bc, ac) = await joinChannels();
+    final request = await aj.receiveJoinRequest(ac, await bj.beginJoin(bc));
+    final beforeSql = await sqlSnapshot(f.aDb);
+    final beforeProtected = Map.of(f.aStore.states);
+    f.aStore.refuseNextCapacityAt = JoinStoreCapacityFault.issuerReservation;
+
+    await expectLater(
+      aj.approveJoin(ac, request, ownerSession: f.owner),
+      throwsA(isA<TestProtectedStoreCapacityRefusal>()),
+    );
+
+    expect(f.aStore.capacityRefusalCount, 1);
+    expect(f.aStore.refuseNextCapacityAt, isNull);
+    expect(await sqlSnapshot(f.aDb), beforeSql);
+    expectJoinProtectedUnchanged(f.aStore, beforeProtected);
+    expect(
+      await f.aDb.select(f.aDb.companyMembershipCertificates).get(),
+      isEmpty,
+    );
+    expect(await f.aDb.select(f.aDb.companyJoinEvents).get(), isEmpty);
+    await expectOwnerDataUnchanged(f, ownerData);
+
+    final wire = await aj.approveJoin(ac, request, ownerSession: f.owner);
+    final accepted = await bj.receiveProvision(bc, wire);
+    final identity = await bj.acceptProvision(accepted);
+    expect(identity.companyId, f.owner.identity.companyId);
+    expect(identity.userId, f.owner.identity.userId);
+    expect(
+      await f.aDb.select(f.aDb.companyMembershipCertificates).get(),
+      hasLength(1),
+    );
+    expect(await f.aDb.select(f.aDb.companyJoinRequests).get(), hasLength(1));
+    expect(await f.aDb.select(f.aDb.companyJoinEvents).get(), hasLength(1));
+    expect(
+      await f.bDb.select(f.bDb.companyMembershipCertificates).get(),
+      hasLength(1),
+    );
+    expect(await f.bDb.select(f.bDb.companyJoinRequests).get(), hasLength(1));
+    expect(await f.bDb.select(f.bDb.companyJoinEvents).get(), hasLength(1));
+    expect(f.aStore.capacityRefusalCount, 1);
+    await expectOwnerDataUnchanged(f, ownerData);
+    bc.close();
+    ac.close();
+  });
+
+  test('recipient capacity refusal stays unjoined and retries the same approved provision', () async {
+    final f = await JoinFixture.create();
+    final ownerData = await captureOwnerData(f);
+    expect(ownerData.jobs, hasLength(1));
+    expect(ownerData.history, hasLength(1));
+
+    final aj = CompanyJoin(enrollment: f.aEnrollment);
+    final bj = CompanyJoin(enrollment: f.bEnrollment);
+    final (bc, ac) = await joinChannels();
+    final request = await aj.receiveJoinRequest(ac, await bj.beginJoin(bc));
+    final wire = await aj.approveJoin(ac, request, ownerSession: f.owner);
+    final preview = await bj.receiveProvision(bc, wire);
+    final beforeSql = await sqlSnapshot(f.bDb);
+    final beforeProtected = Map.of(f.bStore.states);
+    f.bStore.refuseNextCapacityAt = JoinStoreCapacityFault.recipientReservation;
+
+    await expectLater(
+      bj.acceptProvision(preview),
+      throwsA(isA<TestProtectedStoreCapacityRefusal>()),
+    );
+
+    expect(f.bStore.capacityRefusalCount, 1);
+    expect(f.bStore.refuseNextCapacityAt, isNull);
+    expect(await sqlSnapshot(f.bDb), beforeSql);
+    expectJoinProtectedUnchanged(f.bStore, beforeProtected);
+    expect(await f.bEnrollment.readStatus(), CompanyBootstrapStatus.unjoined);
+    await expectOwnerDataUnchanged(f, ownerData);
+
+    final identity = await bj.acceptProvision(preview);
+    expect(identity.companyId, f.owner.identity.companyId);
+    expect(identity.userId, f.owner.identity.userId);
+    expect(
+      await f.bDb.select(f.bDb.companyMembershipCertificates).get(),
+      hasLength(1),
+    );
+    expect(await f.bDb.select(f.bDb.companyJoinRequests).get(), hasLength(1));
+    expect(await f.bDb.select(f.bDb.companyJoinEvents).get(), hasLength(1));
+    expect(f.bStore.capacityRefusalCount, 1);
+    await expectOwnerDataUnchanged(f, ownerData);
+    bc.close();
+    ac.close();
   });
 
   for (final checkpoint in CompanyPeerProofCheckpoint.values) {
