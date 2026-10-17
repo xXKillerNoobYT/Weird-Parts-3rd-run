@@ -22,6 +22,11 @@ enum NearbyPhase {
   failed,
 }
 
+abstract interface class NearbyCompanyDisclosure {
+  Future<void> requireCurrent();
+  void requireLive();
+}
+
 class NearbyViewState {
   const NearbyViewState({
     required this.phase,
@@ -99,16 +104,34 @@ class NearbyController {
     Map<String, Object?> wire,
   )?
   onJoinMessage;
+  NearbyCompanyDisclosure? companySyncDisclosure;
   Future<void> _joinSending = Future<void>.value();
 
   Future<void> sendJoinMessage(Map<String, Object?> wire) {
+    return exchangeCompanyMessage(wire).then((reply) {
+      if (reply.length != 1 || reply['ok'] != true) {
+        throw const NearbyException('Join message was not admitted');
+      }
+    });
+  }
+
+  Future<Map<String, Object?>> exchangeCompanyMessage(
+    Map<String, Object?> wire, {
+    NearbyCompanyDisclosure? disclosure,
+  }) {
     final result = _joinSending.then((_) async {
+      if (wire['kind'] == 'created-jobs' &&
+          (disclosure == null ||
+              !identical(disclosure, companySyncDisclosure))) {
+        throw const NearbyException('Manual Job sync disclosure is required');
+      }
       final session = _session;
       final pair = pairedJoinSession;
       if (session == null || pair == null) {
         throw const NearbyException('Pair for company Join first');
       }
       pair.requireCurrent();
+      await disclosure?.requireCurrent();
       if (utf8.encode(jsonEncode(wire)).length > 65536) {
         throw const NearbyException('Join message is too large');
       }
@@ -117,13 +140,16 @@ class NearbyController {
         '/v2/join',
         wire,
         session: session,
+        disclosure: disclosure,
       );
       pair.requireCurrent();
-      if (reply.length != 1 || reply['ok'] != true) {
-        throw const NearbyException('Join message was not admitted');
-      }
+      disclosure?.requireLive();
+      return reply;
     });
-    _joinSending = result.catchError((Object _) {});
+    _joinSending = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
     return result;
   }
 
@@ -692,10 +718,18 @@ class NearbyController {
         pair.requireCurrent();
         final wire = await _readJson(request);
         pair.requireCurrent();
+        final disclosure = wire['kind'] == 'created-jobs'
+            ? companySyncDisclosure
+            : null;
+        if (wire['kind'] == 'created-jobs' && disclosure == null) {
+          throw const NearbyException('Manual Job sync is unavailable');
+        }
         // Only the company layer opens ciphertext or decides membership.
-        await onJoinMessage!(pair, wire);
+        final reply = await onJoinMessage!(pair, wire);
+        await disclosure?.requireCurrent();
         pair.requireCurrent();
-        await _writeJson(request, {'ok': true});
+        disclosure?.requireLive();
+        await _writeJson(request, reply);
         return;
       }
       if (request.method == 'GET' && path == '/v2/hello') {
@@ -1138,6 +1172,7 @@ class NearbyController {
     Duration timeout = const Duration(seconds: 20),
     DateTime? pairingDeadline,
     Future<void>? pairingEnded,
+    NearbyCompanyDisclosure? disclosure,
   }) => _request(
     peer,
     'POST',
@@ -1147,6 +1182,7 @@ class NearbyController {
     timeout: timeout,
     pairingDeadline: pairingDeadline,
     pairingEnded: pairingEnded,
+    disclosure: disclosure,
   );
 
   Future<void> _putBytes(
@@ -1176,6 +1212,7 @@ class NearbyController {
     Duration timeout = const Duration(seconds: 20),
     DateTime? pairingDeadline,
     Future<void>? pairingEnded,
+    NearbyCompanyDisclosure? disclosure,
     void Function(double progress)? onProgress,
   }) async {
     if (!_allowsPeer(peer.host)) {
@@ -1200,6 +1237,8 @@ class NearbyController {
       final req = await client
           .open(method, peer.host, peer.port, path)
           .timeout(connectTimeout);
+      await disclosure?.requireCurrent();
+      disclosure?.requireLive();
       req.followRedirects = false;
       req.headers.contentLength = bytes.length;
       req.headers.contentType = method == 'PUT'
@@ -1368,6 +1407,7 @@ final class NearbyPairedJoinSession {
   final Set<String> _nonces = {};
   bool _revoked = false;
   Duration get timeUntilExpiry => const Duration(minutes: 5) - _clock.elapsed;
+  int get remainingReceivedNonces => 128 - _nonces.length;
   void revoke() => _revoked = true;
   void requireCurrent() {
     if (!_owner.companyJoin ||

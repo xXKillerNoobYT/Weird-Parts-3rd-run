@@ -17,9 +17,10 @@ import 'company_join_test.dart'
 
 Future<void> joinWidgetSignal(
   WidgetTester tester,
-  bool Function() ready,
-) async {
-  for (var i = 0; i < 400 && !ready(); i++) {
+  bool Function() ready, {
+  int attempts = 400,
+}) async {
+  for (var i = 0; i < attempts && !ready(); i++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 25)),
     );
@@ -94,7 +95,7 @@ void main() {
         tester,
         () => find
             .text(
-              'Trusted peer authenticated for this live connection. Job catch-up remains unavailable.',
+              'Trusted peer authenticated. Verification alone does not exchange Jobs.',
             )
             .evaluate()
             .isNotEmpty,

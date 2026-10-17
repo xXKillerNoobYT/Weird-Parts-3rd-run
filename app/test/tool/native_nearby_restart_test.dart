@@ -218,9 +218,9 @@ void main() {
     );
   }
 
-  test('unknown schema8 proof refuses without writes', () {
+  test('unknown schema9 proof refuses without writes', () {
     final proof = envelope['proof'] as Map<String, dynamic>;
-    proof['schemaVersion'] = 8;
+    proof['schemaVersion'] = 9;
     proof['tableCount'] = 25;
     save();
     final before = bytes();

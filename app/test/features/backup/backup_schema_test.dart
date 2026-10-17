@@ -20,10 +20,11 @@ void main() {
     'company_membership_certificates',
     'company_join_requests',
     'company_join_events',
+    'company_job_peer_acks',
   ]) {
     for (final malformed in ['missing', 'wrong columns']) {
       test(
-        'schema7 $malformed $table refuses backup before file mutation',
+        'schema8 $malformed $table refuses backup before file mutation',
         () async {
           final dir = Directory.systemTemp.createTempSync('join-schema-file-');
           addTearDown(() => dir.deleteSync(recursive: true));
@@ -63,6 +64,7 @@ void main() {
         'company_membership_certificates',
         'company_join_requests',
         'company_join_events',
+        'company_job_peer_acks',
       ]) {
         raw.execute('DROP TABLE $table');
       }
@@ -92,6 +94,7 @@ void main() {
       'company_membership_certificates',
       'company_join_requests',
       'company_join_events',
+      'company_job_peer_acks',
     ]) {
       old.execute('DROP TABLE $table');
     }
@@ -195,6 +198,7 @@ void main() {
       'company_membership_certificates',
       'company_join_requests',
       'company_join_events',
+      'company_job_peer_acks',
     ]) {
       await source.customStatement('DROP TABLE $table');
     }
