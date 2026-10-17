@@ -206,7 +206,7 @@ try {
   const identityOnly = generateClientIdentity();
   const serverOnly = generateKeyPairSync('ed25519');
   const serverSpkiOnly = serverOnly.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
-  for (const run of [undefined, null, '', 'j61-created-v1', 'j61-created-v3', 'company-j61-created-v2', 'j60-join-v10 ', ['j61-created-v2']]) {
+  for (const run of [undefined, null, '', 'j61-created-v1', 'j61-created-v2', 'j61-created-v4', 'company-j61-created-v3', 'j60-join-v10 ', ['j61-created-v3']]) {
     assert.throws(() => createClient({
       host: '127.0.0.1', port: 1234, run, channelId: CHANNEL,
       serverPublicKeySpki: serverSpkiOnly, identity: identityOnly,
@@ -431,7 +431,7 @@ try {
   }
 
 
-  for (const interopRun of [RUN, 'j61-created-v2']) {
+  for (const interopRun of [RUN, 'j61-created-v3']) {
   currentMockCase = 'actual server loopback interoperability ' + interopRun;
   const interopIdentity = generateClientIdentity();
   const interopPair = generateKeyPairSync('ed25519');
@@ -509,7 +509,7 @@ try {
     const otherRunClient = createClient({
       host: '127.0.0.1',
       port: actualHttp.address().port,
-      run: interopRun === RUN ? 'j61-created-v2' : RUN,
+      run: interopRun === RUN ? 'j61-created-v3' : RUN,
       channelId: CHANNEL,
       serverPublicKeySpki: interopPin,
       identity: interopIdentity,
