@@ -204,6 +204,7 @@ void main() {
     expect(() => _validate(run: 'j61-created-v1'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v2'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v3'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v4'), throwsA(anything));
     expect(() => _validate(productRevision: _tree), throwsA(anything));
     expect(
       () => _validate(revision: 'short', productRevision: 'short'),
@@ -243,7 +244,7 @@ void main() {
         'owner',
         createdMode: true,
       ),
-      'synthetic.company.created.j61-created-v4.owner',
+      'synthetic.company.created.j61-created-v5.owner',
     );
     expect(
       () => adapter.joinNativeNamespace(
