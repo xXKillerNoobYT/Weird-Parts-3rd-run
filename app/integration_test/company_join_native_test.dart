@@ -1,4 +1,4 @@
-// Opt-in native #60 acceptance adapter. Product libraries remain frozen.
+// Opt-in native acceptance adapter for isolated #60 and #61 exercises.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
@@ -37,6 +37,11 @@ const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
 const joinNativeRun = 'j60-join-v10';
+const createdJobNativeRun = 'j61-created-v1';
+const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
+const _createdProductRevision = String.fromEnvironment(
+  'COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION',
+);
 const _pin = '1234'; // Isolated synthetic namespace only; never emitted.
 const _phrase = 'Synthetic Join owner authority only 123';
 const _nativeStore = NativeInstallationSecureStore();
@@ -78,12 +83,23 @@ void validateJoinNativeDefines({
   required String revision,
   required String tree,
   required String adapter,
+  bool createdMode = false,
+  String productRevision = joinNativeProductRevision,
 }) {
   _require(enabled && {'windows', 'macos'}.contains(platform));
   _require(role == (platform == 'windows' ? 'owner' : 'member'));
-  _require(run == joinNativeRun);
+  _require(run == (createdMode ? createdJobNativeRun : joinNativeRun));
+  if (createdMode) {
+    _require(
+      productRevision == revision &&
+          productRevision != joinNativeProductRevision &&
+          RegExp(r'^[a-f0-9]{40}$').hasMatch(productRevision),
+    );
+  } else {
+    _require(productRevision == joinNativeProductRevision);
+  }
   for (final nativeRole in ['owner', 'member']) {
-    joinNativeNamespace(run, nativeRole);
+    joinNativeNamespace(run, nativeRole, createdMode: createdMode);
   }
   _require(RegExp(r'^[a-f0-9]{40}$').hasMatch(revision));
   _require(RegExp(r'^[a-f0-9]{40}$').hasMatch(tree));
@@ -91,9 +107,17 @@ void validateJoinNativeDefines({
 }
 
 /// The exact base and companion namespaces must pass the real store contract.
-String joinNativeNamespace(String run, String role) {
-  _require(run == joinNativeRun && {'owner', 'member'}.contains(role));
-  final namespace = 'synthetic.company.join.$run.$role';
+String joinNativeNamespace(
+  String run,
+  String role, {
+  bool createdMode = false,
+}) {
+  _require(
+    run == (createdMode ? createdJobNativeRun : joinNativeRun) &&
+        {'owner', 'member'}.contains(role),
+  );
+  final family = createdMode ? 'created' : 'join';
+  final namespace = 'synthetic.company.$family.$run.$role';
   validateInstallationNamespace(namespace);
   companyCustodyNamespace(namespace);
   return namespace;
@@ -151,6 +175,8 @@ bool validateJoinNativeExistingRoot(
   required String revision,
   required String tree,
   required String adapter,
+  bool createdMode = false,
+  String productRevision = joinNativeProductRevision,
 }) {
   final type = FileSystemEntity.typeSync(root.path, followLinks: false);
   if (type == FileSystemEntityType.notFound) return false;
@@ -167,14 +193,26 @@ bool validateJoinNativeExistingRoot(
         receipt['passed'] == true &&
         receipt['run'] == run &&
         receipt['role'] == role &&
-        receipt['namespace'] == joinNativeNamespace(run, role) &&
+        receipt['namespace'] ==
+            joinNativeNamespace(run, role, createdMode: createdMode) &&
         receipt['sourceRevision'] == revision &&
         receipt['sourceTree'] == tree &&
         receipt['adapterSha256'] == adapter &&
-        receipt['productRevision'] == joinNativeProductRevision &&
+        receipt['productRevision'] == productRevision &&
         receipt['root'] == root.path &&
         receipt['locked'] == true,
   );
+  if (createdMode) {
+    _require(
+      receipt['mode'] == 'created-jobs' &&
+          receipt['schema'] == 8 &&
+          receipt['createdJobsComplete'] == true &&
+          receipt['bothJobsRendered'] == true &&
+          receipt['receiptCountVerifiedBeforeLock'] == 2 &&
+          productRevision == revision &&
+          productRevision != joinNativeProductRevision,
+    );
+  }
   final identity = receipt['identity'];
   _require(
     identity is Map &&
@@ -201,6 +239,54 @@ final class _SavedPair {
   final SealedObservation sealed;
   final RenderedObservation plain;
   final int captured;
+}
+
+enum _CreatedJobStage { enrollment, retainedPeer, cancelling }
+
+enum _CreatedJobCancelReason { incomingInterruption, retryIncomplete }
+
+enum CreatedJobNativeUiState {
+  idle,
+  pending,
+  complete,
+  incomplete,
+  error,
+  unknown,
+}
+
+CreatedJobNativeUiState createdJobNativeUiState({
+  required String status,
+  required bool errorVisible,
+  required bool busy,
+}) {
+  if (busy) return CreatedJobNativeUiState.pending;
+  if (errorVisible) return CreatedJobNativeUiState.error;
+  if (RegExp(r'^Job snapshot synced\. Sent \d+, received \d+\.$')
+      .hasMatch(status)) {
+    return CreatedJobNativeUiState.complete;
+  }
+  if (status.startsWith('Confirmed sent ') &&
+      status.contains('More Jobs pending.')) {
+    return CreatedJobNativeUiState.incomplete;
+  }
+  if ({
+    'Exchanging offline-created Jobs in both directions.',
+    'Checking Job sync permissions.',
+    'Comparing verified Job holdings.',
+    'Exchanging Job holdings with the verified peer.',
+    'Sending an offline-created Job to the retained peer.',
+    'Receiving an offline-created Job from the retained peer.',
+    'Confirming the Job snapshot exchange.',
+  }.contains(status)) {
+    return CreatedJobNativeUiState.pending;
+  }
+  if (status.startsWith('Ready to exchange Jobs with this verified peer ') ||
+      status.startsWith('Trusted peer authenticated') ||
+      status.startsWith('Checking the selected retained peer.') ||
+      status == 'Pair and compare the code on both devices.') {
+    return CreatedJobNativeUiState.idle;
+  }
+  return CreatedJobNativeUiState.unknown;
 }
 
 final class _JoinNative with WidgetsBindingObserver {
@@ -236,16 +322,99 @@ final class _JoinNative with WidgetsBindingObserver {
   String? initialFreshSqlHash;
   ProtectedInstallationState? initialFreshBase;
   Map<String, Object?>? initialIdentity;
+  late _CreatedJobStage createdStage = restart
+      ? _CreatedJobStage.retainedPeer
+      : _CreatedJobStage.enrollment;
+  int syncStarts = 0;
+  int cancelStarts = 0;
+  int interruptionStarts = 0;
+  int interruptionDrains = 0;
+  int joinPageEpoch = 0;
+  bool routeReturned = false;
+  _CreatedJobCancelReason? cancelReason;
   bool get owner => _roleName == 'owner';
   TestRole get role => owner ? TestRole.sender : TestRole.receiver;
   String get peerId => 'lan-${workspace.run}-${owner ? 'receiver' : 'sender'}';
   String get phase => restart ? 'restart' : 'exercise';
-  String get namespace => joinNativeNamespace(_run, _roleName);
+  String get namespace =>
+      joinNativeNamespace(_run, _roleName, createdMode: _createdMode);
+  String get productRevision =>
+      _createdMode ? _createdProductRevision : joinNativeProductRevision;
+  bool get reconnect =>
+      restart || (_createdMode && createdStage != _CreatedJobStage.enrollment);
+  bool get cancellationDrained =>
+      createdStage == _CreatedJobStage.cancelling &&
+      routeReturned &&
+      !pageMounted &&
+      !view.running &&
+      effectCurrent();
+  bool get incomingSyncPending =>
+      !owner &&
+      syncUiState == CreatedJobNativeUiState.pending &&
+      joinStatus == 'Exchanging Job holdings with the verified peer.';
   bool get pageMounted =>
       find.byType(CompanyJoinPage).evaluate().length == 1 &&
       identical(_pageState, tester.state(find.byType(CompanyJoinPage)));
   NearbyViewState get view => controller!.state;
   NativeTestResidentRpc get rpc => _rpc!;
+
+  String get joinStatus {
+    final status = find.byKey(const Key('company-join-status'));
+    return status.evaluate().length == 1
+        ? tester.widget<Text>(status).data!
+        : '';
+  }
+
+  bool buttonEnabled(String key) {
+    final button = find.byKey(Key(key));
+    return button.evaluate().length == 1 &&
+        tester.widget<FilledButton>(button).onPressed != null;
+  }
+
+  CreatedJobNativeUiState get syncUiState => createdJobNativeUiState(
+    status: joinStatus,
+    errorVisible: find
+        .byKey(const Key('company-join-error'))
+        .evaluate()
+        .isNotEmpty,
+    busy:
+        find.byKey(const Key('company-jobs-sync-now')).evaluate().length == 1 &&
+        !buttonEnabled('company-jobs-sync-now'),
+  );
+
+  NativeTestPhase get reportedPhase {
+    if (finished) return NativeTestPhase.success;
+    if (_createdMode && createdStage == _CreatedJobStage.cancelling) {
+      return cancellationDrained
+          ? NativeTestPhase.idle
+          : NativeTestPhase.transferring;
+    }
+    if (_createdMode && reconnect) {
+      switch (syncUiState) {
+        case CreatedJobNativeUiState.pending:
+          return NativeTestPhase.transferring;
+        case CreatedJobNativeUiState.complete:
+          return NativeTestPhase.success;
+        case CreatedJobNativeUiState.incomplete:
+        case CreatedJobNativeUiState.error:
+        case CreatedJobNativeUiState.unknown:
+          return NativeTestPhase.failed;
+        case CreatedJobNativeUiState.idle:
+          break;
+      }
+    }
+    return NativeTestPhase.values.byName(view.phase.name);
+  }
+
+  void requireSnapshotSafe() {
+    _require(!_createdMode || createdStage != _CreatedJobStage.cancelling);
+    if (_createdMode && reconnect && !finished && pageMounted) {
+      _require(
+        syncUiState != CreatedJobNativeUiState.pending &&
+            syncUiState != CreatedJobNativeUiState.unknown,
+      );
+    }
+  }
 
   Map<String, Object?> get header => {
     'format': 1,
@@ -254,7 +423,8 @@ final class _JoinNative with WidgetsBindingObserver {
     'pid': pid,
     'sourceRevision': _revision,
     'sourceTree': _tree,
-    'productRevision': joinNativeProductRevision,
+    'productRevision': productRevision,
+    if (_createdMode) 'mode': 'created-jobs',
     'adapterSha256': _adapter,
     'platform': Platform.operatingSystem,
     'root': workspace.root.path,
@@ -281,7 +451,7 @@ final class _JoinNative with WidgetsBindingObserver {
     'role': _roleName,
     'sourceRevision': _revision,
     'sourceTree': _tree,
-    'productRevision': joinNativeProductRevision,
+    'productRevision': productRevision,
     'adapterSha256': _adapter,
   };
 
@@ -457,6 +627,89 @@ final class _JoinNative with WidgetsBindingObserver {
     });
   }
 
+  Future<void> assertCreatedJobsUi(int expected) async {
+    final jobs = await CompanyJobCommands(enrollment: enrollment)
+        .listJobs(ownerSession: adapterSession!);
+    _require(jobs.length == expected);
+    final list = find.byKey(const Key('company-jobs-list'));
+    await wait(
+      () =>
+          list.evaluate().length == 1 &&
+          find.text('Loading company Jobs...').evaluate().isEmpty &&
+          find.byKey(const Key('company-job-error')).evaluate().isEmpty &&
+          find
+                  .descendant(of: list, matching: find.byType(ListTile))
+                  .evaluate()
+                  .length ==
+              expected &&
+          jobs.every((job) {
+            final row = find.descendant(
+              of: list,
+              matching: find.byKey(Key('company-job-${job.id}')),
+            );
+            return row.evaluate().length == 1 &&
+                find
+                        .descendant(of: row, matching: find.text(job.name))
+                        .evaluate()
+                        .length ==
+                    1;
+          }),
+    );
+  }
+
+  Future<void> captureOriginalCreatedJob() async {
+    final records = await db.select(db.companyJobs).get();
+    _require(records.length == 1 && records.single.outgoing);
+    writeOnce('created-local-job.json', {
+      'identity': await identity(),
+      'record': records.single.toJson(),
+      'jobHistorySha256': await jobHash(),
+      'createdThroughProductionUi': true,
+      'offlineBeforeRetainedPeerPair': true,
+    });
+  }
+
+  Future<void> mountJoinPage() async {
+    stage = 'join-page';
+    savedPair = null;
+    final pageEpoch = ++joinPageEpoch;
+    routeReturned = false;
+    CompanyJoinPage page() => CompanyJoinPage(
+      enrollment: enrollment,
+      approver: adapterSession,
+      reconnect: reconnect,
+      createController: (alias) => controller = NearbyController(
+        deviceId: alias,
+        deviceName: 'Nearby ${alias.substring(0, 6)}',
+        discovery: LanNearbyDiscovery(),
+        companyJoin: true,
+      ),
+    );
+    if (_createdMode) {
+      await tester.pumpWidget(
+        MaterialApp(
+          key: ValueKey('join-native-page-$pageEpoch'),
+          home: const Scaffold(),
+        ),
+      );
+      final navigator = Navigator.of(tester.element(find.byType(Scaffold)));
+      unawaited(
+        navigator.push<bool>(MaterialPageRoute(builder: (_) => page())).then((
+          _,
+        ) {
+          if (joinPageEpoch == pageEpoch) routeReturned = true;
+        }),
+      );
+      await tester.pump();
+    } else {
+      await tester.pumpWidget(
+        MaterialApp(key: ValueKey('join-native-page-$pageEpoch'), home: page()),
+      );
+    }
+    _pageState = tester.state(find.byType(CompanyJoinPage));
+    await wait(() => controller != null && view.running);
+  }
+
   Future<String> sqlHash() async => _hash({
     for (final table in db.allTables)
       table.actualTableName:
@@ -493,6 +746,7 @@ final class _JoinNative with WidgetsBindingObserver {
   }
 
   Future<void> initialize() async {
+    _require(db.schemaVersion == (_createdMode ? 8 : 7));
     if (restart) {
       final prior = _readOwnedJson(
         File(p.join(workspace.root.path, 'join-exercise.json')),
@@ -547,24 +801,12 @@ final class _JoinNative with WidgetsBindingObserver {
     if (owner || restart) {
       adapterSession = await tester.runAsync(() => enrollment.signIn(_pin));
     }
-    stage = 'join-page';
-    await tester.pumpWidget(
-      MaterialApp(
-        home: CompanyJoinPage(
-          enrollment: enrollment,
-          approver: adapterSession,
-          reconnect: restart,
-          createController: (alias) => controller = NearbyController(
-            deviceId: alias,
-            deviceName: 'Nearby ${alias.substring(0, 6)}',
-            discovery: LanNearbyDiscovery(),
-            companyJoin: true,
-          ),
-        ),
-      ),
-    );
-    _pageState = tester.state(find.byType(CompanyJoinPage));
-    await wait(() => controller != null && view.running);
+    if (_createdMode && owner && !restart) {
+      await assertCreatedJobsUi(1);
+      await captureOriginalCreatedJob();
+    }
+    if (_createdMode && restart) await assertCreatedJobsUi(2);
+    await mountJoinPage();
     _rpc = NativeTestResidentRpc(
       appPid: pid,
       run: workspace.run,
@@ -573,9 +815,7 @@ final class _JoinNative with WidgetsBindingObserver {
       peerId: peerId,
       clockMillis: () => clock.elapsedMilliseconds,
       readInfoInLoop: () => NativeTestResidentViewInfo(
-        phase: finished
-            ? NativeTestPhase.success
-            : NativeTestPhase.values.byName(view.phase.name),
+        phase: reportedPhase,
         sameNearbyState: pageMounted,
         discovered: view.peers.length == 1,
         codePresent: view.verifyCode != null,
@@ -632,7 +872,7 @@ final class _JoinNative with WidgetsBindingObserver {
                           NativeTestAction.accept,
                           NativeTestAction.snapshot,
                           NativeTestAction.finish,
-                          NativeTestAction.normalExit,
+                          if (!_createdMode) NativeTestAction.normalExit,
                         },
                       )
                       .toJson() ??
@@ -655,11 +895,175 @@ final class _JoinNative with WidgetsBindingObserver {
     return code!;
   }
 
+  Future<NativeTestCommandResult> finishCreatedJobs() async {
+    _require(_createdMode && !finished);
+    if (createdStage == _CreatedJobStage.cancelling) {
+      _require(cancellationDrained);
+      if (cancelReason == _CreatedJobCancelReason.incomingInterruption) {
+        interruptionDrains++;
+      }
+      writeOnce('created-cancel-drained-$pid-$cancelStarts.json', {
+        'reason': cancelReason!.name,
+        'actualUiRouteReturned': routeReturned,
+        'controllerRunning': view.running,
+        'lifecycleCurrent': effectCurrent(),
+        'databaseRead': false,
+      });
+      await enrollment.signOut();
+      adapterSession = null;
+      await mountGate();
+      await signInUi();
+      adapterSession = await tester.runAsync(() => enrollment.signIn(_pin));
+      createdStage = _CreatedJobStage.retainedPeer;
+      await mountJoinPage();
+      writeOnce('created-retry-ready-$pid-$cancelStarts.json', {
+        'encounterAlias': controller!.deviceId,
+        'freshPairRequired': true,
+        'interruptionStarts': interruptionStarts,
+        'interruptionDrains': interruptionDrains,
+        'historyReverification': 'next full snapshot required',
+      });
+      return const NativeTestCommandResult.effect();
+    }
+    if (createdStage == _CreatedJobStage.retainedPeer &&
+        (incomingSyncPending ||
+            syncUiState == CreatedJobNativeUiState.incomplete ||
+            syncUiState == CreatedJobNativeUiState.error)) {
+      requireBeforeEffect();
+      final close = find.byKey(const Key('company-join-close'));
+      _require(
+        close.evaluate().length == 1 &&
+            tester.widget<TextButton>(close).onPressed != null,
+      );
+      cancelReason = incomingSyncPending
+          ? _CreatedJobCancelReason.incomingInterruption
+          : _CreatedJobCancelReason.retryIncomplete;
+      cancelStarts++;
+      if (cancelReason == _CreatedJobCancelReason.incomingInterruption) {
+        interruptionStarts++;
+      }
+      writeOnce('created-cancel-start-$pid-$cancelStarts.json', {
+        'reason': cancelReason!.name,
+        'status': joinStatus,
+        'databaseRead': false,
+        'effect': 'possible-until-actual-route-return-and-controller-stop',
+      });
+      createdStage = _CreatedJobStage.cancelling;
+      savedPair = null;
+      await tap(close);
+      return const NativeTestCommandResult.effect(
+        effect: NativeTestEffect.possible,
+      );
+    }
+    requireSnapshotSafe();
+    if (createdStage == _CreatedJobStage.enrollment) {
+      _require(
+        !restart &&
+            (owner
+                ? joinStatus == 'The other installation confirmed activation.'
+                : joinStatus.startsWith(
+                    'Joined. Sign in with the existing company PIN.',
+                  )),
+      );
+      await controller!.dispose();
+      await enrollment.signOut();
+      adapterSession = null;
+      await mountGate();
+      await signInUi();
+      if (!owner) {
+        _require((await db.select(db.jobs).get()).isEmpty);
+        await createJobUi();
+      }
+      adapterSession = await tester.runAsync(() => enrollment.signIn(_pin));
+      await assertCreatedJobsUi(1);
+      if (!owner) await captureOriginalCreatedJob();
+      originalJobHash = await jobHash();
+      writeOnce('created-before-retained-pair-$pid.json', await snapshot());
+      createdStage = _CreatedJobStage.retainedPeer;
+      await mountJoinPage();
+      writeOnce('created-retained-ready-$pid.json', {
+        'encounterAlias': controller!.deviceId,
+        'originalJobHistorySha256': originalJobHash,
+        'freshPairRequired': true,
+      });
+      return const NativeTestCommandResult.effect();
+    }
+    _require(restart || syncUiState == CreatedJobNativeUiState.complete);
+    await controller!.dispose();
+    await enrollment.signOut();
+    adapterSession = null;
+    await mountGate();
+    await signInUi();
+    adapterSession = await tester.runAsync(() => enrollment.signIn(_pin));
+    await assertCreatedJobsUi(2);
+    final verified = await snapshot();
+    _require(verified['receiptCountVerified'] == 2);
+    writeOnce('created-$phase-production-list-$pid.json', {
+      ...verified,
+      'productionMainNavigationTested': false,
+      'productionJobsPanelRendered': true,
+      'bothJobsRendered': true,
+    });
+    await enrollment.signOut();
+    adapterSession = null;
+    await signOutUi();
+    final evidence = await snapshot();
+    writeOnce('join-$phase.json', {
+      ...evidence,
+      'phase': phase,
+      'passed': true,
+      'locked': true,
+      'createdJobsComplete': true,
+      'productionMainNavigationTested': false,
+      'productionJobsPanelRendered': true,
+      'bothJobsRendered': true,
+      'receiptCountVerifiedBeforeLock': 2,
+      'interruptionStarts': interruptionStarts,
+      'interruptionDrains': interruptionDrains,
+      'nativeInterruptionAcceptance':
+          interruptionStarts > 0 && interruptionStarts == interruptionDrains
+          ? 'actual-receiver-Cancel-drained-and-history-reverified; peer retry evidence required'
+          : 'NOT_RUN locally; paired-device evidence required',
+      'normalExit':
+          'external normal UI quit and cold readback evidence required',
+    });
+    finished = true;
+    return const NativeTestCommandResult.effect();
+  }
+
   Future<NativeTestCommandResult> perform(NativeTestCommand command) async {
     _require(!exitRequested);
-    if (!finished) _require(pageMounted);
+    if (!finished) {
+      _require(
+        pageMounted ||
+            (_createdMode && createdStage == _CreatedJobStage.cancelling),
+      );
+    }
+    if (_createdMode && createdStage == _CreatedJobStage.cancelling) {
+      _require(
+        command.action == NativeTestAction.observe ||
+            command.action == NativeTestAction.finish,
+      );
+    }
     switch (command.action) {
       case NativeTestAction.observe:
+        if (_createdMode) {
+          writeOnce('created-observe-$pid-${++snapshotOrdinal}.json', {
+            'phase': reportedPhase.name,
+            'createdStage': createdStage.name,
+            'syncState': syncUiState.name,
+            'status': joinStatus,
+            'syncStarts': syncStarts,
+            'routeReturned': routeReturned,
+            'cancellationDrained': cancellationDrained,
+            'availabilityButtonVisible': find
+                .byKey(const Key('company-jobs-enable-sync'))
+                .evaluate()
+                .isNotEmpty,
+            'syncButtonEnabled': buttonEnabled('company-jobs-sync-now'),
+            'databaseRead': false,
+          });
+        }
         SealedObservation? sealed;
         if (command.comparison != null) {
           _require(!finished && view.phase == NearbyPhase.pairing);
@@ -685,9 +1089,7 @@ final class _JoinNative with WidgetsBindingObserver {
         return NativeTestCommandResult.observation(
           NativeTestObservationResult(
             session: session!,
-            phase: finished
-                ? NativeTestPhase.success
-                : NativeTestPhase.values.byName(view.phase.name),
+            phase: reportedPhase,
             sameNearbyState: pageMounted,
             discovered: !finished && view.peers.length == 1,
             codePresent: !finished && view.verifyCode != null,
@@ -747,8 +1149,8 @@ final class _JoinNative with WidgetsBindingObserver {
         return const NativeTestCommandResult.effect();
       case NativeTestAction.send:
         _require(!finished && view.phase == NearbyPhase.paired);
-        if (restart) {
-          _require(!owner);
+        if (reconnect) {
+          _require(_createdMode || !owner);
           // Explicit command selects the sole already-retained proof, then Verify.
           final peers = find
               .byType(ListTile)
@@ -768,7 +1170,9 @@ final class _JoinNative with WidgetsBindingObserver {
             () =>
                 find
                     .text(
-                      'Trusted peer authenticated for this live connection. Job catch-up remains unavailable.',
+                      _createdMode
+                          ? 'Trusted peer authenticated. Verification alone does not exchange Jobs.'
+                          : 'Trusted peer authenticated for this live connection. Job catch-up remains unavailable.',
                     )
                     .evaluate()
                     .length ==
@@ -790,6 +1194,22 @@ final class _JoinNative with WidgetsBindingObserver {
         }
         return const NativeTestCommandResult.effect();
       case NativeTestAction.accept:
+        if (_createdMode && reconnect) {
+          _require(!finished && view.phase == NearbyPhase.paired);
+          requireSnapshotSafe();
+          if (buttonEnabled('company-jobs-enable-sync')) {
+            await tap(find.byKey(const Key('company-jobs-enable-sync')));
+            await wait(() => buttonEnabled('company-jobs-sync-now'));
+            return const NativeTestCommandResult.effect();
+          }
+          _require(owner && buttonEnabled('company-jobs-sync-now'));
+          requireBeforeEffect();
+          syncStarts++;
+          await tap(find.byKey(const Key('company-jobs-sync-now')));
+          return const NativeTestCommandResult.effect(
+            effect: NativeTestEffect.possible,
+          );
+        }
         _require(!restart && !finished && view.phase == NearbyPhase.paired);
         await tap(
           find.byKey(
@@ -806,7 +1226,9 @@ final class _JoinNative with WidgetsBindingObserver {
           if (!owner) {
             return find
                     .text(
-                      'Joined. Sign in with the existing company PIN. Jobs arrive only through a later catch-up feature.',
+                      _createdMode
+                          ? 'Joined. Sign in with the existing company PIN. Reconnect to the trusted peer and enable Job availability to use Sync Now.'
+                          : 'Joined. Sign in with the existing company PIN. Jobs arrive only through a later catch-up feature.',
                     )
                     .evaluate()
                     .length ==
@@ -837,7 +1259,7 @@ final class _JoinNative with WidgetsBindingObserver {
             assetsDigest: _hash([]),
             sharedSettingsDigest: _hash([]),
             profileDigest: _hash(workspace.deviceId),
-            schemaVersion: 7,
+            schemaVersion: _createdMode ? 8 : 7,
             tableCount: counts.length,
             rowCount: counts.values.fold(0, (a, b) => a + b),
             assetCount: 0,
@@ -850,6 +1272,7 @@ final class _JoinNative with WidgetsBindingObserver {
           ),
         );
       case NativeTestAction.finish:
+        if (_createdMode) return finishCreatedJobs();
         _require(!finished);
         final status = find.byKey(const Key('company-join-status'));
         _require(status.evaluate().length == 1);
@@ -890,6 +1313,7 @@ final class _JoinNative with WidgetsBindingObserver {
         finished = true;
         return const NativeTestCommandResult.effect();
       case NativeTestAction.normalExit:
+        _require(!_createdMode);
         requireBeforeEffect();
         _require(
           finished && find.text('Company locked').evaluate().length == 1,
@@ -909,6 +1333,7 @@ final class _JoinNative with WidgetsBindingObserver {
   }
 
   Future<Map<String, Object?>> snapshot() async {
+    requireSnapshotSafe();
     final counts = <String, int>{};
     for (final table in db.allTables) {
       counts[table.actualTableName] =
@@ -919,7 +1344,12 @@ final class _JoinNative with WidgetsBindingObserver {
                   .getSingle())
               .read<int>('n');
     }
-    _require(counts.length == 27);
+    _require(counts.length == (_createdMode ? 28 : 27));
+    final schema = (await db.customSelect('PRAGMA user_version').getSingle())
+        .data
+        .values
+        .single;
+    _require(schema == (_createdMode ? 8 : 7));
     _require(
       (await db.customSelect('PRAGMA integrity_check').getSingle())
               .data
@@ -932,7 +1362,7 @@ final class _JoinNative with WidgetsBindingObserver {
         await enrollment.readStatus() == CompanyBootstrapStatus.active;
     final evidence = <String, Object?>{
       'counts': counts,
-      'schema': 7,
+      'schema': schema,
       'integrityValid': true,
       'referencesValid': true,
       'jobHistorySha256': await jobHash(),
@@ -955,6 +1385,19 @@ final class _JoinNative with WidgetsBindingObserver {
       },
       'snapshotSemantics': 'Join public evidence; copy-comparison booleans are false/not asserted',
     };
+    if (_createdMode) {
+      evidence.addAll({
+        'mode': 'created-jobs',
+        'createdStage': createdStage.name,
+        'syncState': syncUiState.name,
+        'status': joinStatus,
+        'syncStarts': syncStarts,
+        'interruptionStarts': interruptionStarts,
+        'interruptionDrains': interruptionDrains,
+        'sqlSha256': await sqlHash(),
+        'snapshotSemantics': 'Scoped created-Job records, original bytes, local receipts and peer ACKs; no mesh, edit, deletion, asset or general-copy assertion',
+      });
+    }
     if (!active && !owner && !restart) {
       final current = (await _nativeStore.readState(namespace))!;
       _require(
@@ -995,13 +1438,111 @@ final class _JoinNative with WidgetsBindingObserver {
         );
       }
       final records = await db.select(db.companyJobs).get();
-      for (final record in records) {
-        await JobLineCommandReceipt.verifyAdmissionSeal(
-          record.receiptBytes,
-          security.identity!,
-          security.receivingStoreGeneration!.value,
-          expectedFamily: CompanyCommandFamily.jobCreate,
+      var verifiedCount = 0;
+      if (_createdMode) {
+        final ownerSession = adapterSession;
+        if (ownerSession != null && ownerSession.isValid) {
+          final commands = CompanyJobCommands(enrollment: enrollment);
+          final jobs = await commands.listJobs(ownerSession: ownerSession);
+          _require(jobs.length == records.length);
+          for (final record in records) {
+            final verified = await commands.verifySyncRecord(
+              record.jobId,
+              ownerSession,
+            );
+            _require(
+              _canonical(verified.toJson()) == _canonical(record.toJson()),
+            );
+            verifiedCount++;
+          }
+          evidence['confirmedPeerCounts'] =
+              await CompanyCreatedJobSync.confirmedPeerCounts(
+                enrollment,
+                ownerSession,
+              );
+        }
+        final originalFile = File(
+          p.join(workspace.root.path, 'created-local-job.json'),
         );
+        if (originalFile.existsSync()) {
+          final original = _readOwnedJson(originalFile);
+          _require(
+            original['mode'] == 'created-jobs' &&
+                original['run'] == _run &&
+                original['role'] == _roleName &&
+                original['namespace'] == namespace &&
+                original['sourceRevision'] == _revision &&
+                original['sourceTree'] == _tree &&
+                original['adapterSha256'] == _adapter &&
+                original['productRevision'] == productRevision &&
+                _canonical(original['identity']) ==
+                    _canonical(await identity()),
+          );
+          final savedRecord = original['record'] as Map;
+          final local = records
+              .where((r) => r.jobId == savedRecord['jobId'])
+              .toList();
+          _require(
+            local.length == 1 &&
+                _canonical(local.single.toJson()) == _canonical(savedRecord),
+          );
+          evidence['originalLocalRecordUnchanged'] = true;
+        }
+        final acks = await db.select(db.companyJobPeerAcks).get();
+        evidence.addAll({
+          'baseProtectedRevision': base.revision,
+          'baseProtectedSha256': sha256.convert(base.bytes).toString(),
+          'custodyProtectedRevision': custody.revision,
+          'custodyProtectedSha256': sha256.convert(custody.bytes).toString(),
+          'records':
+              records.map((record) {
+                final operation = jsonDecode(record.operationBytes) as Map;
+                final body = operation['body'] as Map;
+                return {
+                  ...record.toJson(),
+                  'operationSha256': sha256
+                      .convert(utf8.encode(record.operationBytes))
+                      .toString(),
+                  'projectionSha256': sha256
+                      .convert(utf8.encode(record.projectionBytes))
+                      .toString(),
+                  'receiptSha256': sha256
+                      .convert(utf8.encode(record.receiptBytes))
+                      .toString(),
+                  'originalUser': body['user'],
+                  'originalDevice': body['device'],
+                  'originalInstallation': body['installation'],
+                  'originalGeneration': body['generation'],
+                };
+              }).toList()..sort(
+                (a, b) =>
+                    (a['jobId'] as String).compareTo(b['jobId'] as String),
+              ),
+          'receiptSha256': _hash(
+            records.map((r) => r.receiptBytes).toList()..sort(),
+          ),
+          'ackCount': acks.length,
+          'ackSha256': _hash(
+            acks.map((r) => _canonical(r.toJson())).toList()..sort(),
+          ),
+          'acks': acks.map((r) => r.toJson()).toList(),
+          'receiptVerification': verifiedCount == records.length
+              ? 'typed-public-verifier'
+              : 'locked-not-performed',
+          'ackVerification': adapterSession?.isValid == true
+              ? 'confirmedPeerCounts'
+              : 'locked-not-performed',
+        });
+      } else {
+        for (final record in records) {
+          await JobLineCommandReceipt.verifyAdmissionSeal(
+            record.receiptBytes,
+            security.identity!,
+            security.receivingStoreGeneration!.value,
+            expectedFamily: CompanyCommandFamily.jobCreate,
+          );
+          verifiedCount++;
+        }
       }
       evidence.addAll({
         'nativeCustodyActive': true,
@@ -1010,9 +1551,10 @@ final class _JoinNative with WidgetsBindingObserver {
         'nativeRecordsWithinCapacity': true,
         'baseProtectedBytes': base.bytes.length,
         'custodyProtectedBytes': custody.bytes.length,
-        'receiptCountVerified': records.length,
+        'receiptCountVerified': verifiedCount,
       });
     }
+    requireSnapshotSafe();
     return evidence;
   }
 
@@ -1108,7 +1650,12 @@ void main() {
     revision: _revision,
     tree: _tree,
     adapter: _adapter,
+    createdMode: _createdMode,
+    productRevision: _createdMode
+        ? _createdProductRevision
+        : joinNativeProductRevision,
   );
+  _require(kAppSchemaVersion == (_createdMode ? 8 : 7));
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('isolated native authorized Join resident', (tester) async {
     _JoinNative? resident;
@@ -1139,13 +1686,21 @@ void main() {
         revision: _revision,
         tree: _tree,
         adapter: _adapter,
+        createdMode: _createdMode,
+        productRevision: _createdMode
+            ? _createdProductRevision
+            : joinNativeProductRevision,
       );
       final workspace = openedWorkspace = ValidationWorkspace.open(
         run: workspaceRun,
         role: role,
         requireExisting: restart,
       );
-      final namespace = joinNativeNamespace(_run, _roleName);
+      final namespace = joinNativeNamespace(
+        _run,
+        _roleName,
+        createdMode: _createdMode,
+      );
       if (!restart) {
         _require(!workspace.initialized);
         _require(
