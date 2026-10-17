@@ -34,7 +34,7 @@ final class TestSourceBinding {
        peerId = nativeTestId(peerId),
        isolateId = _isolateId(isolateId) {
     if (deviceId == peerId ||
-        !(run.startsWith('nearby-') || run == 'company-j60-join-v7')) {
+        !(run.startsWith('nearby-') || run == 'company-j60-join-v8')) {
       rejectNativeTest();
     }
   }
