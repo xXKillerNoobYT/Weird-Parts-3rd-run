@@ -15,6 +15,86 @@ import 'company_join_widget_test.dart'
 
 void main() {
   testWidgets(
+    'receiver callback is captured before a closed channel refuses it',
+    (tester) => HttpOverrides.runWithHttpOverrides(() async {
+      late JoinFixture f;
+      late NearbyController a, b;
+      await tester.runAsync(
+        () => HttpOverrides.runWithHttpOverrides(() async {
+          f = await JoinFixture.create();
+          await activateFixtureB(f);
+          await joinChannels(
+            onPaired: (bc, ac) {
+              b = bc;
+              a = ac;
+            },
+          );
+        }, JoinLoopbackHttpOverrides()),
+      );
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CompanyJoinPage(
+            enrollment: f.aEnrollment,
+            approver: f.owner,
+            reconnect: true,
+            createController: (_) => a,
+            onJobSyncDiagnostic: (diagnostic) {
+              diagnostics.add(diagnostic);
+              throw StateError('observer failure must not replace refusal');
+            },
+          ),
+        ),
+      );
+      await joinWidgetSignal(
+        tester,
+        () =>
+            tester
+                .widget<TextButton>(find.byKey(const Key('company-join-close')))
+                .onPressed !=
+            null,
+      );
+      final receive = a.onJoinMessage!;
+      final pair = a.pairedJoinSession!;
+      final before = await tester.runAsync(() => sqlSnapshot(f.aDb));
+      await tester.runAsync(() async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
+      });
+      await tester.pump();
+      expect(find.text('Company connection closed'), findsOneWidget);
+      await tester.runAsync(() async {
+        await expectLater(
+          receive(pair, {'kind': 'created-jobs'}),
+          throwsA(predicate((error) => error.toString() == 'Join is closed')),
+        );
+      });
+      expect(
+        diagnostics.first.kind,
+        CreatedJobSyncDiagnosticKind.receiverEntered,
+      );
+      expect(diagnostics.first.receiverCallbackReached, isTrue);
+      expect(
+        diagnostics.last.result?.failure?.stage,
+        CreatedJobSyncStage.channel,
+      );
+      expect(
+        diagnostics.last.result?.failure?.reason,
+        CreatedJobSyncReason.unavailable,
+      );
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), before);
+      await tester.runAsync(() async {
+        await a.dispose();
+        await b.dispose();
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+      });
+      await tester.pumpWidget(const SizedBox());
+    }, JoinLoopbackHttpOverrides()),
+  );
+  testWidgets(
     'proof-only Verify then explicit availability allows one two-way Sync Now',
     (tester) => HttpOverrides.runWithHttpOverrides(() async {
       late JoinFixture f;

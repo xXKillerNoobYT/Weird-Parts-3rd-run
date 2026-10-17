@@ -253,20 +253,107 @@ final class CreatedJobHoldingsInventory {
   };
 }
 
+enum CreatedJobSyncStage {
+  preflight,
+  channel,
+  localInventory,
+  startRequest,
+  holdings,
+  transfer,
+  confirmation,
+}
+
+enum CreatedJobSyncReason {
+  unavailable,
+  moreJobsPending,
+  unconfirmedSnapshot,
+  unsupportedAuthor,
+  timeout,
+  transportRejected,
+  transportUnavailable,
+  refused,
+  unexpected,
+}
+
+final class CreatedJobSyncFailure {
+  const CreatedJobSyncFailure(this.stage, this.reason);
+
+  factory CreatedJobSyncFailure.fromError(
+    Object error,
+    CreatedJobSyncStage stage,
+  ) {
+    final reason = switch (error) {
+      CompanyBootstrapRefusal(:final message) => switch (message) {
+        'Manual Job sync is unavailable' ||
+        'Enable manual Job sync first' ||
+        'Join is closed' ||
+        'Join connection changed' => CreatedJobSyncReason.unavailable,
+        'More Jobs pending' ||
+        'More Jobs pending; pair again' ||
+        'Job sync channel budget exhausted' ||
+        'Job sync frame ceiling reached' =>
+          CreatedJobSyncReason.moreJobsPending,
+        'Peer claimed an unconfirmed Job snapshot' =>
+          CreatedJobSyncReason.unconfirmedSnapshot,
+        _ => CreatedJobSyncReason.refused,
+      },
+      TimeoutException() => CreatedJobSyncReason.timeout,
+      NearbyException() => CreatedJobSyncReason.transportRejected,
+      SocketException() => CreatedJobSyncReason.transportUnavailable,
+      _ => CreatedJobSyncReason.unexpected,
+    };
+    return CreatedJobSyncFailure(stage, reason);
+  }
+
+  final CreatedJobSyncStage stage;
+  final CreatedJobSyncReason reason;
+  String get message => 'Stage ${stage.name}. Reason ${reason.name}.';
+}
+
+enum CreatedJobSyncDiagnosticKind { started, receiverEntered, terminal }
+
+final class CreatedJobSyncDiagnostic {
+  const CreatedJobSyncDiagnostic.started({this.receiverCallbackReached = false})
+    : kind = CreatedJobSyncDiagnosticKind.started,
+      result = null;
+  const CreatedJobSyncDiagnostic.receiverEntered()
+    : kind = CreatedJobSyncDiagnosticKind.receiverEntered,
+      receiverCallbackReached = true,
+      result = null;
+  const CreatedJobSyncDiagnostic.terminal(
+    CreatedJobSyncResult this.result, {
+    this.receiverCallbackReached = false,
+  }) : kind = CreatedJobSyncDiagnosticKind.terminal;
+
+  final CreatedJobSyncDiagnosticKind kind;
+  final bool receiverCallbackReached;
+  final CreatedJobSyncResult? result;
+
+  void notify(void Function(CreatedJobSyncDiagnostic)? observer) {
+    try {
+      observer?.call(this);
+    } catch (_) {
+      // Observing a result must not change admission or drain behavior.
+    }
+  }
+}
+
 final class CreatedJobSyncResult {
   const CreatedJobSyncResult(
     this.sent,
     this.received,
     this.complete,
-    this.unsupported,
-  );
+    this.unsupported, {
+    this.failure,
+  });
   final int sent;
   final int received;
   final bool complete;
   final int unsupported;
+  final CreatedJobSyncFailure? failure;
   String get message => complete
       ? 'Job snapshot synced. Sent $sent, received $received.'
-      : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${unsupported > 0 ? ' Unsupported author scope remains pending.' : ''}';
+      : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${unsupported > 0 ? ' Unsupported author scope remains pending.' : ''}${failure == null ? '' : ' ${failure!.message}'}';
 }
 
 final class CompanyCreatedJobSync {
@@ -345,6 +432,7 @@ final class CompanyCreatedJobSync {
     required this.availability,
     required this.controller,
     this.onStatus,
+    this.onDiagnostic,
     this.chunkBytes = kCreatedJobSyncChunkBytes,
   }) {
     if (chunkBytes < 1 || chunkBytes > kCreatedJobSyncChunkBytes) {
@@ -355,8 +443,25 @@ final class CompanyCreatedJobSync {
   final CompanyJobSyncAvailability availability;
   final NearbyController controller;
   final void Function(String)? onStatus;
+  final void Function(CreatedJobSyncDiagnostic)? onDiagnostic;
   final int chunkBytes;
   Object? lastFailure;
+
+  void _status(String message) {
+    try {
+      onStatus?.call(message);
+    } catch (_) {
+      // Status observers cannot change the sync result.
+    }
+  }
+
+  void _terminal(CreatedJobSyncResult result, {bool receiving = false}) {
+    if (!receiving || !_busy) _status(result.message);
+    CreatedJobSyncDiagnostic.terminal(
+      result,
+      receiverCallbackReached: receiving,
+    ).notify(onDiagnostic);
+  }
 
   bool get isLive {
     if (_closed) return false;
@@ -761,10 +866,26 @@ final class CompanyCreatedJobSync {
     }
     _receivePending = true;
     final result = _receiving.then((_) async {
+      var stage = CreatedJobSyncStage.channel;
+      String? receivingRun;
       try {
-        return await _receive(wire);
+        return await _receive(wire, (value) => stage = value, () {
+          if (!_busy) receivingRun = _run;
+        });
       } catch (error) {
         lastFailure = error;
+        final ownCounts =
+            receivingRun != null && receivingRun == _run && !_busy;
+        _terminal(
+          CreatedJobSyncResult(
+            ownCounts ? _sentJobs : 0,
+            ownCounts ? _receivedJobs : 0,
+            false,
+            0,
+            failure: CreatedJobSyncFailure.fromError(error, stage),
+          ),
+          receiving: true,
+        );
         rethrow;
       } finally {
         _receivePending = false;
@@ -777,15 +898,23 @@ final class CompanyCreatedJobSync {
     return result;
   }
 
-  Future<Map<String, Object?>> _receive(Map<String, Object?> wire) async {
+  Future<Map<String, Object?>> _receive(
+    Map<String, Object?> wire,
+    void Function(CreatedJobSyncStage) atStage,
+    void Function() receiverInitialized,
+  ) async {
     final body = await _open(wire);
     final action = body['action'];
     final data = Map<String, Object?>.from(body['data'] as Map);
     Map<String, Object?> result;
     if (action == 'start') {
+      atStage(CreatedJobSyncStage.startRequest);
       if (_busy) {
         throw const CompanyBootstrapRefusal('A Job sync is already running');
       }
+      const CreatedJobSyncDiagnostic.started(receiverCallbackReached: true)
+          .notify(onDiagnostic);
+      atStage(CreatedJobSyncStage.localInventory);
       await _freeze();
       _run = body['run'] as String;
       _readSummary(data);
@@ -793,16 +922,20 @@ final class CompanyCreatedJobSync {
       _receivedJobs = 0;
       _served.clear();
       _confirmed.clear();
-      onStatus?.call('Exchanging Job holdings with the verified peer.');
+      receiverInitialized();
+      _status('Exchanging Job holdings with the verified peer.');
       result = _summary();
     } else {
       if (_run == null || body['run'] != _run) {
         throw const CompanyBootstrapRefusal('Job sync run differs');
       }
+      receiverInitialized();
       if (action == 'holdings') {
+        atStage(CreatedJobSyncStage.holdings);
         _remote!.acceptPage(data);
         result = {};
       } else if (action == 'page') {
+        atStage(CreatedJobSyncStage.holdings);
         _joinObject(data, {'ordinal'});
         final ordinal = data['ordinal'];
         if (ordinal is! int) {
@@ -810,16 +943,43 @@ final class CompanyCreatedJobSync {
         }
         result = _holdingsPage(ordinal);
       } else {
+        atStage(
+          action == 'finish'
+              ? CreatedJobSyncStage.confirmation
+              : CreatedJobSyncStage.transfer,
+        );
         _requireInventories();
         result = await _transfer(action, data);
       }
     }
+    atStage(CreatedJobSyncStage.channel);
     final reply = await _seal(wire['request'] as String, {
       'action': '$action.reply',
       'run': _run,
       'data': result,
     });
     availability.requireLive();
+    if (action == 'finish') {
+      final complete = data['complete'] as bool;
+      final unsupported = data['unsupported'] as int;
+      _terminal(
+        CreatedJobSyncResult(
+          _sentJobs,
+          _receivedJobs,
+          complete,
+          unsupported,
+          failure: complete
+              ? null
+              : CreatedJobSyncFailure(
+                  CreatedJobSyncStage.confirmation,
+                  unsupported > 0
+                      ? CreatedJobSyncReason.unsupportedAuthor
+                      : CreatedJobSyncReason.unconfirmedSnapshot,
+                ),
+        ),
+        receiving: true,
+      );
+    }
     return reply;
   }
 
@@ -838,21 +998,10 @@ final class CompanyCreatedJobSync {
       final confirmed = await _snapshotConfirmed();
       if (data['complete'] == true &&
           (!confirmed || data['unsupported'] != 0)) {
-        onStatus?.call(
-          CreatedJobSyncResult(_sentJobs, _receivedJobs, false, 0).message,
-        );
         throw const CompanyBootstrapRefusal(
           'Peer claimed an unconfirmed Job snapshot',
         );
       }
-      onStatus?.call(
-        CreatedJobSyncResult(
-          _sentJobs,
-          _receivedJobs,
-          data['complete'] == true,
-          data['unsupported'] as int,
-        ).message,
-      );
       return {};
     }
     final descriptor = _parseDescriptor(data['descriptor']);
@@ -951,15 +1100,22 @@ final class CompanyCreatedJobSync {
     _receivedJobs = 0;
     var unsupported = 0;
     var complete = false;
+    var stage = CreatedJobSyncStage.preflight;
+    CreatedJobSyncFailure? failure;
+    const CreatedJobSyncDiagnostic.started().notify(onDiagnostic);
     try {
       lastFailure = null;
-      onStatus?.call('Checking Job sync permissions.');
+      _status('Checking Job sync permissions.');
       await availability.requireCurrent();
+      stage = CreatedJobSyncStage.channel;
       await _getChannel();
+      stage = CreatedJobSyncStage.localInventory;
       await _freeze();
-      onStatus?.call('Comparing verified Job holdings.');
+      _status('Comparing verified Job holdings.');
       _run = const Uuid().v4();
+      stage = CreatedJobSyncStage.startRequest;
       _readSummary(await _rpc('start', _summary()));
+      stage = CreatedJobSyncStage.holdings;
       for (var i = 0; i < _local!.pages; i++) {
         await _rpc('holdings', _holdingsPage(i));
       }
@@ -971,6 +1127,7 @@ final class CompanyCreatedJobSync {
       final theirs = _remote!.descriptors;
       final ourKeys = _local!.byKey;
       final theirKeys = _remote!.byKey;
+      stage = CreatedJobSyncStage.transfer;
       for (
         var i = 0;
         i < (ours.length > theirs.length ? ours.length : theirs.length);
@@ -994,9 +1151,7 @@ final class CompanyCreatedJobSync {
               await _saveAck(d, reply['ack']);
             }
           } else if (_authoredHere(d)) {
-            onStatus?.call(
-              'Sending an offline-created Job to the retained peer.',
-            );
+            _status('Sending an offline-created Job to the retained peer.');
             final row = await _record(d);
             final bytes = utf8.encode(row.operationBytes);
             if (!_canExchange(
@@ -1048,9 +1203,7 @@ final class CompanyCreatedJobSync {
             length: d['length'] as int,
             digest: d['digest'] as String,
           );
-          onStatus?.call(
-            'Receiving an offline-created Job from the retained peer.',
-          );
+          _status('Receiving an offline-created Job from the retained peer.');
           while (!buffer.complete) {
             final reply = await _rpc('get', {
               'descriptor': d,
@@ -1073,11 +1226,21 @@ final class CompanyCreatedJobSync {
           _receivedJobs++;
         }
       }
+      stage = CreatedJobSyncStage.confirmation;
       complete = unsupported == 0 && await _snapshotConfirmed();
-      onStatus?.call('Confirming the Job snapshot exchange.');
+      if (!complete) {
+        failure = CreatedJobSyncFailure(
+          stage,
+          unsupported > 0
+              ? CreatedJobSyncReason.unsupportedAuthor
+              : CreatedJobSyncReason.unconfirmedSnapshot,
+        );
+      }
+      _status('Confirming the Job snapshot exchange.');
       await _rpc('finish', {'complete': complete, 'unsupported': unsupported});
     } catch (error) {
       lastFailure = error;
+      failure = CreatedJobSyncFailure.fromError(error, stage);
       complete = false;
     } finally {
       _busy = false;
@@ -1089,8 +1252,9 @@ final class CompanyCreatedJobSync {
       _receivedJobs,
       complete,
       unsupported,
+      failure: failure,
     );
-    onStatus?.call(result.message);
+    _terminal(result);
     return result;
   }
 }

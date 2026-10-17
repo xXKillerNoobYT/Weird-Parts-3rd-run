@@ -16,6 +16,7 @@ import '../../data/app_database.dart';
 import '../company/company_bootstrap.dart';
 import '../company/company_store_markers.dart';
 import '../nearby/nearby_pairing.dart';
+import '../nearby/nearby_protocol.dart' show NearbyException;
 import '../nearby/nearby_controller.dart'
     show NearbyPairedJoinSession, NearbyController, NearbyCompanyDisclosure;
 import '../job_line_commands/job_line_commands.dart'

@@ -8,8 +8,10 @@ import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
 import 'package:uuid/uuid.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 import 'package:wired_parts/features/nearby/nearby_controller.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'company_join_test.dart'
     show
@@ -50,6 +52,10 @@ Future<
 openSyncPair(
   JoinFixture f, {
   int chunkBytes = kCreatedJobSyncChunkBytes,
+  void Function(String)? onAStatus,
+  void Function(String)? onBStatus,
+  void Function(CreatedJobSyncDiagnostic)? onADiagnostic,
+  void Function(CreatedJobSyncDiagnostic)? onBDiagnostic,
 }) async {
   final bo = f.bEnrollment.currentSession ?? await f.bEnrollment.signIn('1234');
   late NearbyController ac, bc;
@@ -81,6 +87,8 @@ openSyncPair(
       peer: aPeer,
     ),
     controller: ac,
+    onStatus: onAStatus,
+    onDiagnostic: onADiagnostic,
     chunkBytes: chunkBytes,
   );
   final b = CompanyCreatedJobSync(
@@ -90,6 +98,8 @@ openSyncPair(
       peer: done.membership,
     ),
     controller: bc,
+    onStatus: onBStatus,
+    onDiagnostic: onBDiagnostic,
     chunkBytes: chunkBytes,
   );
   ac.onJoinMessage = (_, wire) => a.receive(wire);
@@ -152,6 +162,200 @@ Future<Map<String, Object?>> syncAttackWire(
 }
 
 void main() {
+  test(
+    'Nearby rejection exposes a fixed reason without its arbitrary message',
+    () {
+      final result = CreatedJobSyncResult(
+        0,
+        0,
+        false,
+        0,
+        failure: CreatedJobSyncFailure.fromError(
+          const NearbyException('private /unsafe/key 192.0.2.1 secret-token'),
+          CreatedJobSyncStage.startRequest,
+        ),
+      );
+      expect(
+        result.message,
+        contains('Stage startRequest. Reason transportRejected.'),
+      );
+      expect(result.message, isNot(contains('private')));
+      expect(result.message, isNot(contains('/unsafe/key')));
+      expect(result.message, isNot(contains('192.0.2.1')));
+      expect(result.message, isNot(contains('secret-token')));
+    },
+  );
+  test(
+    'closed availability explains an incomplete zero-count sync safely',
+    () async {
+      final f = await JoinFixture.create();
+      await activateFixtureB(f);
+      final statuses = <String>[];
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      final pair = await openSyncPair(
+        f,
+        onAStatus: statuses.add,
+        onADiagnostic: diagnostics.add,
+      );
+      pair.a.availability.close();
+      final before = await sqlSnapshot(f.aDb);
+      final result = await pair.a.syncNow();
+      expect(result.complete, isFalse);
+      expect(result.sent, 0);
+      expect(result.received, 0);
+      expect(result.message, contains('Stage preflight. Reason unavailable.'));
+      expect(result.failure?.stage, CreatedJobSyncStage.preflight);
+      expect(result.failure?.reason, CreatedJobSyncReason.unavailable);
+      expect(statuses.last, result.message);
+      expect(diagnostics.last.result, same(result));
+      expect(await sqlSnapshot(f.aDb), before);
+    },
+  );
+  for (final (error, reason) in <(Object, CreatedJobSyncReason)>[
+    (
+      const CompanyBootstrapRefusal('More Jobs pending; pair again'),
+      CreatedJobSyncReason.moreJobsPending,
+    ),
+    (
+      const CompanyBootstrapRefusal(
+        'private /unsafe/key 192.0.2.1 secret-token',
+      ),
+      CreatedJobSyncReason.refused,
+    ),
+    (
+      StateError('private /unsafe/key 192.0.2.1 secret-token'),
+      CreatedJobSyncReason.unexpected,
+    ),
+    (
+      const SocketException('private /unsafe/key 192.0.2.1 secret-token'),
+      CreatedJobSyncReason.transportUnavailable,
+    ),
+    (
+      TimeoutException('private /unsafe/key 192.0.2.1 secret-token'),
+      CreatedJobSyncReason.timeout,
+    ),
+  ]) {
+    test(
+      'terminal ${reason.name} diagnostics exclude arbitrary exception data',
+      () async {
+        final f = await JoinFixture.create();
+        await activateFixtureB(f);
+        final statuses = <String>[];
+        final pair = await openSyncPair(f, onAStatus: statuses.add);
+        final before = await sqlSnapshot(f.aDb);
+        final protected = Map.of(f.aStore.states);
+        f.aStore.beforeRead = (_) => throw error;
+        late CreatedJobSyncResult result;
+        try {
+          result = await pair.a.syncNow();
+        } finally {
+          f.aStore.beforeRead = null;
+        }
+        expect(result.complete, isFalse);
+        expect(result.failure?.reason, reason);
+        expect(
+          result.message,
+          contains('Stage preflight. Reason ${reason.name}.'),
+        );
+        expect(statuses.last, result.message);
+        expect(statuses.join(' '), isNot(contains('private')));
+        expect(statuses.join(' '), isNot(contains('/unsafe/key')));
+        expect(statuses.join(' '), isNot(contains('192.0.2.1')));
+        expect(statuses.join(' '), isNot(contains('secret-token')));
+        expect(await sqlSnapshot(f.aDb), before);
+        expectJoinProtectedUnchanged(f.aStore, protected);
+      },
+    );
+  }
+  test(
+    'throwing status and diagnostic observers cannot fail sync or drain',
+    () async {
+      final f = await JoinFixture.create();
+      await activateFixtureB(f);
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      void status(String _) => throw StateError('observer failed');
+      void diagnostic(CreatedJobSyncDiagnostic event) {
+        diagnostics.add(event);
+        throw StateError('observer failed');
+      }
+
+      final pair = await openSyncPair(
+        f,
+        onAStatus: status,
+        onBStatus: status,
+        onADiagnostic: diagnostic,
+        onBDiagnostic: diagnostic,
+      );
+      final result = await pair.a.syncNow();
+      expect(result.complete, isTrue, reason: result.failure?.message);
+      expect(result.failure, isNull);
+      expect(result.message, 'Job snapshot synced. Sent 1, received 0.');
+      expect(await f.bDb.select(f.bDb.companyJobs).get(), hasLength(1));
+      await expectLater(pair.a.receive({}), throwsA(anything));
+      expect(diagnostics.last.result?.sent, 0);
+      expect(diagnostics.last.result?.received, 0);
+      await pair.a.closeAndDrain();
+      await pair.b.closeAndDrain();
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
+    'rejected concurrent receiver start preserves the active local status',
+    () async {
+      final f = await JoinFixture.create();
+      await activateFixtureB(f);
+      final statuses = <String>[];
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      final pair = await openSyncPair(
+        f,
+        onAStatus: statuses.add,
+        onADiagnostic: diagnostics.add,
+      );
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      f.aStore.beforeRead = (namespace) {
+        if (namespace == f.a.namespace && !entered.isCompleted) {
+          entered.complete();
+          return release.future;
+        }
+        return null;
+      };
+      final active = pair.a.syncNow();
+      try {
+        await entered.future;
+        final statusBefore = statuses.last;
+        final inventory = CreatedJobHoldingsInventory.local(
+          await f.bDb.select(f.bDb.companyJobs).get(),
+        );
+        final wire = await syncAttackWire(
+          pair.b.controller.pairedJoinSession!,
+          base64Encode(f.a.identity!.publicKey),
+          const Uuid().v4(),
+          'start',
+          {
+            'inventory': inventory.meta,
+            'store': f.b.receivingStoreGeneration!.value,
+          },
+        );
+        await expectLater(pair.a.receive(wire), throwsA(anything));
+        expect(statuses.last, statusBefore);
+        expect(
+          diagnostics.where(
+            (event) => event.kind == CreatedJobSyncDiagnosticKind.started,
+          ),
+          hasLength(1),
+        );
+        expect(diagnostics.last.result?.sent, 0);
+        expect(diagnostics.last.result?.received, 0);
+      } finally {
+        f.aStore.beforeRead = null;
+        final drain = pair.a.closeAndDrain();
+        if (!release.isCompleted) release.complete();
+        await active;
+        await drain;
+      }
+    },
+  );
   test('512 descriptor codec inventory remains paged and bounded with cached ACK stores', () {
     final descriptors = List.generate(512, (index) {
       final id = '00000000-0000-4000-8000-${index.toString().padLeft(12, '0')}';
@@ -300,7 +504,13 @@ void main() {
   test('retained peer cannot claim completed snapshot before transferring missing Jobs', () async {
     final f = await JoinFixture.create();
     await activateFixtureB(f);
-    final pair = await openSyncPair(f);
+    final statuses = <String>[];
+    final diagnostics = <CreatedJobSyncDiagnostic>[];
+    final pair = await openSyncPair(
+      f,
+      onBStatus: statuses.add,
+      onBDiagnostic: diagnostics.add,
+    );
     final inventory = CreatedJobHoldingsInventory.local(
       await f.aDb.select(f.aDb.companyJobs).get(),
     );
@@ -335,6 +545,15 @@ void main() {
       throwsA(anything),
     );
     expect(pair.b.lastFailure.toString(), contains('unconfirmed Job snapshot'));
+    expect(
+      statuses.last,
+      contains('Stage confirmation. Reason unconfirmedSnapshot.'),
+    );
+    expect(diagnostics.last.result?.complete, isFalse);
+    expect(
+      diagnostics.last.result?.failure?.reason,
+      CreatedJobSyncReason.unconfirmedSnapshot,
+    );
     expect(await sqlSnapshot(f.bDb), before);
     expect(await f.bDb.select(f.bDb.companyJobs).get(), isEmpty);
   }, timeout: const Timeout(Duration(minutes: 2)));

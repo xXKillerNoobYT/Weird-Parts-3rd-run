@@ -15,12 +15,14 @@ class CompanyJoinPage extends StatefulWidget {
     this.approver,
     this.reconnect = false,
     this.createController,
+    this.onJobSyncDiagnostic,
     super.key,
   });
   final CompanyEnrollment enrollment;
   final OwnerSession? approver;
   final bool reconnect;
   final NearbyController Function(String encounterAlias)? createController;
+  final void Function(CreatedJobSyncDiagnostic)? onJobSyncDiagnostic;
   @override
   State<CompanyJoinPage> createState() => _CompanyJoinPageState();
 }
@@ -118,15 +120,40 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     NearbyPairedJoinSession pair,
     Map<String, Object?> wire,
   ) async {
-    final channel = await _currentChannel(pair);
-    if (widget.reconnect) {
-      if (wire['kind'] == 'created-jobs') {
-        final sync = _jobSync;
-        if (sync == null) {
+    if (widget.reconnect && wire['kind'] == 'created-jobs') {
+      const CreatedJobSyncDiagnostic.receiverEntered().notify(
+        widget.onJobSyncDiagnostic,
+      );
+      late CompanyCreatedJobSync sync;
+      try {
+        await _currentChannel(pair);
+        final current = _jobSync;
+        if (current == null) {
           throw const CompanyBootstrapRefusal('Enable manual Job sync first');
         }
-        return sync.receive(wire);
+        sync = current;
+      } catch (error) {
+        final result = CreatedJobSyncResult(
+          0,
+          0,
+          false,
+          0,
+          failure: CreatedJobSyncFailure.fromError(
+            error,
+            CreatedJobSyncStage.channel,
+          ),
+        );
+        if (mounted && !_closed) setState(() => _status = result.message);
+        CreatedJobSyncDiagnostic.terminal(
+          result,
+          receiverCallbackReached: true,
+        ).notify(widget.onJobSyncDiagnostic);
+        rethrow;
       }
+      return sync.receive(wire);
+    }
+    final channel = await _currentChannel(pair);
+    if (widget.reconnect) {
       Map<String, Object?>? reply;
       if (wire['kind'] == 'peer-init') {
         reply = await _authentication.receivePeerChallenge(
@@ -230,6 +257,8 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     final sync = _jobSync = CompanyCreatedJobSync(
       availability: available,
       controller: _controller,
+      onDiagnostic: (diagnostic) =>
+          diagnostic.notify(widget.onJobSyncDiagnostic),
       onStatus: (status) {
         if (mounted && !_closed) {
           setState(() {

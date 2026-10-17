@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/features/company/company_gate.dart';
 import 'package:wired_parts/features/company/company_jobs_panel.dart';
 import 'package:wired_parts/features/company/company_join_page.dart';
+import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/nearby/nearby_discovery.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
@@ -97,6 +98,88 @@ void _validate({
 );
 
 void main() {
+  test('native diagnostic retention and evidence writes stay bounded across remounts', () {
+    final diagnostics = adapter.CreatedJobNativeSyncDiagnostics();
+    var writes = 0;
+    for (var i = 0; i < 35; i++) {
+      if (diagnostics.observe(
+        const CreatedJobSyncDiagnostic.terminal(
+          CreatedJobSyncResult(0, 0, false, 0),
+        ),
+      )) {
+        writes++;
+      }
+    }
+    expect(writes, 32);
+    expect(diagnostics.snapshot['terminals'], hasLength(32));
+    expect(diagnostics.snapshot['droppedTerminals'], 3);
+    expect(diagnostics.snapshot['evidenceWriteAttempts'], 32);
+    expect(diagnostics.snapshot['droppedEvidence'], 3);
+    diagnostics.resetAttempt();
+    expect(
+      diagnostics.observe(const CreatedJobSyncDiagnostic.receiverEntered()),
+      isFalse,
+    );
+    expect(diagnostics.snapshot['evidenceWriteAttempts'], 32);
+    expect(diagnostics.snapshot['droppedEvidence'], 4);
+  });
+  test(
+    'native terminal capture survives remount and resets the next attempt',
+    () {
+      final diagnostics = adapter.CreatedJobNativeSyncDiagnostics();
+      const failure = CreatedJobSyncResult(
+        0,
+        0,
+        false,
+        0,
+        failure: CreatedJobSyncFailure(
+          CreatedJobSyncStage.preflight,
+          CreatedJobSyncReason.unavailable,
+        ),
+      );
+      diagnostics.observe(const CreatedJobSyncDiagnostic.started());
+      diagnostics.observe(const CreatedJobSyncDiagnostic.terminal(failure));
+      final terminal = diagnostics.snapshot;
+      expect(terminal['receiverCallbackReached'], isFalse);
+      expect(terminal['failureStage'], 'preflight');
+      expect(terminal['failureReason'], 'unavailable');
+      diagnostics.resetAttempt();
+      expect(diagnostics.snapshot['terminalObserved'], isFalse);
+      expect(diagnostics.snapshot['receiverCallbackReached'], isFalse);
+      expect((diagnostics.snapshot['terminals'] as List).single, {
+        'receiverCallbackReached': false,
+        'terminalObserved': true,
+        'complete': false,
+        'sent': 0,
+        'received': 0,
+        'unsupported': 0,
+        'failureStage': 'preflight',
+        'failureReason': 'unavailable',
+      });
+      expect(
+        diagnostics.observe(const CreatedJobSyncDiagnostic.receiverEntered()),
+        isTrue,
+      );
+      expect(diagnostics.snapshot['receiverCallbackReached'], isTrue);
+      diagnostics.observe(
+        const CreatedJobSyncDiagnostic.started(receiverCallbackReached: true),
+      );
+      diagnostics.observe(
+        const CreatedJobSyncDiagnostic.terminal(
+          CreatedJobSyncResult(0, 1, true, 0),
+          receiverCallbackReached: true,
+        ),
+      );
+      expect(diagnostics.snapshot['complete'], isTrue);
+      expect(diagnostics.snapshot['failureReason'], isNull);
+      expect(diagnostics.snapshot['receiverCallbackReached'], isTrue);
+      diagnostics.observe(const CreatedJobSyncDiagnostic.started());
+      expect(diagnostics.snapshot['terminalObserved'], isFalse);
+      expect(diagnostics.snapshot['receiverCallbackReached'], isFalse);
+      expect(diagnostics.snapshot['terminals'], hasLength(2));
+      expect(jsonEncode(terminal), contains('unavailable'));
+    },
+  );
   for (final beforeEffect in [false, true]) {
     test(
       'native readiness keeps ${beforeEffect ? 'effect deadline' : 'three-minute passive bound'}',
@@ -800,8 +883,8 @@ void main() {
     expect(() => _validate(run: 'j61-created-v7'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v8'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v9'), throwsA(anything));
-    expect(() => _validate(run: 'j61-created-v10'), throwsA(anything));
-    expect(() => _validate(run: 'j61-created-v12'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v11'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v13'), throwsA(anything));
     expect(() => _validate(productRevision: _tree), throwsA(anything));
     expect(
       () => _validate(revision: 'short', productRevision: 'short'),
@@ -841,7 +924,7 @@ void main() {
         'owner',
         createdMode: true,
       ),
-      'synthetic.company.created.j61-created-v11.owner',
+      'synthetic.company.created.j61-created-v12.owner',
     );
     expect(
       () => adapter.joinNativeNamespace(

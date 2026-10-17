@@ -37,7 +37,7 @@ const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
 const joinNativeRun = 'j60-join-v10';
-const createdJobNativeRun = 'j61-created-v11';
+const createdJobNativeRun = 'j61-created-v12';
 const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _createdProductRevision = String.fromEnvironment(
   'COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION',
@@ -309,6 +309,66 @@ enum CreatedJobNativeUiState {
   unknown,
 }
 
+const createdJobNativeDiagnosticLimit = 32;
+
+final class CreatedJobNativeSyncDiagnostics {
+  bool receiverCallbackReached = false;
+  CreatedJobSyncResult? _result;
+  final List<Map<String, Object?>> _terminals = [];
+  int _droppedTerminals = 0;
+  int _evidenceWriteAttempts = 0;
+  int _droppedEvidence = 0;
+  int get evidenceWriteAttempts => _evidenceWriteAttempts;
+
+  void resetAttempt() {
+    receiverCallbackReached = false;
+    _result = null;
+  }
+
+  bool observe(CreatedJobSyncDiagnostic diagnostic) {
+    final firstReceiverEntry =
+        !receiverCallbackReached && diagnostic.receiverCallbackReached;
+    if (diagnostic.kind == CreatedJobSyncDiagnosticKind.started) resetAttempt();
+    receiverCallbackReached |= diagnostic.receiverCallbackReached;
+    if (diagnostic.result case final result?) {
+      _result = result;
+      if (_terminals.length < createdJobNativeDiagnosticLimit) {
+        _terminals.add(_current());
+      } else {
+        _droppedTerminals++;
+      }
+    }
+    if (!firstReceiverEntry && diagnostic.result == null) return false;
+    if (_evidenceWriteAttempts >= createdJobNativeDiagnosticLimit) {
+      _droppedEvidence++;
+      return false;
+    }
+    _evidenceWriteAttempts++;
+    return true;
+  }
+
+  Map<String, Object?> _current() => {
+    'receiverCallbackReached': receiverCallbackReached,
+    'terminalObserved': _result != null,
+    if (_result case final result?) ...{
+      'complete': result.complete,
+      'sent': result.sent,
+      'received': result.received,
+      'unsupported': result.unsupported,
+      'failureStage': result.failure?.stage.name,
+      'failureReason': result.failure?.reason.name,
+    },
+  };
+
+  Map<String, Object?> get snapshot => {
+    ..._current(),
+    'terminals': [for (final terminal in _terminals) Map.of(terminal)],
+    'droppedTerminals': _droppedTerminals,
+    'evidenceWriteAttempts': _evidenceWriteAttempts,
+    'droppedEvidence': _droppedEvidence,
+  };
+}
+
 final class CreatedJobNativeTerminalFailure implements Exception {
   const CreatedJobNativeTerminalFailure();
   NativeTestCommandError get error => NativeTestCommandError.stateChanged;
@@ -420,6 +480,7 @@ final class _JoinNative with WidgetsBindingObserver {
       ? _CreatedJobStage.retainedPeer
       : _CreatedJobStage.enrollment;
   int syncStarts = 0;
+  final syncDiagnostics = CreatedJobNativeSyncDiagnostics();
   int cancelStarts = 0;
   int interruptionStarts = 0;
   int interruptionDrains = 0;
@@ -774,10 +835,25 @@ final class _JoinNative with WidgetsBindingObserver {
     savedPair = null;
     final pageEpoch = ++joinPageEpoch;
     routeReturned = false;
+    syncDiagnostics.resetAttempt();
     CompanyJoinPage page() => CompanyJoinPage(
       enrollment: enrollment,
       approver: adapterSession,
       reconnect: reconnect,
+      onJobSyncDiagnostic: _createdMode
+          ? (diagnostic) {
+              if (syncDiagnostics.observe(diagnostic)) {
+                writeOnce(
+                  'created-sync-diagnostic-$pid-${syncDiagnostics.evidenceWriteAttempts}.json',
+                  {
+                    'observation': diagnostic.kind.name,
+                    'pageEpoch': pageEpoch,
+                    ...syncDiagnostics.snapshot,
+                  },
+                );
+              }
+            }
+          : null,
       createController: (alias) => controller = NearbyController(
         deviceId: alias,
         deviceName: 'Nearby ${alias.substring(0, 6)}',
@@ -1507,6 +1583,7 @@ final class _JoinNative with WidgetsBindingObserver {
         'syncState': syncUiState.name,
         'status': joinStatus,
         'syncStarts': syncStarts,
+        'syncDiagnostics': syncDiagnostics.snapshot,
         'interruptionStarts': interruptionStarts,
         'interruptionDrains': interruptionDrains,
         'sqlSha256': await sqlHash(),
