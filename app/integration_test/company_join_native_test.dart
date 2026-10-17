@@ -36,7 +36,7 @@ const _roleName = String.fromEnvironment('COMPANY_JOIN_NATIVE_ROLE');
 const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
-const joinNativeRun = 'j60-join-v3';
+const joinNativeRun = 'j60-join-v4';
 const _pin = '1234'; // Isolated synthetic namespace only; never emitted.
 const _phrase = 'Synthetic Join owner authority only 123';
 const _nativeStore = NativeInstallationSecureStore();
@@ -203,6 +203,7 @@ final class _JoinNative with WidgetsBindingObserver {
   NativeTestResidentRpc? _rpc;
   bool finished = false, closed = false, exitRequested = false;
   bool lifecycleCancelled = false;
+  int lifecycleEvent = 0;
   NativeTestCommand? activeCommand;
   State? _pageState;
   int snapshotOrdinal = 0;
@@ -243,6 +244,60 @@ final class _JoinNative with WidgetsBindingObserver {
     );
     file.createSync(exclusive: true);
     file.writeAsStringSync(jsonEncode({...header, ...value}), flush: true);
+  }
+
+  Map<String, Object?> _lifecycleDetails(AppLifecycleState state) => {
+    'state': state.name,
+    'stage': stage,
+    'elapsedMillis': clock.elapsedMilliseconds,
+    'controllerPhase': controller?.state.phase.name,
+    'lifecycleCancelled': lifecycleCancelled,
+    'pid': pid,
+    'run': _run,
+    'role': _roleName,
+    'sourceRevision': _revision,
+    'sourceTree': _tree,
+    'productRevision': joinNativeProductRevision,
+    'adapterSha256': _adapter,
+  };
+
+  void writeLifecycleBaseline(AppLifecycleState state) {
+    try {
+      final file = File(
+        p.join(workspace.root.path, 'join-$phase-lifecycle-baseline-$pid.json'),
+      );
+      file.createSync(exclusive: true);
+      file.writeAsStringSync(
+        jsonEncode({'format': 1, 'startup': _lifecycleDetails(state)}),
+        flush: true,
+      );
+    } catch (_) {
+      // Diagnostics must not affect lifecycle cancellation or startup guards.
+    }
+  }
+
+  void _writeLifecycleEvent(
+    int event,
+    Map<String, Object?>? before,
+    AppLifecycleState state,
+  ) {
+    try {
+      final file = File(
+        p.join(workspace.root.path, 'join-$phase-lifecycle-$pid-$event.json'),
+      );
+      file.createSync(exclusive: true);
+      file.writeAsStringSync(
+        jsonEncode({
+          'format': 1,
+          'event': event,
+          'before': before,
+          'after': _lifecycleDetails(state),
+        }),
+        flush: true,
+      );
+    } catch (_) {
+      // Diagnostics must not affect lifecycle cancellation or startup guards.
+    }
   }
 
   Future<void> wait(bool Function() ready) async {
@@ -985,12 +1040,20 @@ final class _JoinNative with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final event = ++lifecycleEvent;
+    Map<String, Object?>? before;
+    try {
+      before = _lifecycleDetails(state);
+    } catch (_) {
+      // The existing safety response must run even when diagnostics fail.
+    }
     if (state != AppLifecycleState.resumed) {
       lifecycleCancelled = true;
       adapterSession = null;
       unawaited(enrollment.signOut());
       unawaited(controller?.stop());
     }
+    _writeLifecycleEvent(event, before, state);
   }
 
   @override
@@ -1068,6 +1131,17 @@ void main() {
       _require(security.readiness == InstallationReadiness.ready);
       if (!restart) workspace.markInitialized();
       resident = _JoinNative(tester, workspace, db, security, restart);
+      resident.stage = 'awaiting-startup-resumed';
+      await resident.wait(
+        () =>
+            WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      );
+      final startupState = WidgetsBinding.instance.lifecycleState;
+      if (startupState != AppLifecycleState.resumed) {
+        throw const NativeTestFailure('startup-lifecycle-not-resumed');
+      }
+      resident.stage = 'startup-resumed';
+      resident.writeLifecycleBaseline(AppLifecycleState.resumed);
       WidgetsBinding.instance.addObserver(resident);
       await resident.initialize();
       await resident.run();
