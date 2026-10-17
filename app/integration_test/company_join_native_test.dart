@@ -158,6 +158,23 @@ bool joinNativeMatchWindow({
   return age >= 0 && age < ttl && age < remaining && now < expires;
 }
 
+Future<NativeTestCommandResult> performJoinNativePair({
+  required bool createdMode,
+  required bool finished,
+  required NearbyPhase phase,
+  required int peerCount,
+  required Future<void> Function() tapPair,
+}) async {
+  _require(
+    !finished &&
+        (phase == NearbyPhase.looking ||
+            (createdMode && phase == NearbyPhase.failed)) &&
+        peerCount == 1,
+  );
+  await tapPair();
+  return const NativeTestCommandResult.effect();
+}
+
 String _canonical(Object? value) {
   Object? sorted(Object? v) {
     if (v is Map) {
@@ -1155,17 +1172,17 @@ final class _JoinNative with WidgetsBindingObserver {
           ),
         );
       case NativeTestAction.pair:
-        _require(
-          !finished &&
-              view.phase == NearbyPhase.looking &&
-              view.peers.length == 1,
-        );
-        await tap(
-          find.byKey(
-            ValueKey('company-join-pair-${view.peers.single.deviceId}'),
+        return performJoinNativePair(
+          createdMode: _createdMode,
+          finished: finished,
+          phase: view.phase,
+          peerCount: view.peers.length,
+          tapPair: () => tap(
+            find.byKey(
+              ValueKey('company-join-pair-${view.peers.single.deviceId}'),
+            ),
           ),
         );
-        return const NativeTestCommandResult.effect();
       case NativeTestAction.matchWithGrant:
         final saved = savedPair;
         _require(saved != null);

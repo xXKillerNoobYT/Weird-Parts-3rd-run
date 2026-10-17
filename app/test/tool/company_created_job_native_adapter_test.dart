@@ -97,6 +97,83 @@ void _validate({
 );
 
 void main() {
+  test('created native Pair retries failed state once through cache', () async {
+    final cache = command_test.Fixture();
+    final wire = cache.request(1, action: NativeTestAction.pair);
+    cache.cache.submitJson(wire);
+    final command = cache.cache.takeNext()!;
+    var taps = 0;
+    final reply = await _settleNativeCommand(
+      cache,
+      command,
+      adapter.performJoinNativePair(
+        createdMode: true,
+        finished: false,
+        phase: NearbyPhase.failed,
+        peerCount: 1,
+        tapPair: () async {
+          taps++;
+        },
+      ),
+    );
+    expect(reply.state, NativeTestCommandState.completed);
+    expect(reply.effect, NativeTestEffect.completed);
+    expect(taps, 1);
+    expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+    expect(cache.cache.takeNext(), isNull);
+    expect(taps, 1);
+  });
+  test('native Pair preserves looking behavior in both modes', () async {
+    for (final createdMode in [false, true]) {
+      var taps = 0;
+      final result = await adapter.performJoinNativePair(
+        createdMode: createdMode,
+        finished: false,
+        phase: NearbyPhase.looking,
+        peerCount: 1,
+        tapPair: () async {
+          taps++;
+        },
+      );
+      expect(result.effect, NativeTestEffect.completed);
+      expect(taps, 1);
+    }
+  });
+  test('native Pair refuses legacy failure and other inactive boundary shapes before tapping', () async {
+    final refused = [
+      (created: false, finished: false, phase: NearbyPhase.failed, peers: 1),
+      for (final created in [false, true])
+        for (final phase in NearbyPhase.values)
+          if (phase != NearbyPhase.looking && phase != NearbyPhase.failed)
+            (created: created, finished: false, phase: phase, peers: 1),
+      (created: true, finished: true, phase: NearbyPhase.failed, peers: 1),
+      (created: true, finished: false, phase: NearbyPhase.failed, peers: 0),
+      (created: true, finished: false, phase: NearbyPhase.failed, peers: 2),
+    ];
+    for (final input in refused) {
+      final cache = command_test.Fixture();
+      final wire = cache.request(1, action: NativeTestAction.pair);
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      var taps = 0;
+      final reply = await _settleNativeCommand(
+        cache,
+        command,
+        adapter.performJoinNativePair(
+          createdMode: input.created,
+          finished: input.finished,
+          phase: input.phase,
+          peerCount: input.peers,
+          tapPair: () async {
+            taps++;
+          },
+        ),
+      );
+      expect(reply.state, NativeTestCommandState.failed, reason: '$input');
+      expect(reply.effect, NativeTestEffect.possible);
+      expect(taps, 0, reason: '$input');
+    }
+  });
   for (final terminal in [
     adapter.CreatedJobNativeUiState.complete,
     adapter.CreatedJobNativeUiState.incomplete,
