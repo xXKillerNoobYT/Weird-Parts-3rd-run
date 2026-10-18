@@ -37,7 +37,7 @@ const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
 const joinNativeRun = 'j60-join-v10';
-const createdJobNativeRun = 'j61-created-v17';
+const createdJobNativeRun = 'j61-created-v18';
 const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
 const _createdProductRevision = String.fromEnvironment(
@@ -577,6 +577,12 @@ enum CreatedJobNativeUiState {
   error,
   unknown,
 }
+
+bool mayStartCreatedJobNativeSync({
+  required bool owner,
+  required bool jobNameMode,
+  required bool syncEnabled,
+}) => (owner || jobNameMode) && syncEnabled;
 
 const createdJobNativeDiagnosticLimit = 32;
 
@@ -2121,7 +2127,13 @@ final class _JoinNative with WidgetsBindingObserver {
             await wait(() => buttonEnabled('company-jobs-sync-now'));
             return const NativeTestCommandResult.effect();
           }
-          _require(owner && buttonEnabled('company-jobs-sync-now'));
+          _require(
+            mayStartCreatedJobNativeSync(
+              owner: owner,
+              jobNameMode: _jobNameMode,
+              syncEnabled: buttonEnabled('company-jobs-sync-now'),
+            ),
+          );
           requireBeforeEffect();
           syncStarts++;
           final syncPage = _pageState;

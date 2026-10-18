@@ -98,6 +98,47 @@ void _validate({
 );
 
 void main() {
+  test(
+    'Job-name native sync admits either enrolled role only with enabled UI',
+    () {
+      expect(
+        adapter.mayStartCreatedJobNativeSync(
+          owner: false,
+          jobNameMode: true,
+          syncEnabled: true,
+        ),
+        isTrue,
+      );
+      expect(
+        adapter.mayStartCreatedJobNativeSync(
+          owner: false,
+          jobNameMode: false,
+          syncEnabled: true,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayStartCreatedJobNativeSync(
+          owner: true,
+          jobNameMode: false,
+          syncEnabled: true,
+        ),
+        isTrue,
+      );
+      for (final owner in [false, true]) {
+        for (final jobNameMode in [false, true]) {
+          expect(
+            adapter.mayStartCreatedJobNativeSync(
+              owner: owner,
+              jobNameMode: jobNameMode,
+              syncEnabled: false,
+            ),
+            isFalse,
+          );
+        }
+      }
+    },
+  );
   test('native diagnostic retention and evidence writes stay bounded across remounts', () {
     final diagnostics = adapter.CreatedJobNativeSyncDiagnostics();
     var writes = 0;
@@ -885,7 +926,8 @@ void main() {
     expect(() => _validate(run: 'j61-created-v9'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v15'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v16'), throwsA(anything));
-    expect(() => _validate(run: 'j61-created-v18'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v17'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v19'), throwsA(anything));
     expect(() => _validate(productRevision: _tree), throwsA(anything));
     expect(
       () => _validate(revision: 'short', productRevision: 'short'),
@@ -925,7 +967,7 @@ void main() {
         'owner',
         createdMode: true,
       ),
-      'synthetic.company.created.j61-created-v17.owner',
+      'synthetic.company.created.j61-created-v18.owner',
     );
     expect(
       () => adapter.joinNativeNamespace(
