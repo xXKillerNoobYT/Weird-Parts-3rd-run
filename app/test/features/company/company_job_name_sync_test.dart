@@ -13,9 +13,18 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 
-import 'company_join_test.dart' show JoinFixture, activateFixtureB, sqlSnapshot;
+import 'company_join_test.dart'
+    show
+        JoinFixture,
+        activateFixtureB,
+        enrollAdditionalFixtureC,
+        sqlSnapshot;
 import 'company_created_job_sync_test.dart'
-    show openSyncPair, receiverAvailability, syncAttackWire;
+    show
+        openEnrolledSyncPair,
+        openSyncPair,
+        receiverAvailability,
+        syncAttackWire;
 import 'company_job_name_test.dart' show canonicalNameTest;
 
 String digestName(Object? value) =>
@@ -27,6 +36,37 @@ Future<void> closeNamePair(
 ) async {
   await pair.a.closeAndDrain();
   await pair.b.closeAndDrain();
+}
+
+Future<CreatedJobSyncResult> exchangeEnrolledPair(
+  CompanyEnrollment local,
+  OwnerSession localOwner,
+  CompanyEnrollment remote,
+  OwnerSession remoteOwner, {
+  required bool fromLocal,
+}) async {
+  final pair = await openEnrolledSyncPair(
+    local,
+    localOwner,
+    remote,
+    remoteOwner,
+  );
+  try {
+    final run = await (fromLocal ? pair.a : pair.b).syncNow();
+    expect(
+      pair.a.lastFailure,
+      isNull,
+      reason: safeNameFailure(pair),
+    );
+    expect(
+      pair.b.lastFailure,
+      isNull,
+      reason: safeNameFailure(pair),
+    );
+    return run;
+  } finally {
+    await closeNamePair(pair);
+  }
 }
 
 void main() {
@@ -190,6 +230,160 @@ void main() {
       },
     );
   }
+
+  test(
+    'missing foreign name parent keeps descendants pending and still exchanges unrelated work',
+    () async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      final bo = f.bEnrollment.currentSession ?? await f.bEnrollment.signIn('1234');
+      final ce = await enrollAdditionalFixtureC(f);
+      final co = await ce.signIn('1234');
+      final ac = CompanyJobCommands(enrollment: f.aEnrollment);
+      final cc = CompanyJobCommands(enrollment: ce);
+      String nameOf(CompanyJobName row) {
+        final body = (jsonDecode(row.operationBytes) as Map)['body'] as Map;
+        return body['name'] as String;
+      }
+      Future<Set<String>> storedNames(AppDatabase db) async =>
+          (await db.select(db.companyJobNames).get()).map(nameOf).toSet();
+      expect(
+        (await exchangeEnrolledPair(
+          f.aEnrollment,
+          f.owner,
+          f.bEnrollment,
+          bo,
+          fromLocal: true,
+        )).complete,
+        isTrue,
+      );
+      expect(
+        (await exchangeEnrolledPair(
+          f.aEnrollment,
+          f.owner,
+          ce,
+          co,
+          fromLocal: true,
+        )).complete,
+        isTrue,
+      );
+      final original = (await ac.listJobViews(ownerSession: f.owner)).single;
+      RenameJob edit(String name, List<String> parents) => RenameJob(
+        companyId: f.owner.identity.companyId,
+        shopId: f.owner.identity.shopId,
+        jobId: original.baseJob.id,
+        requestId: const Uuid().v4(),
+        creationDigest: original.creationDigest,
+        observedHeads: parents,
+        name: name,
+      );
+      final parent = await cc.renameJob(
+        edit('Foreign parent', const []),
+        ownerSession: co,
+      );
+      expect(
+        (await exchangeEnrolledPair(
+          f.aEnrollment,
+          f.owner,
+          ce,
+          co,
+          fromLocal: true,
+        )).complete,
+        isTrue,
+      );
+      final child = await ac.renameJob(
+        edit('Local child', [parent.operationId]),
+        ownerSession: f.owner,
+      );
+      await ac.renameJob(
+        edit('Local grandchild', [child.operationId]),
+        ownerSession: f.owner,
+      );
+      await ac.renameJob(
+        edit('Unrelated sibling', const []),
+        ownerSession: f.owner,
+      );
+      await ac.createJob(
+        CreateJob(
+          companyId: f.owner.identity.companyId,
+          shopId: f.owner.identity.shopId,
+          jobId: const Uuid().v4(),
+          requestId: const Uuid().v4(),
+          name: 'Unrelated job',
+        ),
+        ownerSession: f.owner,
+      );
+      final blocked = await exchangeEnrolledPair(
+        f.aEnrollment,
+        f.owner,
+        f.bEnrollment,
+        bo,
+        fromLocal: true,
+      );
+      expect(blocked.complete, isFalse);
+      expect(blocked.failure?.reason, CreatedJobSyncReason.unsupportedAuthor);
+      expect(blocked.sent, 2);
+      expect(blocked.received, 0);
+      expect(blocked.unsupported, 3);
+      expect(await storedNames(f.bDb), {'Unrelated sibling'});
+      expect(
+        (await f.bDb.select(f.bDb.companyJobs).get()).map((j) => j.jobId).toSet(),
+        {
+          original.baseJob.id,
+          (await f.aDb.select(f.aDb.companyJobs).get())
+              .singleWhere((j) => j.jobId != original.baseJob.id)
+              .jobId,
+        },
+      );
+      expect(await storedNames(f.aDb), {
+        'Foreign parent',
+        'Local child',
+        'Local grandchild',
+        'Unrelated sibling',
+      });
+      final repeat = await exchangeEnrolledPair(
+        f.aEnrollment,
+        f.owner,
+        f.bEnrollment,
+        bo,
+        fromLocal: false,
+      );
+      expect(repeat.complete, isFalse);
+      expect(repeat.failure?.reason, CreatedJobSyncReason.unsupportedAuthor);
+      expect(repeat.sent, 0);
+      expect(repeat.received, 0);
+      expect(repeat.unsupported, 3);
+      expect(await storedNames(f.bDb), {'Unrelated sibling'});
+      final toAuthor = await exchangeEnrolledPair(
+        f.aEnrollment,
+        f.owner,
+        ce,
+        co,
+        fromLocal: true,
+      );
+      expect(toAuthor.complete, isTrue);
+      expect(toAuthor.sent, 4);
+      expect(toAuthor.received, 0);
+      expect(await storedNames(ce.db), {
+        'Foreign parent',
+        'Local child',
+        'Local grandchild',
+        'Unrelated sibling',
+      });
+      final authorRepeat = await exchangeEnrolledPair(
+        f.aEnrollment,
+        f.owner,
+        ce,
+        co,
+        fromLocal: false,
+      );
+      expect(authorRepeat.complete, isTrue);
+      expect(authorRepeat.sent, 0);
+      expect(authorRepeat.received, 0);
+      expect(await storedNames(f.bDb), {'Unrelated sibling'});
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
 
   test('out of order dependency rejects unchanged then exact signed child retries after parent', () async {
     final f = await JoinFixture.create(allowOwnerAdditions: true);

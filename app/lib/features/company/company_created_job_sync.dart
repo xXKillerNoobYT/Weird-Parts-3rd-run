@@ -1332,6 +1332,39 @@ final class CompanyCreatedJobSync {
     return result;
   }
 
+  bool _dependenciesHeld(
+    Map<String, Object?> descriptor,
+    Set<String> held,
+    Map<String, Map<String, Object?>> all,
+  ) {
+    if (descriptor['kind'] != 'job.name.set@1') return true;
+    final creation = all.values
+        .where(
+          (c) =>
+              c['kind'] == null &&
+              c['digest'] == descriptor['creation'] &&
+              c['job'] == descriptor['job'],
+        )
+        .firstOrNull;
+    if (creation == null || !held.contains(_descriptorKey(creation))) {
+      return false;
+    }
+    final byOperation = {
+      for (final d in all.values) d['operation'] as String: d,
+    };
+    for (final parent in descriptor['parents'] as List) {
+      final dependency = byOperation[parent];
+      if (dependency == null ||
+          dependency['kind'] != 'job.name.set@1' ||
+          dependency['creation'] != descriptor['creation'] ||
+          dependency['job'] != descriptor['job'] ||
+          !held.contains(_descriptorKey(dependency))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   Future<Map<String, Object?>> _transfer(
     Object? action,
     Map<String, Object?> data,
@@ -1496,6 +1529,9 @@ final class CompanyCreatedJobSync {
           .toList();
       final ourKeys = _local!.byKey;
       final theirKeys = _remote!.byKey;
+      final all = {...ourKeys, ...theirKeys};
+      final heldByPeer = theirKeys.keys.toSet();
+      final heldHere = ourKeys.keys.toSet();
       stage = CreatedJobSyncStage.transfer;
       for (
         var i = 0;
@@ -1504,10 +1540,11 @@ final class CompanyCreatedJobSync {
       ) {
         if (i < ours.length) {
           final d = ours[i];
-          if (theirKeys.containsKey(_descriptorKey(d))) {
+          final key = _descriptorKey(d);
+          if (theirKeys.containsKey(key)) {
             final confirmed =
-                _cachedAckStores[_descriptorKey(d)] == _remoteStore &&
-                _remote!.peerAckStore(_descriptorKey(d)) ==
+                _cachedAckStores[key] == _remoteStore &&
+                _remote!.peerAckStore(key) ==
                     _installation.receivingStoreGeneration!.value;
             if (!confirmed) {
               if (!_canExchange(2)) {
@@ -1519,7 +1556,8 @@ final class CompanyCreatedJobSync {
               });
               await _saveAck(d, reply['ack']);
             }
-          } else if (_authoredHere(d)) {
+          } else if (_authoredHere(d) &&
+              _dependenciesHeld(d, heldByPeer, all)) {
             _status('Sending a Job change to the retained peer.');
             final row = await _record(d);
             final bytes = utf8.encode(row.operationBytes);
@@ -1545,6 +1583,7 @@ final class CompanyCreatedJobSync {
                 });
                 await _saveAck(d, confirmed['ack']);
                 _sentJobs++;
+                heldByPeer.add(key);
               } else if (reply.isNotEmpty) {
                 throw const CompanyBootstrapRefusal('Premature Job ACK');
               }
@@ -1555,11 +1594,13 @@ final class CompanyCreatedJobSync {
         }
         if (i < theirs.length) {
           final d = theirs[i];
-          if (ourKeys.containsKey(_descriptorKey(d))) continue;
+          final key = _descriptorKey(d);
+          if (heldHere.contains(key)) continue;
           final member = availability.peer._held.peer._membership;
           if (d['author'] != member.device['id'] ||
               d['installation'] != member.device['installation'] ||
-              d['origin'] != member.device['generation']) {
+              d['origin'] != member.device['generation'] ||
+              !_dependenciesHeld(d, heldHere, all)) {
             unsupported++;
             continue;
           }
@@ -1594,6 +1635,7 @@ final class CompanyCreatedJobSync {
           });
           await _saveAck(d, confirmed['ack']);
           _receivedJobs++;
+          heldHere.add(key);
         }
       }
       stage = CreatedJobSyncStage.confirmation;

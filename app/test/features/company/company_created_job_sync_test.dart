@@ -49,15 +49,17 @@ Future<CompanyJobSyncAvailability> receiverAvailability(
 Future<
   ({CompanyCreatedJobSync a, CompanyCreatedJobSync b, OwnerSession ownerB})
 >
-openSyncPair(
-  JoinFixture f, {
+openEnrolledSyncPair(
+  CompanyEnrollment local,
+  OwnerSession localOwner,
+  CompanyEnrollment remote,
+  OwnerSession remoteOwner, {
   int chunkBytes = kCreatedJobSyncChunkBytes,
   void Function(String)? onAStatus,
   void Function(String)? onBStatus,
   void Function(CreatedJobSyncDiagnostic)? onADiagnostic,
   void Function(CreatedJobSyncDiagnostic)? onBDiagnostic,
 }) async {
-  final bo = f.bEnrollment.currentSession ?? await f.bEnrollment.signIn('1234');
   late NearbyController ac, bc;
   final (bChannel, aChannel) = await joinChannels(
     onPaired: (b, a) {
@@ -65,15 +67,19 @@ openSyncPair(
       ac = a;
     },
   );
-  final aa = CompanyPeerAuthentication(enrollment: f.aEnrollment);
-  final ba = CompanyPeerAuthentication(enrollment: f.bEnrollment);
+  final aa = CompanyPeerAuthentication(enrollment: local);
+  final ba = CompanyPeerAuthentication(enrollment: remote);
   final first = await aa.beginPeerChallenge(
     aChannel,
-    (await aa.retainedPeers(session: f.owner))
-        .firstWhere((p) => p.deviceId == bo.identity.deviceId),
-    session: f.owner,
+    (await aa.retainedPeers(session: localOwner))
+        .firstWhere((p) => p.deviceId == remoteOwner.identity.deviceId),
+    session: localOwner,
   );
-  final response = await ba.receivePeerChallenge(bChannel, first, session: bo);
+  final response = await ba.receivePeerChallenge(
+    bChannel,
+    first,
+    session: remoteOwner,
+  );
   final complete = await aa.receivePeerResponse(aChannel, response);
   final done = await ba.receivePeerCompletion(bChannel, complete);
   final aPeer = await aa.receivePeerAcknowledgment(
@@ -82,8 +88,8 @@ openSyncPair(
   );
   final a = CompanyCreatedJobSync(
     availability: await CompanyJobSyncAvailability.open(
-      enrollment: f.aEnrollment,
-      owner: f.owner,
+      enrollment: local,
+      owner: localOwner,
       peer: aPeer,
     ),
     controller: ac,
@@ -93,8 +99,8 @@ openSyncPair(
   );
   final b = CompanyCreatedJobSync(
     availability: await CompanyJobSyncAvailability.open(
-      enrollment: f.bEnrollment,
-      owner: bo,
+      enrollment: remote,
+      owner: remoteOwner,
       peer: done.membership,
     ),
     controller: bc,
@@ -104,7 +110,32 @@ openSyncPair(
   );
   ac.onJoinMessage = (_, wire) => a.receive(wire);
   bc.onJoinMessage = (_, wire) => b.receive(wire);
-  return (a: a, b: b, ownerB: bo);
+  return (a: a, b: b, ownerB: remoteOwner);
+}
+
+Future<
+  ({CompanyCreatedJobSync a, CompanyCreatedJobSync b, OwnerSession ownerB})
+>
+openSyncPair(
+  JoinFixture f, {
+  int chunkBytes = kCreatedJobSyncChunkBytes,
+  void Function(String)? onAStatus,
+  void Function(String)? onBStatus,
+  void Function(CreatedJobSyncDiagnostic)? onADiagnostic,
+  void Function(CreatedJobSyncDiagnostic)? onBDiagnostic,
+}) async {
+  final bo = f.bEnrollment.currentSession ?? await f.bEnrollment.signIn('1234');
+  return openEnrolledSyncPair(
+    f.aEnrollment,
+    f.owner,
+    f.bEnrollment,
+    bo,
+    chunkBytes: chunkBytes,
+    onAStatus: onAStatus,
+    onBStatus: onBStatus,
+    onADiagnostic: onADiagnostic,
+    onBDiagnostic: onBDiagnostic,
+  );
 }
 
 Future<Map<String, Object?>> syncAttackWire(
