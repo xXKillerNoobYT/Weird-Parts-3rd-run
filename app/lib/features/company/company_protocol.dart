@@ -599,6 +599,99 @@ final class CompanyEnrollment {
     ).verify(command, proof);
   }
 
+  Future<VerifiedRenameJobSession> issueRenameJobAssertion(
+    RenameJob command,
+  ) async {
+    final session = currentSession;
+    final custody = await _readCustody();
+    if (session == null || custody == null || custody.status != 'active') {
+      throw const CompanyBootstrapRefusal('Administrator sign-in required');
+    }
+    await _checkBinding(custody, requireActive: true);
+    if (command.companyId != custody.company ||
+        command.shopId != custody.shop) {
+      throw const CompanyBootstrapRefusal('Command is outside this company');
+    }
+    final trust = await installation.readCompanyTrust(db);
+    if (trust == null || trust.companyId.value != custody.company) {
+      throw const CompanyBootstrapRefusal('Company trust is unavailable');
+    }
+    session.validateAuthority(trust, installation.knownSecurityFloors);
+    final facts =
+        await (db.select(db.companyAuthorityFacts)..where(
+              (t) =>
+                  t.companyId.equals(custody.company) &
+                  t.commitment.equals(trust.factsCommitment),
+            ))
+            .getSingle();
+    final signed = jsonDecode(facts.signedBytes) as Map<String, dynamic>;
+    final body = signed['body'] as Map<String, dynamic>;
+    if (body['v'] != 2) {
+      throw const CompanyBootstrapRefusal('Production facts version refused');
+    }
+    final membership = await resolveCompanyMembership(
+      db: db,
+      installation: installation,
+    );
+    final device = membership.device;
+    final user = membership.user;
+    final identity = installation.identity!;
+    session.validateCommand(
+      company: custody.company,
+      shop: custody.shop,
+      user: custody.user,
+      device: custody.device,
+      installation: identity.id.value,
+      generation: identity.generation.value,
+      session: session.sessionId,
+    );
+    final assertion = <String, Object?>{
+      'v': custody.isMember ? 3 : 2,
+      if (custody.isMember) 'membership': membership.proofCommitment,
+      'company': custody.company,
+      'shop': custody.shop,
+      'job': command.jobId,
+      'request': command.requestId,
+      'command': command.commitment,
+      'user': custody.user,
+      'device': custody.device,
+      'installation': identity.id.value,
+      'generation': identity.generation.value,
+      'grant': custody.grant,
+      'credential': user['credential'],
+      'permission': user['permission'],
+      'authority': trust.authorityVersion,
+      'facts': trust.factsCommitment,
+      'session': session.sessionId,
+    };
+    if (device['grant'] != custody.grant ||
+        device['installation'] != identity.id.value ||
+        device['generation'] != identity.generation.value) {
+      throw const CompanyBootstrapRefusal('Installation grant differs');
+    }
+    final canonical = _securityCanonical(assertion);
+    final pair = await Ed25519().newKeyPairFromSeed(installation._record!.seed);
+    final signature = await Ed25519().sign(
+      utf8.encode(
+        '${custody.isMember ? 'wiredpart.job.name.authorization@2:' : 'wiredpart.job.name.authorization@1:'}$canonical',
+      ),
+      keyPair: pair,
+    );
+    final proof = Uint8List.fromList(
+      utf8.encode(
+        _securityCanonical({
+          'body': assertion,
+          'signature': base64Encode(signature.bytes),
+          if (custody.isMember) 'membership': membership.certificateBytes,
+        }),
+      ),
+    );
+    return RenameJobAuthorization(
+      db: db,
+      installation: installation,
+    ).verify(command, proof);
+  }
+
   String get _namespace => companyCustodyNamespace(installation.namespace);
 
   Future<_CompanyCustody?> _readCustody() async {
@@ -1246,6 +1339,7 @@ final class CompanyEnrollment {
             'deleteJobLine',
             'enrollDevice',
             'createJob',
+            'renameJob',
           ],
         },
       ],
@@ -1261,6 +1355,7 @@ final class CompanyEnrollment {
             'deleteJobLine',
             'enrollDevice',
             'createJob',
+            'renameJob',
           ],
         },
       ],
@@ -1814,7 +1909,13 @@ void _requireRecoverableFirstOwner(Map<String, dynamic> body) {
       ((value.length == capabilities.length &&
               value.toSet().containsAll(capabilities)) ||
           (value.length == capabilities.length + 1 &&
-              value.toSet().containsAll({...capabilities, 'createJob'})));
+              value.toSet().containsAll({...capabilities, 'createJob'})) ||
+          (value.length == capabilities.length + 2 &&
+              value.toSet().containsAll({
+                ...capabilities,
+                'createJob',
+                'renameJob',
+              })));
   bool entities(Object? value) {
     if (value is! List || value.length > 128) return false;
     final seen = <String>{};

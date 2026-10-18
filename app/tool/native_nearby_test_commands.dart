@@ -18,6 +18,17 @@ enum NativeTestAction {
   markReceivedDatabase,
   finish,
   normalExit,
+  jobNameUi,
+}
+
+enum NativeJobNameUiStep {
+  inspect,
+  renameSequential,
+  renameConcurrent,
+  inspectConflict,
+  checkpointConflict,
+  resolveFirst,
+  inspectResolved,
 }
 
 enum NativeTestCommandState { accepted, running, completed, failed, unknown }
@@ -64,6 +75,7 @@ final class NativeTestCommand {
     this.grant,
     this.leg,
     this.snapshotStage,
+    this.jobNameStep,
   });
 
   final String epoch, commandId, contentHash;
@@ -73,6 +85,7 @@ final class NativeTestCommand {
   final MatchGrant? grant;
   final int? leg;
   final PrivateSnapshotStage? snapshotStage;
+  final NativeJobNameUiStep? jobNameStep;
 
   static NativeTestCommand parseRequest(String source, TestSession session) {
     try {
@@ -99,12 +112,14 @@ final class NativeTestCommand {
     MatchGrant? grant,
     int? leg,
     PrivateSnapshotStage? snapshotStage,
+    NativeJobNameUiStep? jobNameStep,
   }) {
     final arguments = <String, Object>{
       if (comparison != null) 'comparison': comparison.toJson(),
       if (grant != null) 'grant': grant.toJson(),
       'leg': ?leg,
       if (snapshotStage != null) 'stage': snapshotStage.wireName,
+      if (jobNameStep != null) 'step': jobNameStep.name,
     };
     final request = <String, Object>{
       'epoch': session.epoch,
@@ -552,6 +567,7 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
   MatchGrant? grant;
   int? leg;
   PrivateSnapshotStage? snapshotStage;
+  NativeJobNameUiStep? jobNameStep;
   final arguments = m['arguments'];
   if (kind == NativeTestAction.observe &&
       arguments is Map<String, dynamic> &&
@@ -573,6 +589,11 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
   } else if (kind == NativeTestAction.snapshot) {
     final a = nativeTestMap(arguments, {'stage'});
     snapshotStage = PrivateSnapshotStage.parse(a['stage']);
+  } else if (kind == NativeTestAction.jobNameUi) {
+    final a = nativeTestMap(arguments, {'step'});
+    final steps = NativeJobNameUiStep.values.where((v) => v.name == a['step']);
+    if (steps.length != 1) _reject(NativeTestCommandError.invalidRequest);
+    jobNameStep = steps.single;
   } else {
     nativeTestMap(arguments, {});
   }
@@ -587,5 +608,6 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
     grant: grant,
     leg: leg,
     snapshotStage: snapshotStage,
+    jobNameStep: jobNameStep,
   );
 }

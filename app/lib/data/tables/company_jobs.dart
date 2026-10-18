@@ -39,3 +39,26 @@ class CompanyJobPeerAcks extends Table {
     peerDeviceId,
   };
 }
+
+class CompanyJobNames extends Table {
+  TextColumn get companyId => text()();
+  TextColumn get shopId => text()();
+  TextColumn get jobId => text()();
+  TextColumn get originGeneration => text()();
+  TextColumn get requestId => text()();
+  TextColumn get operationCommitment => text()();
+  TextColumn get commandCommitment => text()();
+  TextColumn get operationBytes => text()();
+  TextColumn get receiptKey => text().unique()();
+  TextColumn get receiptBytes => text()();
+  TextColumn get auditBytes => text()();
+  BoolColumn get outgoing => boolean()();
+  @override
+  Set<Column> get primaryKey => {operationCommitment};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {companyId, originGeneration, requestId},
+  ];
+}
+
+class CompanyJobNamePeerAcks extends CompanyJobPeerAcks {}

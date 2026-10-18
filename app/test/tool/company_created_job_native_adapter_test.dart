@@ -884,7 +884,8 @@ void main() {
     expect(() => _validate(run: 'j61-created-v8'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v9'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v15'), throwsA(anything));
-    expect(() => _validate(run: 'j61-created-v17'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v16'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v18'), throwsA(anything));
     expect(() => _validate(productRevision: _tree), throwsA(anything));
     expect(
       () => _validate(revision: 'short', productRevision: 'short'),
@@ -924,7 +925,7 @@ void main() {
         'owner',
         createdMode: true,
       ),
-      'synthetic.company.created.j61-created-v16.owner',
+      'synthetic.company.created.j61-created-v17.owner',
     );
     expect(
       () => adapter.joinNativeNamespace(
@@ -1023,7 +1024,7 @@ void main() {
         'root': root.path,
         'locked': true,
         'mode': 'created-jobs',
-        'schema': 8,
+        'schema': 9,
         'createdJobsComplete': false,
         'bothJobsRendered': true,
         'receiptCountVerifiedBeforeLock': 2,
@@ -1047,9 +1048,325 @@ void main() {
       receipt['createdJobsComplete'] = true;
       file.writeAsStringSync(jsonEncode(receipt));
       expect(validate(), isTrue);
-      receipt['sourceTree'] = _revision;
+      bool validateNames() => adapter.validateJoinNativeExistingRoot(
+        root,
+        run: adapter.createdJobNativeRun,
+        role: 'owner',
+        revision: _revision,
+        tree: _tree,
+        adapter: _adapterHash,
+        createdMode: true,
+        jobNameMode: true,
+        productRevision: _revision,
+      );
+      expect(validateNames, throwsA(anything));
+      receipt.addAll({
+        'jobNameMode': true,
+        'jobNamesComplete': true,
+        'nameOperationCount': 4,
+        'nameAckCount': 4,
+        'nameReceiptCountVerifiedBeforeLock': 3,
+      });
       file.writeAsStringSync(jsonEncode(receipt));
       expect(validate, throwsA(anything));
+      expect(validateNames, throwsA(anything));
+      receipt['nameReceiptCountVerifiedBeforeLock'] = 4;
+      file.writeAsStringSync(jsonEncode(receipt));
+      expect(validateNames(), isTrue);
+      receipt['schema'] = 8;
+      file.writeAsStringSync(jsonEncode(receipt));
+      expect(validateNames, throwsA(anything));
+      receipt['schema'] = 9;
+      receipt['sourceTree'] = _revision;
+      file.writeAsStringSync(jsonEncode(receipt));
+      expect(validateNames, throwsA(anything));
+    },
+  );
+
+  test(
+    'unresolved Job-name conflict admits only its exact cold checkpoint',
+    () {
+      final root = Directory.systemTemp.createTempSync('j61-name-conflict-');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final identity = {
+        for (final key in [
+          'installation',
+          'generation',
+          'publicKeySha256',
+          'storeGeneration',
+          'company',
+          'shop',
+          'user',
+          'device',
+        ])
+          key: key,
+      };
+      final conflictView = {
+        'job': 'job-1',
+        'hasConflict': true,
+        'heads': ['owner-head', 'member-head'],
+        'candidates': [
+          {
+            'operation': 'owner-head',
+            'name': 'Owner',
+            'user': 'owner',
+            'device': 'device-a',
+          },
+          {
+            'operation': 'member-head',
+            'name': 'Member',
+            'user': 'member',
+            'device': 'device-b',
+          },
+        ],
+      };
+      final checkpoint = <String, Object?>{
+        'format': 1,
+        'stage': 'unresolved-name-conflict',
+        'passed': false,
+        'run': adapter.createdJobNativeRun,
+        'role': 'owner',
+        'namespace': adapter.joinNativeNamespace(
+          adapter.createdJobNativeRun,
+          'owner',
+          createdMode: true,
+        ),
+        'sourceRevision': _revision,
+        'sourceTree': _tree,
+        'adapterSha256': _adapterHash,
+        'productRevision': _revision,
+        'root': root.path,
+        'mode': 'created-jobs',
+        'schema': 9,
+        'jobNameMode': true,
+        'createdJobsComplete': false,
+        'jobNamesComplete': false,
+        'locked': true,
+        'syncCompleted': true,
+        'syncStarts': 1,
+        'nearbyControllerRunning': false,
+        'productionJobsPanelRendered': true,
+        'bothAttributedCandidatesRendered': true,
+        'lockedSqlSha256': 'd' * 64,
+        'identity': identity,
+        'nameEvidence': {
+          'jobHistorySha256': 'a' * 64,
+          'nameOperationCount': 3,
+          'nameReceiptCountVerified': 3,
+          'nameAckCount': 3,
+          'nameRecordsSha256': 'b' * 64,
+          'nameAckSha256': 'c' * 64,
+          'nameReceiptVerification': 'typed-public-verifier',
+          'ackVerification': 'confirmedPeerCounts',
+          'nameViews': [
+            conflictView,
+            {
+              'job': 'job-2',
+              'hasConflict': false,
+              'heads': [],
+              'candidates': [],
+            },
+          ],
+        },
+      };
+      final checkpointFile = File(p.join(root.path, 'join-name-conflict.json'));
+      checkpointFile.writeAsStringSync(jsonEncode(checkpoint));
+      adapter.JoinNativeRootAdmission validate() =>
+          adapter.validateJoinNativeRootAdmission(
+            root,
+            run: adapter.createdJobNativeRun,
+            role: 'owner',
+            revision: _revision,
+            tree: _tree,
+            adapter: _adapterHash,
+            createdMode: true,
+            jobNameMode: true,
+            productRevision: _revision,
+          );
+
+      expect(validate().stage, adapter.JoinNativeRootStage.unresolvedConflict);
+      expect(
+        adapter.validateJoinNativeExistingRoot(
+          root,
+          run: adapter.createdJobNativeRun,
+          role: 'owner',
+          revision: _revision,
+          tree: _tree,
+          adapter: _adapterHash,
+          createdMode: true,
+          jobNameMode: true,
+          productRevision: _revision,
+        ),
+        isFalse,
+      );
+      for (final invalid in [
+        {...checkpoint, 'passed': true},
+        {
+          ...checkpoint,
+          'nameEvidence': {
+            ...(checkpoint['nameEvidence'] as Map),
+            'nameOperationCount': 4,
+          },
+        },
+        {
+          ...checkpoint,
+          'nameEvidence': {
+            ...(checkpoint['nameEvidence'] as Map),
+            'nameAckSha256': 'not-a-digest',
+          },
+        },
+        {
+          ...checkpoint,
+          'nameEvidence': {
+            ...(checkpoint['nameEvidence'] as Map),
+            'nameViews': [conflictView],
+          },
+        },
+      ]) {
+        checkpointFile.writeAsStringSync(jsonEncode(invalid));
+        expect(validate, throwsA(anything));
+      }
+    },
+  );
+
+  test('cold name readback refuses changed identity, history, records, ACKs, or attribution', () {
+    final identity = {
+      for (final key in [
+        'installation',
+        'generation',
+        'publicKeySha256',
+        'storeGeneration',
+        'company',
+        'shop',
+        'user',
+        'device',
+      ])
+        key: key,
+    };
+    final views = [
+      {
+        'job': 'job-1',
+        'hasConflict': true,
+        'heads': ['owner-head', 'member-head'],
+        'candidates': [
+          {
+            'operation': 'owner-head',
+            'name': 'Owner',
+            'user': 'owner',
+            'device': 'device-a',
+          },
+          {
+            'operation': 'member-head',
+            'name': 'Member',
+            'user': 'member',
+            'device': 'device-b',
+          },
+        ],
+      },
+    ];
+    final expected = <String, dynamic>{
+      'identity': identity,
+      'nameEvidence': {
+        'jobHistorySha256': 'a' * 64,
+        'nameOperationCount': 3,
+        'nameReceiptCountVerified': 3,
+        'nameAckCount': 3,
+        'nameRecordsSha256': 'b' * 64,
+        'nameAckSha256': 'c' * 64,
+        'nameReceiptVerification': 'typed-public-verifier',
+        'ackVerification': 'confirmedPeerCounts',
+        'nameViews': views,
+      },
+    };
+    final actual = <String, Object?>{
+      ...(expected['nameEvidence'] as Map<String, Object?>),
+      'identity': identity,
+    };
+    adapter.verifyJoinNativeJobNameReadback(expected, actual);
+    for (final key in [
+      'jobHistorySha256',
+      'nameRecordsSha256',
+      'nameAckSha256',
+    ]) {
+      final changed = {...actual, key: 'd' * 64};
+      expect(
+        () => adapter.verifyJoinNativeJobNameReadback(expected, changed),
+        throwsA(anything),
+      );
+    }
+    expect(
+      () => adapter.verifyJoinNativeJobNameReadback(expected, {
+        ...actual,
+        'identity': {...identity, 'device': 'changed'},
+      }),
+      throwsA(anything),
+    );
+    expect(
+      () => adapter.verifyJoinNativeJobNameReadback(expected, {
+        ...actual,
+        'nameViews': const [],
+      }),
+      throwsA(anything),
+    );
+  });
+
+  test(
+    'name finalization waits for conflict resume Sync after cold readback',
+    () {
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: false,
+          conflictResume: false,
+          conflictReadbackVerified: false,
+          syncComplete: false,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: false,
+          conflictResume: false,
+          conflictReadbackVerified: false,
+          syncComplete: true,
+        ),
+        isTrue,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: true,
+          conflictReadbackVerified: false,
+          syncComplete: true,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: true,
+          conflictReadbackVerified: true,
+          syncComplete: false,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: true,
+          conflictReadbackVerified: true,
+          syncComplete: true,
+        ),
+        isTrue,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: false,
+          conflictReadbackVerified: false,
+          syncComplete: false,
+        ),
+        isTrue,
+      );
     },
   );
 }

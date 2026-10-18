@@ -21,6 +21,8 @@ void main() {
     'company_join_requests',
     'company_join_events',
     'company_job_peer_acks',
+    'company_job_names',
+    'company_job_name_peer_acks',
   ]) {
     for (final malformed in ['missing', 'wrong columns']) {
       test(
@@ -65,6 +67,8 @@ void main() {
         'company_join_requests',
         'company_join_events',
         'company_job_peer_acks',
+        'company_job_names',
+        'company_job_name_peer_acks',
       ]) {
         raw.execute('DROP TABLE $table');
       }
@@ -95,6 +99,8 @@ void main() {
       'company_join_requests',
       'company_join_events',
       'company_job_peer_acks',
+      'company_job_names',
+      'company_job_name_peer_acks',
     ]) {
       old.execute('DROP TABLE $table');
     }
@@ -199,6 +205,8 @@ void main() {
       'company_join_requests',
       'company_join_events',
       'company_job_peer_acks',
+      'company_job_names',
+      'company_job_name_peer_acks',
     ]) {
       await source.customStatement('DROP TABLE $table');
     }

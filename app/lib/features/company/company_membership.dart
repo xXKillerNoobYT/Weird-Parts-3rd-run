@@ -223,10 +223,11 @@ Future<ResolvedCompanyMembership> _resolveMemberCertificate(
   }
   final capabilities = recipient['capabilities'];
   if (capabilities is! List ||
-      capabilities.length > 1 ||
+      capabilities.length > 2 ||
+      capabilities.toSet().length != capabilities.length ||
       capabilities.any(
         (c) =>
-            c != 'createJob' ||
+            !['createJob', 'renameJob'].contains(c) ||
             !permits(user, c as String) ||
             !permits(rootDevice, c),
       )) {

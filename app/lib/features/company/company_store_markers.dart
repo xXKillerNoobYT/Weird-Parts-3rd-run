@@ -19,10 +19,37 @@ const companyMarkerTables = [
   'company_join_requests',
   'company_join_events',
   'company_job_peer_acks',
+  'company_job_names',
+  'company_job_name_peer_acks',
 ];
 
 const companySyncTableColumns = <String, Set<String>>{
   'company_job_peer_acks': {
+    'company_id',
+    'origin_generation',
+    'request_id',
+    'peer_device_id',
+    'operation_digest',
+    'ack_bytes',
+  },
+};
+
+const companyNameTableColumns = <String, Set<String>>{
+  'company_job_names': {
+    'company_id',
+    'shop_id',
+    'job_id',
+    'origin_generation',
+    'request_id',
+    'operation_commitment',
+    'command_commitment',
+    'operation_bytes',
+    'receipt_key',
+    'receipt_bytes',
+    'audit_bytes',
+    'outgoing',
+  },
+  'company_job_name_peer_acks': {
     'company_id',
     'origin_generation',
     'request_id',
@@ -71,6 +98,7 @@ Future<void> requireCompanyJoinSchema(AppDatabase db) async {
   final expected = {
     ...companyJoinTableColumns,
     if (version >= 8) ...companySyncTableColumns,
+    if (version >= 9) ...companyNameTableColumns,
   };
   for (final table in expected.keys) {
     final columns = await db.customSelect('PRAGMA table_info("$table")').get();

@@ -36,6 +36,7 @@ final class Fixture {
     MatchGrant? grant,
     int? leg,
     PrivateSnapshotStage? snapshotStage,
+    NativeJobNameUiStep? jobNameStep,
   }) => NativeTestCommand.encodeRequest(
     session: localSession,
     sequence: sequence,
@@ -47,6 +48,9 @@ final class Fixture {
     snapshotStage: action == NativeTestAction.snapshot
         ? snapshotStage ?? PrivateSnapshotStage.baseline
         : snapshotStage,
+    jobNameStep: action == NativeTestAction.jobNameUi
+        ? jobNameStep ?? NativeJobNameUiStep.inspect
+        : jobNameStep,
   );
 
   NativeTestCommand finish(int sequence) {
@@ -423,6 +427,9 @@ void main() {
         }
         if (action == NativeTestAction.snapshot) {
           expect(command.snapshotStage, PrivateSnapshotStage.baseline);
+        }
+        if (action == NativeTestAction.jobNameUi) {
+          expect(command.jobNameStep, NativeJobNameUiStep.inspect);
         }
         final invalid = change(request, (m) {
           (m['arguments'] as Map<String, dynamic>)['path'] = 'forbidden';

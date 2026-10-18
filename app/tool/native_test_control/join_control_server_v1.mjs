@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { isIPv4 } from 'node:net';
 
 const RUN = 'j60-join-v10';
-const ALLOWED_RUNS = new Set([RUN, 'j61-created-v16']);
+const ALLOWED_RUNS = new Set([RUN, 'j61-created-v17']);
 const REQUEST_PREFIX = 'wired-parts/j60-test-control/request/v1\n';
 const RESPONSE_PREFIX = 'wired-parts/j60-test-control/response/v1\n';
 const MAX_BODY = 16384;

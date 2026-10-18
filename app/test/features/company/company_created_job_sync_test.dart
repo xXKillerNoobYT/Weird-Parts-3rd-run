@@ -112,8 +112,9 @@ Future<Map<String, Object?>> syncAttackWire(
   String recipient,
   String run,
   String action,
-  Object? data,
-) async {
+  Object? data, [
+  String protocol = 'company.job.sync@2',
+]) async {
   final keys = pair.keys;
   final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final join = await kdf.deriveKey(
@@ -142,7 +143,7 @@ Future<Map<String, Object?>> syncAttackWire(
   };
   final body = {
     'v': 1,
-    'protocol': 'company.job.create.sync@1',
+    'protocol': protocol,
     'remaining': pair.remainingReceivedNonces,
     'action': action,
     'run': run,
