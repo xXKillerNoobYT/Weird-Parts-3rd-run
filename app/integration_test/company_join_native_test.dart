@@ -41,7 +41,7 @@ const joinNativeRun = 'j60-join-v10';
 const createdJobNativeRun = 'j61-created-v19';
 const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
-const jobDetailsNativeRun = 'j116-details-v1';
+const jobDetailsNativeRun = 'j116-details-v2';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
 const _detailsManifestPath = String.fromEnvironment(
   'COMPANY_JOB_DETAILS_NATIVE_MANIFEST',

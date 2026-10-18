@@ -121,6 +121,13 @@ void main() {
       ),
     );
     expect(() => admit(retired), throwsA(isA<NativeTestFailure>()));
+    final retiredDetails = Directory(
+      p.join(nativeTemp.path, 'wired-parts-lan-company-j116-details-v1-sender'),
+    )..createSync();
+    final retiredEvidence = File(p.join(retiredDetails.path, 'preserved.json'))
+      ..writeAsStringSync('preserved');
+    expect(() => admit(retiredDetails), throwsA(isA<NativeTestFailure>()));
+    expect(retiredEvidence.readAsStringSync(), 'preserved');
     root.createSync();
     final preserved = File(p.join(root.path, 'failed-evidence.json'))
       ..writeAsStringSync('preserved');

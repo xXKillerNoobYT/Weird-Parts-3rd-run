@@ -241,7 +241,7 @@ either first launch. Preserve `j61-created-v19`, its source, stores and evidence
 
 Require `COMPANY_JOIN_NATIVE_MODE=true`, `COMPANY_CREATED_JOB_NATIVE_MODE=true`,
 `COMPANY_JOB_DETAILS_NATIVE_MODE=true`, `COMPANY_JOB_NAME_NATIVE_MODE=false`,
-`COMPANY_JOIN_NATIVE_RUN=j116-details-v1`, the ordinary role/source/tree/adapter
+`COMPANY_JOIN_NATIVE_RUN=j116-details-v2`, the ordinary role/source/tree/adapter
 defines, and `COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION` equal to the new source
 revision. Details mode requires schema 10 and a separate synthetic details custody
 namespace. The old recovery-manifest defines must be absent.
@@ -256,7 +256,7 @@ rejects symlinks, unexpected files, missing required product/adapter files and
 hash differences. Product, build and binary qualification remains an external gate.
 
 The manifest has exactly `format: 1`, `kind: j116.details.source@1`,
-`run: j116-details-v1`, `revision`, `tree`, `adapterSha256`, `productRevision`, and
+`run: j116-details-v2`, `revision`, `tree`, `adapterSha256`, `productRevision`, and
 `sourceLfSha256`. `COMPANY_JOB_DETAILS_NATIVE_MANIFEST_SHA256` is SHA-256 of its
 exact raw immutable bytes, bounded to 65536 bytes and decoded from the same verified
 buffer. The adapter hash equals its LF-normalized entry in the source map. Generate
