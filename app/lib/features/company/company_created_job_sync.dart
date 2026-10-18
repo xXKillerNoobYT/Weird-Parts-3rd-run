@@ -525,6 +525,16 @@ final class CompanyCreatedJobSync {
     ]);
   }
 
+  void _retireResponderRun() {
+    _run = null;
+    _local = null;
+    _remote = null;
+    _incoming = null;
+    _incomingDescriptor = null;
+    _served.clear();
+    _confirmed.clear();
+  }
+
   Future<NearbyJoinChannel> _getChannel() => _channelPending ??= (() async {
     await availability.requireCurrent();
     final source = availability.peer._held.channel;
@@ -970,23 +980,22 @@ final class CompanyCreatedJobSync {
     if (action == 'finish') {
       final complete = data['complete'] as bool;
       final unsupported = data['unsupported'] as int;
-      _terminal(
-        CreatedJobSyncResult(
-          _sentJobs,
-          _receivedJobs,
-          complete,
-          unsupported,
-          failure: complete
-              ? null
-              : CreatedJobSyncFailure(
-                  CreatedJobSyncStage.confirmation,
-                  unsupported > 0
-                      ? CreatedJobSyncReason.unsupportedAuthor
-                      : CreatedJobSyncReason.unconfirmedSnapshot,
-                ),
-        ),
-        receiving: true,
+      final terminal = CreatedJobSyncResult(
+        _sentJobs,
+        _receivedJobs,
+        complete,
+        unsupported,
+        failure: complete
+            ? null
+            : CreatedJobSyncFailure(
+                CreatedJobSyncStage.confirmation,
+                unsupported > 0
+                    ? CreatedJobSyncReason.unsupportedAuthor
+                    : CreatedJobSyncReason.unconfirmedSnapshot,
+              ),
       );
+      if (!_busy) _retireResponderRun();
+      _terminal(terminal, receiving: true);
     }
     return reply;
   }
