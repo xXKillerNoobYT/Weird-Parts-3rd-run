@@ -1,16 +1,215 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
+import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_crypto.dart';
+import '../features/company/company_job_name_test.dart' show NameFixture;
+import '../features/company/company_join_test.dart'
+    show JoinFixture, activateFixtureB;
+import '../features/company/company_created_job_sync_test.dart'
+    show openSyncPair;
 
 String digest(String text) => sha256.convert(utf8.encode(text)).toString();
 
+final class _LoopbackHttpOverrides extends HttpOverrides {}
+
 void main() {
+  test('pre-kernel native headers require original identity, path and sealed creation proof', () async {
+    final f = await NameFixture.create();
+    addTearDown(f.close);
+    final base = await f.store.readState(f.security.namespace);
+    final custody = await f.store.readState(
+      companyCustodyNamespace(f.security.namespace),
+    );
+    final binding = (await f.db.settingsDao.getSetting(
+      kInstallationBindingKey,
+    ))!;
+    final record = (await f.db.select(f.db.companyJobs).get()).single;
+    final identity = <String, Object?>{
+      'installation': f.security.identity!.id.value,
+      'generation': f.security.identity!.generation.value,
+      'storeGeneration': f.security.receivingStoreGeneration!.value,
+      'publicKeySha256': sha256
+          .convert(f.security.identity!.publicKey)
+          .toString(),
+      'company': f.owner.identity.companyId,
+      'shop': f.owner.identity.shopId,
+      'user': f.owner.identity.userId,
+      'device': f.owner.identity.deviceId,
+    };
+    Future<Map<String, Object?>> verify({
+      ProtectedInstallationState? heldBase,
+      bool missingBase = false,
+      String? path,
+      String? receipt,
+      Map<String, Object?>? expected,
+    }) => adapter.verifyDetailsBaselineNativeHeaders(
+      base: missingBase ? null : heldBase ?? base,
+      custody: custody,
+      binding: binding,
+      databasePath: path ?? '${f.root.path}/shop.sqlite',
+      originalIdentity: expected ?? identity,
+      originalReceipt: receipt ?? record.receiptBytes,
+      incomingOperations: {},
+    );
+    final beforeSql = await adapter.detailsNativeSqlHash(f.db);
+    expect((await verify())['hashesAreIndependentAnchor'], isFalse);
+    await expectLater(verify(missingBase: true), throwsA(anything));
+    await expectLater(
+      verify(expected: {...identity, 'installation': const Uuid().v4()}),
+      throwsA(anything),
+    );
+    await expectLater(
+      verify(expected: {...identity, 'publicKeySha256': '0' * 64}),
+      throwsA(anything),
+    );
+    final changedReceipt =
+        jsonDecode(record.receiptBytes) as Map<String, dynamic>;
+    changedReceipt['seal'] = base64Encode(List<int>.filled(64, 0));
+    await expectLater(
+      verify(receipt: jsonEncode(changedReceipt)),
+      throwsA(anything),
+    );
+    await expectLater(
+      verify(path: '${f.root.path}/authority.wpca'),
+      throwsA(anything),
+    );
+    for (final family in [
+      CompanyCommandFamily.jobDetails,
+      CompanyCommandFamily.jobCreateIncoming,
+    ]) {
+      final native =
+          jsonDecode(utf8.decode(base!.bytes)) as Map<String, dynamic>;
+      native['pendingCommand'] = CompanyCommandIntent(
+        family: family,
+        receiptKey: record.receiptKey,
+        operationCommitment: '0' * 64,
+        commandCommitment: record.commandCommitment,
+        storeGeneration: f.security.receivingStoreGeneration!.value,
+        companyId: f.owner.identity.companyId,
+        lineId: record.jobId,
+        originGeneration: record.originGeneration,
+        requestId: record.requestId,
+      ).encode();
+      await expectLater(
+        verify(
+          heldBase: ProtectedInstallationState(
+            base.revision,
+            Uint8List.fromList(utf8.encode(jsonEncode(native))),
+          ),
+        ),
+        throwsA(anything),
+      );
+    }
+    expect(await adapter.detailsNativeSqlHash(f.db), beforeSql);
+    expect(
+      (await f.store.readState(f.security.namespace))!.revision,
+      base!.revision,
+    );
+    expect(
+      (await f.store.readState(companyCustodyNamespace(f.security.namespace)))!
+          .revision,
+      custody!.revision,
+    );
+  });
+
+  test(
+    'baseline typed recovery verifies both creation receipts and rejects forged ACK signature',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      final member = await f.bEnrollment.signIn('1234');
+      await CompanyJobCommands(enrollment: f.bEnrollment).createJob(
+        CreateJob(
+          companyId: member.identity.companyId,
+          shopId: member.identity.shopId,
+          jobId: const Uuid().v4(),
+          requestId: const Uuid().v4(),
+          name: 'Synthetic member baseline',
+        ),
+        ownerSession: member,
+      );
+      final pair = await openSyncPair(f);
+      addTearDown(() async {
+        await pair.a.closeAndDrain();
+        await pair.b.closeAndDrain();
+        await pair.a.controller.dispose();
+        await pair.b.controller.dispose();
+      });
+      final result = await pair.a.syncNow();
+      expect(
+        result.complete,
+        isTrue,
+        reason: result.failure == null
+            ? 'no failure reported'
+            : '${result.failure!.stage.name}/${result.failure!.reason.name}',
+      );
+      expect([result.sent, result.received], [1, 1]);
+      final original = (await f.aDb.select(f.aDb.companyJobs).get())
+          .singleWhere((r) => r.outgoing);
+      Future<void> verify() async =>
+          adapter.verifyDetailsBaselineRecoveryRecords(
+            enrollment: f.aEnrollment,
+            owner: f.owner,
+            sqlSha256: await adapter.detailsNativeSqlHash(f.aDb),
+            localCreation: {'record': original.toJson()},
+          );
+      await verify();
+      final ack = (await f.aDb.select(f.aDb.companyJobPeerAcks).get()).first;
+      final forged = jsonDecode(ack.ackBytes) as Map<String, dynamic>;
+      forged['signature'] = base64Encode(List<int>.filled(64, 0));
+      await f.aDb.customStatement(
+        'UPDATE company_job_peer_acks SET ack_bytes = ? WHERE request_id = ?',
+        [jsonEncode(forged), ack.requestId],
+      );
+      final before = await adapter.detailsNativeSqlHash(f.aDb);
+      await expectLater(verify(), throwsA(anything));
+      expect(await adapter.detailsNativeSqlHash(f.aDb), before);
+    }, _LoopbackHttpOverrides()),
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+  test(
+    'same-v2 baseline recovery pins origin and refuses other source lineage',
+    () {
+      final origin = <String, dynamic>{
+        'revision': 'ab710d81811eda567a2920a7557a5df52685c9af',
+        'tree': '073ecdf226dd4e57da25714c401e4edcdaad4302',
+        'adapterSha256':
+            'cb4c521e610aaa9ccd4121ff231114c82f02dea28fe4e3ed53609c7d4b831f4c',
+        'productRevision': 'ab710d81811eda567a2920a7557a5df52685c9af',
+        'manifestSha256':
+            'd4791cb60877b78caad3680366eadb7408727dd463ab19ed9e763692e5349860',
+      };
+      expect(
+        () => adapter.validateDetailsBaselineRecoveryOrigin(origin),
+        returnsNormally,
+      );
+      for (final key in origin.keys) {
+        expect(
+          () => adapter.validateDetailsBaselineRecoveryOrigin({
+            ...origin,
+            key: '0' * (origin[key] as String).length,
+          }),
+          throwsA(isA<NativeTestFailure>()),
+        );
+      }
+      expect(
+        () => adapter.validateDetailsBaselineRecoveryOrigin({
+          ...origin,
+          'extra': true,
+        }),
+        throwsA(isA<NativeTestFailure>()),
+      );
+    },
+  );
   late Directory temp;
   setUp(() {
     temp = Directory.systemTemp.createTempSync('details-admission-');
