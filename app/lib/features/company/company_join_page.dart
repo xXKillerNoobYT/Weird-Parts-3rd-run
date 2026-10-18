@@ -150,7 +150,13 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
         ).notify(widget.onJobSyncDiagnostic);
         rethrow;
       }
-      return sync.receive(wire);
+      final receiving = sync.receive(wire);
+      if (mounted && !_closed) setState(() {});
+      try {
+        return await receiving;
+      } finally {
+        if (mounted && !_closed) setState(() {});
+      }
     }
     final channel = await _currentChannel(pair);
     if (widget.reconnect) {
@@ -527,7 +533,9 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
             if (_jobSync != null)
               FilledButton(
                 key: const Key('company-jobs-sync-now'),
-                onPressed: _busy || !jobsLive ? null : () => _run(_syncJobs),
+                onPressed: _busy || !jobsLive || (_jobSync?.isRunning ?? false)
+                    ? null
+                    : () => _run(_syncJobs),
                 child: const Text('Sync Now'),
               ),
           ],

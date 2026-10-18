@@ -364,6 +364,15 @@ final class CreatedJobSyncResult {
       : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${unsupported > 0 ? ' Unsupported author scope remains pending.' : ''}${failure == null ? '' : ' ${failure!.message}'}';
 }
 
+enum _CreatedJobRunDirection { initiating, receiving }
+
+final class _CreatedJobRun {
+  _CreatedJobRun(this.id, this.direction);
+  final String id;
+  final _CreatedJobRunDirection direction;
+  bool disclosed = false;
+}
+
 final class CompanyCreatedJobSync {
   static Future<Map<String, int>> confirmedPeerCounts(
     CompanyEnrollment enrollment,
@@ -464,7 +473,7 @@ final class CompanyCreatedJobSync {
   }
 
   void _terminal(CreatedJobSyncResult result, {bool receiving = false}) {
-    if (!receiving || !_busy) _status(result.message);
+    if (!receiving || _activeRun == null) _status(result.message);
     CreatedJobSyncDiagnostic.terminal(
       result,
       receiverCallbackReached: receiving,
@@ -489,8 +498,41 @@ final class CompanyCreatedJobSync {
   Future<NearbyJoinChannel>? _channelPending;
   CreatedJobHoldingsInventory? _local;
   CreatedJobHoldingsInventory? _remote;
-  String? _run;
-  bool _busy = false;
+  _CreatedJobRun? _activeRun;
+  // Each retained ID consumed an inbound start or an outbound frame. The
+  // unchanged channel ceilings bound this set to at most 224 IDs.
+  final Set<String> _retiredRuns = {};
+  bool get isRunning => _activeRun != null || _receivePending;
+
+  void _requireRunCapacity() {
+    if (_retiredRuns.length >= 224) {
+      throw const CompanyBootstrapRefusal('Job sync channel budget exhausted');
+    }
+  }
+
+  void _requireRun(_CreatedJobRun run) {
+    if (_closed || !identical(_activeRun, run)) {
+      throw const CompanyBootstrapRefusal('Job sync run differs');
+    }
+    availability.requireLive();
+  }
+
+  void _retire(_CreatedJobRun run) {
+    if (!identical(_activeRun, run)) return;
+    if (run.direction == _CreatedJobRunDirection.receiving || run.disclosed) {
+      _retiredRuns.add(run.id);
+    }
+    _activeRun = null;
+    _local = null;
+    _remote = null;
+    _remoteStore = null;
+    _cachedAckStores = {};
+    _incoming = null;
+    _incomingDescriptor = null;
+    _served.clear();
+    _confirmed.clear();
+  }
+
   bool _closed = false;
   Future<CreatedJobSyncResult>? _initiating;
   int _remoteRemaining = 128;
@@ -513,8 +555,7 @@ final class CompanyCreatedJobSync {
       controller.companySyncDisclosure = null;
     }
     availability.close();
-    _incoming = null;
-    _run = null;
+    if (_activeRun case final run?) _retire(run);
   }
 
   Future<void> closeAndDrain() async {
@@ -612,34 +653,47 @@ final class CompanyCreatedJobSync {
     String action,
     Map<String, Object?> data,
   ) async {
+    final run = _activeRun;
+    if (run == null || run.direction != _CreatedJobRunDirection.initiating) {
+      throw const CompanyBootstrapRefusal('Job sync run differs');
+    }
+    _requireRun(run);
     if (!_canExchange(1)) {
       throw const CompanyBootstrapRefusal('More Jobs pending; pair again');
     }
     final request = const Uuid().v4();
     final wire = await _seal(request, {
       'action': action,
-      'run': _run,
+      'run': run.id,
       'data': data,
     });
+    _requireRun(run);
+    run.disclosed = true;
     final response = await controller.exchangeCompanyMessage(
       wire,
       disclosure: availability,
     );
+    _requireRun(run);
     final body = await _open(response);
+    _requireRun(run);
     if (response['request'] != request ||
         body['action'] != '$action.reply' ||
-        body['run'] != _run) {
+        body['run'] != run.id) {
       throw const CompanyBootstrapRefusal('Job sync response differs');
     }
     return Map<String, Object?>.from(body['data'] as Map);
   }
 
-  Future<void> _freeze() async {
+  Future<void> _freeze(_CreatedJobRun run) async {
     final records = await _commands.syncHoldings(
       ownerSession: availability.owner,
     );
-    _local = CreatedJobHoldingsInventory.local(records);
-    _cachedAckStores = await _readAckCache(records);
+    _requireRun(run);
+    final local = CreatedJobHoldingsInventory.local(records);
+    final cached = await _readAckCache(records);
+    _requireRun(run);
+    _local = local;
+    _cachedAckStores = cached;
     _incoming = null;
     _incomingDescriptor = null;
   }
@@ -773,6 +827,11 @@ final class CompanyCreatedJobSync {
   }
 
   Future<void> _saveAck(Map<String, Object?> descriptor, Object? raw) async {
+    final run = _activeRun;
+    if (run == null) {
+      throw const CompanyBootstrapRefusal('Job sync run differs');
+    }
+    _requireRun(run);
     final body = await _validatePeerAck(descriptor, raw);
     if (body['store'] != _remoteStore) {
       throw const CompanyBootstrapRefusal(
@@ -812,6 +871,7 @@ final class CompanyCreatedJobSync {
       }
       availability.requireLive();
     });
+    _requireRun(run);
     _cachedAckStores[_descriptorKey(descriptor)] = body['store'] as String;
   }
 
@@ -839,10 +899,16 @@ final class CompanyCreatedJobSync {
   }
 
   Future<bool> _snapshotConfirmed() async {
+    final run = _activeRun;
+    if (run == null) {
+      throw const CompanyBootstrapRefusal('Job sync run differs');
+    }
+    _requireRun(run);
     _requireInventories();
     final records = await _commands.syncHoldings(
       ownerSession: availability.owner,
     );
+    _requireRun(run);
     final actual = {
       for (final row in records)
         _descriptorKey(_jobDescriptor(row)): _jobDescriptor(row),
@@ -855,6 +921,7 @@ final class CompanyCreatedJobSync {
       }
     }
     final verifiedAckStores = await _readAckCache(records);
+    _requireRun(run);
     for (final descriptor in expected.values) {
       if (verifiedAckStores[_descriptorKey(descriptor)] != _remoteStore) {
         return false;
@@ -875,25 +942,32 @@ final class CompanyCreatedJobSync {
     _receivePending = true;
     final result = _receiving.then((_) async {
       var stage = CreatedJobSyncStage.channelOpen;
-      String? receivingRun;
+      _CreatedJobRun? receivingRun;
       try {
-        return await _receive(wire, (value) => stage = value, () {
-          if (!_busy) receivingRun = _run;
-        });
+        return await _receive(
+          wire,
+          (value) => stage = value,
+          (run) => receivingRun = run,
+        );
       } catch (error) {
         lastFailure = error;
         final ownCounts =
-            receivingRun != null && receivingRun == _run && !_busy;
-        _terminal(
-          CreatedJobSyncResult(
-            ownCounts ? _sentJobs : 0,
-            ownCounts ? _receivedJobs : 0,
-            false,
-            0,
-            failure: CreatedJobSyncFailure.fromError(error, stage),
-          ),
-          receiving: true,
-        );
+            receivingRun != null && identical(receivingRun, _activeRun);
+        final sent = ownCounts ? _sentJobs : 0;
+        final received = ownCounts ? _receivedJobs : 0;
+        if (ownCounts) _retire(receivingRun!);
+        if (ownCounts || (_activeRun == null && _retiredRuns.isEmpty)) {
+          _terminal(
+            CreatedJobSyncResult(
+              sent,
+              received,
+              false,
+              0,
+              failure: CreatedJobSyncFailure.fromError(error, stage),
+            ),
+            receiving: true,
+          );
+        }
         rethrow;
       } finally {
         _receivePending = false;
@@ -909,35 +983,58 @@ final class CompanyCreatedJobSync {
   Future<Map<String, Object?>> _receive(
     Map<String, Object?> wire,
     void Function(CreatedJobSyncStage) atStage,
-    void Function() receiverInitialized,
+    void Function(_CreatedJobRun) receiverInitialized,
   ) async {
     final body = await _open(wire);
     final action = body['action'];
+    late _CreatedJobRun run;
+    if (action == 'start') {
+      atStage(CreatedJobSyncStage.startRequest);
+      if (_activeRun != null) {
+        throw const CompanyBootstrapRefusal('A Job sync is already running');
+      }
+      _requireRunCapacity();
+      final id = body['run'] as String;
+      if (_retiredRuns.contains(id)) {
+        throw const CompanyBootstrapRefusal('Job sync run differs');
+      }
+      run = _CreatedJobRun(id, _CreatedJobRunDirection.receiving);
+      _activeRun = run;
+      _sentJobs = 0;
+      _receivedJobs = 0;
+      receiverInitialized(run);
+      const CreatedJobSyncDiagnostic.started(receiverCallbackReached: true)
+          .notify(onDiagnostic);
+    } else {
+      final active = _activeRun;
+      if (active == null ||
+          active.direction != _CreatedJobRunDirection.receiving ||
+          body['run'] != active.id) {
+        throw const CompanyBootstrapRefusal('Job sync run differs');
+      }
+      run = active;
+      receiverInitialized(run);
+      atStage(
+        action == 'holdings' || action == 'page'
+            ? CreatedJobSyncStage.holdings
+            : action == 'finish'
+            ? CreatedJobSyncStage.confirmation
+            : CreatedJobSyncStage.transfer,
+      );
+    }
+    _requireRun(run);
     final data = Map<String, Object?>.from(body['data'] as Map);
     Map<String, Object?> result;
     if (action == 'start') {
-      atStage(CreatedJobSyncStage.startRequest);
-      if (_busy) {
-        throw const CompanyBootstrapRefusal('A Job sync is already running');
-      }
-      const CreatedJobSyncDiagnostic.started(receiverCallbackReached: true)
-          .notify(onDiagnostic);
       atStage(CreatedJobSyncStage.localInventory);
-      await _freeze();
-      _run = body['run'] as String;
+      await _freeze(run);
+      _requireRun(run);
       _readSummary(data);
-      _sentJobs = 0;
-      _receivedJobs = 0;
       _served.clear();
       _confirmed.clear();
-      receiverInitialized();
-      _status('Exchanging Job holdings with the verified peer.');
       result = _summary();
+      _status('Exchanging Job holdings with the verified peer.');
     } else {
-      if (_run == null || body['run'] != _run) {
-        throw const CompanyBootstrapRefusal('Job sync run differs');
-      }
-      receiverInitialized();
       if (action == 'holdings') {
         atStage(CreatedJobSyncStage.holdings);
         _remote!.acceptPage(data);
@@ -957,23 +1054,28 @@ final class CompanyCreatedJobSync {
               : CreatedJobSyncStage.transfer,
         );
         _requireInventories();
-        result = await _transfer(action, data);
+        result = await _transfer(action, data, run);
+        _requireRun(run);
       }
     }
     atStage(CreatedJobSyncStage.replySeal);
+    _requireRun(run);
     final reply = await _seal(wire['request'] as String, {
       'action': '$action.reply',
-      'run': _run,
+      'run': run.id,
       'data': result,
     });
-    availability.requireLive();
+    _requireRun(run);
     if (action == 'finish') {
+      final sent = _sentJobs;
+      final received = _receivedJobs;
+      _retire(run);
       final complete = data['complete'] as bool;
       final unsupported = data['unsupported'] as int;
       _terminal(
         CreatedJobSyncResult(
-          _sentJobs,
-          _receivedJobs,
+          sent,
+          received,
           complete,
           unsupported,
           failure: complete
@@ -994,7 +1096,9 @@ final class CompanyCreatedJobSync {
   Future<Map<String, Object?>> _transfer(
     Object? action,
     Map<String, Object?> data,
+    _CreatedJobRun run,
   ) async {
+    _requireRun(run);
     if (action == 'finish') {
       _joinObject(data, {'complete', 'unsupported'});
       if (data['complete'] is! bool ||
@@ -1004,6 +1108,7 @@ final class CompanyCreatedJobSync {
         throw const CompanyBootstrapRefusal('Invalid completion');
       }
       final confirmed = await _snapshotConfirmed();
+      _requireRun(run);
       if (data['complete'] == true &&
           (!confirmed || data['unsupported'] != 0)) {
         throw const CompanyBootstrapRefusal(
@@ -1050,9 +1155,11 @@ final class CompanyCreatedJobSync {
           ownerSession: availability.owner,
           availability: availability,
         );
+        _requireRun(run);
         _incoming = null;
         _incomingDescriptor = null;
         final ack = await _ack(descriptor);
+        _requireRun(run);
         _receivedJobs++;
         return {'ack': ack};
       }
@@ -1068,6 +1175,7 @@ final class CompanyCreatedJobSync {
         throw const CompanyBootstrapRefusal('Job relay is not supported');
       }
       final row = await _record(descriptor);
+      _requireRun(run);
       _served.add(key);
       final bytes = utf8.encode(row.operationBytes);
       final offset = data['offset'];
@@ -1089,21 +1197,29 @@ final class CompanyCreatedJobSync {
     if (action == 'ackBoth') {
       _joinObject(data, {'descriptor', 'ack'});
       await _saveAck(descriptor, data['ack']);
+      _requireRun(run);
       if (_served.contains(key) && _confirmed.add(key)) _sentJobs++;
-      return {'ack': await _ack(descriptor)};
+      final ack = await _ack(descriptor);
+      _requireRun(run);
+      return {'ack': ack};
     }
     throw const CompanyBootstrapRefusal('Unsupported Job sync action');
   }
 
   Future<CreatedJobSyncResult> syncNow() {
-    if (_closed || _busy) {
+    if (_closed || isRunning) {
       throw const CompanyBootstrapRefusal('A Job sync is already running');
     }
-    return _initiating = _syncNow();
+    _requireRunCapacity();
+    final run = _CreatedJobRun(
+      const Uuid().v4(),
+      _CreatedJobRunDirection.initiating,
+    );
+    _activeRun = run;
+    return _initiating = _syncNow(run);
   }
 
-  Future<CreatedJobSyncResult> _syncNow() async {
-    _busy = true;
+  Future<CreatedJobSyncResult> _syncNow(_CreatedJobRun run) async {
     _sentJobs = 0;
     _receivedJobs = 0;
     var unsupported = 0;
@@ -1118,9 +1234,9 @@ final class CompanyCreatedJobSync {
       stage = CreatedJobSyncStage.channelOpen;
       await _getChannel();
       stage = CreatedJobSyncStage.localInventory;
-      await _freeze();
+      await _freeze(run);
+      _requireRun(run);
       _status('Comparing verified Job holdings.');
-      _run = const Uuid().v4();
       stage = CreatedJobSyncStage.startRequest;
       _readSummary(await _rpc('start', _summary()));
       stage = CreatedJobSyncStage.holdings;
@@ -1251,9 +1367,7 @@ final class CompanyCreatedJobSync {
       failure = CreatedJobSyncFailure.fromError(error, stage);
       complete = false;
     } finally {
-      _busy = false;
-      _incoming = null;
-      _incomingDescriptor = null;
+      _retire(run);
     }
     final result = CreatedJobSyncResult(
       _sentJobs,

@@ -200,7 +200,7 @@ pairProtocolFixture({String run = 'nearby-test-a'}) async {
 void main() {
   for (final run in [
     'company-j60-join-v10',
-    'company-j61-created-v15',
+    'company-j61-created-v16',
     'nearby-test-a',
   ]) {
     test(
@@ -258,13 +258,13 @@ void main() {
     'company-j61-created-v5',
     'company-j61-created-v6',
     'company-j61-created-v7',
-    'company-j61-created-v15-extra',
+    'company-j61-created-v16-extra',
     'company-j61-created-v8',
     'company-j61-created-v9',
-    'company-j61-created-v14',
-    'company-j61-created-v16',
+    'company-j61-created-v15',
+    'company-j61-created-v17',
     'company-j61-created-v',
-    'j61-created-v15',
+    'j61-created-v16',
     'company-j60-join-v10-extra',
     'company-j60-join-v4',
     'company-j60-join-v4-extra',

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -130,6 +131,12 @@ void main() {
       final beforeB = await tester.runAsync(() => sqlSnapshot(f.bDb));
       await tester.binding.setSurfaceSize(const Size(1600, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
+      final freezeEntered = Completer<void>();
+      final releaseFreeze = Completer<void>();
+      addTearDown(() {
+        f.bStore.beforeRead = null;
+        if (!releaseFreeze.isCompleted) releaseFreeze.complete();
+      });
       Widget connectedPeers() => MaterialApp(
         home: Row(
           children: [
@@ -147,6 +154,19 @@ void main() {
                 approver: member,
                 reconnect: true,
                 createController: (_) => b,
+                onJobSyncDiagnostic: (event) {
+                  if (event.kind == CreatedJobSyncDiagnosticKind.started &&
+                      event.receiverCallbackReached) {
+                    f.bStore.beforeRead = (namespace) {
+                      if (namespace == f.b.namespace &&
+                          !freezeEntered.isCompleted) {
+                        freezeEntered.complete();
+                        return releaseFreeze.future;
+                      }
+                      return null;
+                    };
+                  }
+                },
               ),
             ),
           ],
@@ -191,7 +211,30 @@ void main() {
       );
       expect(find.textContaining('Ready to exchange Jobs'), findsNWidgets(2));
       stdout.writeln('Job sync widget: both manually available');
+      final handling = b.onJoinMessage!;
+      final incomingStarted = Completer<void>();
+      final releaseStartReply = Completer<void>();
+      addTearDown(() {
+        if (!releaseStartReply.isCompleted) releaseStartReply.complete();
+      });
+      b.onJoinMessage = (session, wire) async {
+        final reply = await handling(session, wire);
+        if (!incomingStarted.isCompleted) {
+          incomingStarted.complete();
+          await releaseStartReply.future;
+        }
+        return reply;
+      };
       await tester.runAsync(() => tester.tap(sync.at(0)));
+      await joinWidgetSignal(tester, () => freezeEntered.isCompleted);
+      final receiverEnabledDuringFreeze =
+          tester.widget<FilledButton>(sync.at(1)).onPressed != null;
+      f.bStore.beforeRead = null;
+      releaseFreeze.complete();
+      await joinWidgetSignal(tester, () => incomingStarted.isCompleted);
+      final receiverEnabledDuringRun =
+          tester.widget<FilledButton>(sync.at(1)).onPressed != null;
+      releaseStartReply.complete();
       await tester.pump();
       expect(find.byKey(const Key('company-join-busy')), findsOneWidget);
       await joinWidgetSignal(
@@ -217,6 +260,17 @@ void main() {
             )
             .map((w) => w.data)
             .join(' | '),
+      );
+      expect(
+        receiverEnabledDuringFreeze,
+        isFalse,
+        reason:
+            'Local Sync must be disabled while the inbound inventory freezes',
+      );
+      expect(
+        receiverEnabledDuringRun,
+        isFalse,
+        reason: 'Local Sync must be disabled while receiving the peer run',
       );
       final aJobs = await tester.runAsync(
         () =>

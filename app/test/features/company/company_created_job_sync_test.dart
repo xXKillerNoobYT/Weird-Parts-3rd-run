@@ -112,7 +112,7 @@ Future<Map<String, Object?>> syncAttackWire(
   String recipient,
   String run,
   String action,
-  Map<String, Object?> data,
+  Object? data,
 ) async {
   final keys = pair.keys;
   final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
@@ -162,6 +162,446 @@ Future<Map<String, Object?>> syncAttackWire(
 }
 
 void main() {
+  for (final foreign in [false, true]) {
+    final label = foreign ? 'foreign' : 'owned';
+    test(
+      'malformed data for $label run preserves only the rightful owner',
+      () async {
+        final f = await JoinFixture.create(allowOwnerAdditions: true);
+        await activateFixtureB(f);
+        final statuses = <String>[];
+        final diagnostics = <CreatedJobSyncDiagnostic>[];
+        final pair = await openSyncPair(
+          f,
+          onBStatus: statuses.add,
+          onBDiagnostic: diagnostics.add,
+        );
+        final source = (await f.aDb.select(f.aDb.companyJobs).get()).single;
+        final inventory = CreatedJobHoldingsInventory.local([source]);
+        final bytes = utf8.encode(source.operationBytes);
+        final descriptor = inventory.descriptors.single;
+        final run = const Uuid().v4();
+        Future<Map<String, Object?>> send(
+          String id,
+          String action,
+          Object? data,
+        ) async => pair.b.receive(
+          await syncAttackWire(
+            pair.a.controller.pairedJoinSession!,
+            base64Encode(f.b.identity!.publicKey),
+            id,
+            action,
+            data,
+          ),
+        );
+        await send(run, 'start', {
+          'inventory': inventory.meta,
+          'store': f.a.receivingStoreGeneration!.value,
+        });
+        await send(run, 'holdings', {
+          'ordinal': 0,
+          'digest': inventory.digest,
+          'items': inventory.page(0),
+          'confirmedStores': [null],
+        });
+        await send(run, 'put', {
+          'descriptor': descriptor,
+          'offset': 0,
+          'bytes': base64Encode(bytes.sublist(0, 1)),
+        });
+        final before = await sqlSnapshot(f.bDb);
+        final protected = Map.of(f.bStore.states);
+        final status = statuses.last;
+        final eventCount = diagnostics.length;
+        await expectLater(
+          send(foreign ? const Uuid().v4() : run, 'put', []),
+          throwsA(anything),
+        );
+        expect(await sqlSnapshot(f.bDb), before);
+        expectJoinProtectedUnchanged(f.bStore, protected);
+        final remaining = {
+          'descriptor': descriptor,
+          'offset': 1,
+          'bytes': base64Encode(bytes.sublist(1)),
+        };
+        if (foreign) {
+          expect(statuses.last, status);
+          expect(diagnostics, hasLength(eventCount));
+          await send(run, 'put', remaining);
+          expect(
+            (await f.bDb.select(f.bDb.companyJobs).get()).single.operationBytes,
+            source.operationBytes,
+          );
+          await send(run, 'finish', {'complete': false, 'unsupported': 0});
+        } else {
+          await expectLater(send(run, 'put', remaining), throwsA(anything));
+          expect(await sqlSnapshot(f.bDb), before);
+          expectJoinProtectedUnchanged(f.bStore, protected);
+        }
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
+
+  test('inbound start owns the run throughout inventory freeze', () async {
+    final f = await JoinFixture.create(allowOwnerAdditions: true);
+    await activateFixtureB(f);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final pair = await openSyncPair(
+      f,
+      onBDiagnostic: (event) {
+        if (event.kind == CreatedJobSyncDiagnosticKind.started) {
+          f.bStore.beforeRead = (namespace) {
+            if (namespace == f.b.namespace && !entered.isCompleted) {
+              entered.complete();
+              return release.future;
+            }
+            return null;
+          };
+        }
+      },
+    );
+    final inventory = CreatedJobHoldingsInventory.local(
+      await f.aDb.select(f.aDb.companyJobs).get(),
+    );
+    final wire = await syncAttackWire(
+      pair.a.controller.pairedJoinSession!,
+      base64Encode(f.b.identity!.publicKey),
+      const Uuid().v4(),
+      'start',
+      {
+        'inventory': inventory.meta,
+        'store': f.a.receivingStoreGeneration!.value,
+      },
+    );
+    Future<CreatedJobSyncResult>? competing;
+    final receiving = pair.a.controller.exchangeCompanyMessage(
+      wire,
+      disclosure: pair.a.availability,
+    );
+    try {
+      await entered.future;
+      expect(() {
+        competing = pair.b.syncNow();
+      }, throwsA(isA<CompanyBootstrapRefusal>()));
+      release.complete();
+      await receiving;
+      expect(pair.b.syncNow, throwsA(isA<CompanyBootstrapRefusal>()));
+    } finally {
+      f.bStore.beforeRead = null;
+      final drains = Future.wait([
+        pair.a.closeAndDrain(),
+        pair.b.closeAndDrain(),
+      ]);
+      if (!release.isCompleted) release.complete();
+      await receiving.catchError((Object _) => <String, Object?>{});
+      await competing;
+      await drains;
+    }
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('second inbound start preserves the accepted run and status', () async {
+    final f = await JoinFixture.create();
+    await activateFixtureB(f);
+    final statuses = <String>[];
+    final pair = await openSyncPair(f, onBStatus: statuses.add);
+    final inventory = CreatedJobHoldingsInventory.local(
+      await f.aDb.select(f.aDb.companyJobs).get(),
+    );
+    final run = const Uuid().v4();
+    Future<Map<String, Object?>> send(
+      String id,
+      String action,
+      Map<String, Object?> data,
+    ) async => pair.a.controller.exchangeCompanyMessage(
+      await syncAttackWire(
+        pair.a.controller.pairedJoinSession!,
+        base64Encode(f.b.identity!.publicKey),
+        id,
+        action,
+        data,
+      ),
+      disclosure: pair.a.availability,
+    );
+    final start = {
+      'inventory': inventory.meta,
+      'store': f.a.receivingStoreGeneration!.value,
+    };
+    await send(run, 'start', start);
+    final before = await sqlSnapshot(f.bDb);
+    final protected = Map.of(f.bStore.states);
+    final status = statuses.last;
+    await expectLater(
+      send(const Uuid().v4(), 'start', start),
+      throwsA(anything),
+    );
+    expect(statuses.last, status);
+    await send(run, 'holdings', {
+      'ordinal': 0,
+      'digest': inventory.digest,
+      'items': inventory.page(0),
+      'confirmedStores': [null],
+    });
+    expect(await sqlSnapshot(f.bDb), before);
+    expectJoinProtectedUnchanged(f.bStore, protected);
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  for (final terminal in ['incomplete', 'unconfirmed', 'chunk failure']) {
+    test(
+      '$terminal retires partial transfer and rejects fresh late run frames',
+      () async {
+        final f = await JoinFixture.create(allowOwnerAdditions: true);
+        await activateFixtureB(f);
+        final statuses = <String>[];
+        final diagnostics = <CreatedJobSyncDiagnostic>[];
+        final pair = await openSyncPair(
+          f,
+          onBStatus: statuses.add,
+          onBDiagnostic: diagnostics.add,
+        );
+        final source = (await f.aDb.select(f.aDb.companyJobs).get()).single;
+        final bytes = utf8.encode(source.operationBytes);
+        final inventory = CreatedJobHoldingsInventory.local([source]);
+        final descriptor = inventory.descriptors.single;
+        final run = const Uuid().v4();
+        Future<Map<String, Object?>> send(
+          String action,
+          Map<String, Object?> data,
+        ) async => pair.b.receive(
+          await syncAttackWire(
+            pair.a.controller.pairedJoinSession!,
+            base64Encode(f.b.identity!.publicKey),
+            run,
+            action,
+            data,
+          ),
+        );
+        final start = {
+          'inventory': inventory.meta,
+          'store': f.a.receivingStoreGeneration!.value,
+        };
+        final holdings = {
+          'ordinal': 0,
+          'digest': inventory.digest,
+          'items': inventory.page(0),
+          'confirmedStores': [null],
+        };
+        await send('start', start);
+        await send('holdings', holdings);
+        await send('put', {
+          'descriptor': descriptor,
+          'offset': 0,
+          'bytes': base64Encode(bytes.sublist(0, 1)),
+        });
+        final before = await sqlSnapshot(f.bDb);
+        final protected = Map.of(f.bStore.states);
+        if (terminal == 'incomplete') {
+          await send('finish', {'complete': false, 'unsupported': 0});
+        } else {
+          await expectLater(
+            terminal == 'unconfirmed'
+                ? send('finish', {'complete': true, 'unsupported': 0})
+                : send('put', {
+                    'descriptor': descriptor,
+                    'offset': 2,
+                    'bytes': base64Encode(bytes.sublist(1)),
+                  }),
+            throwsA(anything),
+          );
+        }
+        final status = statuses.last;
+        final eventCount = diagnostics.length;
+        for (final (action, data) in <(String, Map<String, Object?>)>[
+          (
+            'put',
+            {
+              'descriptor': descriptor,
+              'offset': 1,
+              'bytes': base64Encode(bytes.sublist(1)),
+            },
+          ),
+          ('get', {'descriptor': descriptor, 'offset': 0, 'limit': 1024}),
+          ('ackBoth', {'descriptor': descriptor, 'ack': {}}),
+          ('page', {'ordinal': 0}),
+          ('holdings', holdings),
+          ('start', start),
+        ]) {
+          await expectLater(send(action, data), throwsA(anything));
+          expect(
+            pair.b.lastFailure.toString(),
+            contains('Job sync run differs'),
+            reason: action,
+          );
+          expect(await sqlSnapshot(f.bDb), before);
+          expectJoinProtectedUnchanged(f.bStore, protected);
+          expect(statuses.last, status);
+          expect(diagnostics, hasLength(eventCount));
+        }
+        final fresh = await pair.a.syncNow();
+        expect(fresh.complete, isTrue, reason: pair.a.lastFailure?.toString());
+        final afterA = await sqlSnapshot(f.aDb);
+        final afterB = await sqlSnapshot(f.bDb);
+        final protectedA = Map.of(f.aStore.states);
+        final protectedB = Map.of(f.bStore.states);
+        final repeat = await pair.a.syncNow();
+        expect(repeat.complete, isTrue, reason: pair.a.lastFailure?.toString());
+        expect([repeat.sent, repeat.received], [0, 0]);
+        expect(await sqlSnapshot(f.aDb), afterA);
+        expect(await sqlSnapshot(f.bDb), afterB);
+        expectJoinProtectedUnchanged(f.aStore, protectedA);
+        expectJoinProtectedUnchanged(f.bStore, protectedB);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
+  test(
+    'simultaneous local starts settle before a fresh same-Pair sync',
+    () async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      final pair = await openSyncPair(f);
+      final source = (await f.aDb.select(f.aDb.companyJobs).get()).single;
+      await Future.wait([pair.a.syncNow(), pair.b.syncNow()]);
+      expect(pair.a.isRunning, isFalse);
+      expect(pair.b.isRunning, isFalse);
+      final fresh = await pair.a.syncNow();
+      expect(fresh.complete, isTrue, reason: pair.a.lastFailure?.toString());
+      for (final (commands, owner) in [
+        (CompanyJobCommands(enrollment: f.aEnrollment), f.owner),
+        (CompanyJobCommands(enrollment: f.bEnrollment), pair.ownerB),
+      ]) {
+        expect(
+          (await commands.listJobs(ownerSession: owner)).map((job) => job.id),
+          [source.jobId],
+        );
+      }
+      final beforeA = await sqlSnapshot(f.aDb);
+      final beforeB = await sqlSnapshot(f.bDb);
+      final protectedA = Map.of(f.aStore.states);
+      final protectedB = Map.of(f.bStore.states);
+      final repeat = await pair.a.syncNow();
+      expect(repeat.complete, isTrue, reason: pair.a.lastFailure?.toString());
+      expect([repeat.sent, repeat.received], [0, 0]);
+      expect(await sqlSnapshot(f.aDb), beforeA);
+      expect(await sqlSnapshot(f.bDb), beforeB);
+      expectJoinProtectedUnchanged(f.aStore, protectedA);
+      expectJoinProtectedUnchanged(f.bStore, protectedB);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'completed run rejects fresh late actions and reuse of its terminal ID',
+    () async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      final statuses = <String>[];
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      final pair = await openSyncPair(
+        f,
+        onBStatus: statuses.add,
+        onBDiagnostic: diagnostics.add,
+      );
+      final handling = pair.b.controller.onJoinMessage!;
+      String? completedRun;
+      pair.b.controller.onJoinMessage = (session, wire) async {
+        if (completedRun == null) {
+          final keys = pair.a.controller.pairedJoinSession!.keys;
+          SecretKey key = keys.sendKey;
+          for (final purpose in ['company-join', 'company-job-create-sync']) {
+            key = await Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
+              secretKey: key,
+              nonce: utf8.encode(keys.id),
+              info: utf8.encode(
+                'wiredpart-v2/$purpose@1/${keys.sendDirection}',
+              ),
+            );
+          }
+          final header = {
+            for (final field in [
+              'v',
+              'kind',
+              'request',
+              'recipient',
+              'session',
+              'direction',
+            ])
+              field: wire[field],
+          };
+          final bytes = await AesGcm.with256bits().decrypt(
+            SecretBox(
+              base64Decode(wire['ciphertext'] as String),
+              nonce: base64Decode(wire['nonce'] as String),
+              mac: Mac(base64Decode(wire['tag'] as String)),
+            ),
+            secretKey: key,
+            aad: utf8.encode(canonicalJoinTest(header)),
+          );
+          completedRun =
+              (jsonDecode(utf8.decode(bytes)) as Map)['run'] as String;
+        }
+        return handling(session, wire);
+      };
+      expect((await pair.a.syncNow()).complete, isTrue);
+      final source = (await f.aDb.select(f.aDb.companyJobs).get()).single;
+      final inventory = CreatedJobHoldingsInventory.local([source]);
+      final before = await sqlSnapshot(f.bDb);
+      final protected = Map.of(f.bStore.states);
+      final status = statuses.last;
+      final eventCount = diagnostics.length;
+      for (final (action, data) in <(String, Map<String, Object?>)>[
+        (
+          'put',
+          {
+            'descriptor': inventory.descriptors.single,
+            'offset': 0,
+            'bytes': base64Encode(utf8.encode(source.operationBytes)),
+          },
+        ),
+        (
+          'get',
+          {
+            'descriptor': inventory.descriptors.single,
+            'offset': 0,
+            'limit': 1024,
+          },
+        ),
+        ('ackBoth', {'descriptor': inventory.descriptors.single, 'ack': {}}),
+        ('page', {'ordinal': 0}),
+        (
+          'start',
+          {
+            'inventory': inventory.meta,
+            'store': f.a.receivingStoreGeneration!.value,
+          },
+        ),
+      ]) {
+        final wire = await syncAttackWire(
+          pair.a.controller.pairedJoinSession!,
+          base64Encode(f.b.identity!.publicKey),
+          completedRun!,
+          action,
+          data,
+        );
+        await expectLater(pair.b.receive(wire), throwsA(anything));
+        expect(
+          pair.b.lastFailure.toString(),
+          contains('Job sync run differs'),
+          reason: action,
+        );
+        expect(await sqlSnapshot(f.bDb), before);
+        expectJoinProtectedUnchanged(f.bStore, protected);
+        expect(statuses.last, status);
+        expect(diagnostics, hasLength(eventCount));
+      }
+      final repeat = await pair.a.syncNow();
+      expect(repeat.complete, isTrue, reason: pair.a.lastFailure?.toString());
+      expect([repeat.sent, repeat.received], [0, 0]);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test(
     'receiver channel opening and reply sealing have distinct failure stages',
     () async {
@@ -432,9 +872,10 @@ void main() {
       expect(result.failure, isNull);
       expect(result.message, 'Job snapshot synced. Sent 1, received 0.');
       expect(await f.bDb.select(f.bDb.companyJobs).get(), hasLength(1));
+      final terminalCount = diagnostics.length;
       await expectLater(pair.a.receive({}), throwsA(anything));
-      expect(diagnostics.last.result?.sent, 0);
-      expect(diagnostics.last.result?.received, 0);
+      expect(diagnostics, hasLength(terminalCount));
+      expect(diagnostics.last.result, same(result));
       await pair.a.closeAndDrain();
       await pair.b.closeAndDrain();
     },
@@ -486,8 +927,12 @@ void main() {
           ),
           hasLength(1),
         );
-        expect(diagnostics.last.result?.sent, 0);
-        expect(diagnostics.last.result?.received, 0);
+        expect(
+          diagnostics.where(
+            (event) => event.kind == CreatedJobSyncDiagnosticKind.terminal,
+          ),
+          isEmpty,
+        );
       } finally {
         f.aStore.beforeRead = null;
         final drain = pair.a.closeAndDrain();
@@ -998,6 +1443,7 @@ void main() {
     };
     final first = expectLater(pair.b.receive({}), throwsA(anything));
     await entered.future;
+    expect(pair.b.syncNow, throwsA(isA<CompanyBootstrapRefusal>()));
     await expectLater(
       pair.b.receive({}),
       throwsA(predicate((e) => e.toString().contains('receiving a request'))),
