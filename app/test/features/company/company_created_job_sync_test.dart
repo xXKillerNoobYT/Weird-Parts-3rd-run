@@ -1145,6 +1145,81 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 2)));
 
   test(
+    'incoming finish retires responder state so a late put cannot commit',
+    () async {
+      final f = await JoinFixture.create();
+      await activateFixtureB(f);
+      final statuses = <String>[];
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      final pair = await openSyncPair(
+        f,
+        onBStatus: statuses.add,
+        onBDiagnostic: diagnostics.add,
+      );
+      addTearDown(pair.a.closeAndDrain);
+      addTearDown(pair.b.closeAndDrain);
+      final source = (await f.aDb.select(f.aDb.companyJobs).get()).single;
+      final inventory = CreatedJobHoldingsInventory.local([source]);
+      final run = const Uuid().v4();
+      Future<void> send(String action, Map<String, Object?> data) async {
+        final wire = await syncAttackWire(
+          pair.a.controller.pairedJoinSession!,
+          base64Encode(f.b.identity!.publicKey),
+          run,
+          action,
+          data,
+        );
+        await pair.a.controller.exchangeCompanyMessage(
+          wire,
+          disclosure: pair.a.availability,
+        );
+      }
+
+      await send('start', {
+        'inventory': inventory.meta,
+        'store': f.a.receivingStoreGeneration!.value,
+      });
+      await send('holdings', {
+        'ordinal': 0,
+        'digest': inventory.digest,
+        'items': inventory.page(0),
+        'confirmedStores': [for (final _ in inventory.page(0)) null],
+      });
+      await send('finish', {'complete': false, 'unsupported': 0});
+      expect(
+        diagnostics.last.result?.failure?.reason,
+        CreatedJobSyncReason.unconfirmedSnapshot,
+      );
+      expect(statuses.last, contains('Job sync incomplete.'));
+      expect(await f.bDb.select(f.bDb.companyJobs).get(), isEmpty);
+      final before = await sqlSnapshot(f.bDb);
+      final protected = Map.of(f.bStore.states);
+      final raw = utf8.encode(source.operationBytes);
+      expect(raw.length, lessThanOrEqualTo(kCreatedJobSyncChunkBytes));
+      await expectLater(
+        send('put', {
+          'descriptor': inventory.descriptors.single,
+          'offset': 0,
+          'bytes': base64Encode(raw),
+        }),
+        throwsA(anything),
+      );
+      expect(pair.b.lastFailure.toString(), contains('Job sync run differs'));
+      expect(await sqlSnapshot(f.bDb), before);
+      expectJoinProtectedUnchanged(f.bStore, protected);
+      expect(await f.bDb.select(f.bDb.companyJobs).get(), isEmpty);
+      final repeated = await pair.a.syncNow();
+      expect(
+        repeated.complete,
+        isTrue,
+        reason: '${pair.a.lastFailure}; ${pair.b.lastFailure}',
+      );
+      expect(await f.bDb.select(f.bDb.companyJobs).get(), hasLength(1));
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'known revoked retained peer receives no business inventory or Job writes',
     () async {
       final f = await JoinFixture.create();
