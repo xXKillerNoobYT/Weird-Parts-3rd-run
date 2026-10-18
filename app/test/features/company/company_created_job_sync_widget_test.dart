@@ -244,6 +244,31 @@ void main() {
       expect(find.textContaining('Pair again and verify'), findsOneWidget);
       expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
       expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
+      expect(tester.widget<FilledButton>(sync.at(1)).onPressed, isNotNull);
+      final otherPeer = find.byKey(
+        ValueKey('company-peer-${member.identity.deviceId}'),
+      );
+      await tester.ensureVisible(otherPeer);
+      await tester.tap(otherPeer);
+      await tester.pump();
+      await tester.runAsync(
+        () => tester.tap(find.byKey(const Key('company-peer-verify')).at(0)),
+      );
+      await joinWidgetSignal(
+        tester,
+        () =>
+            tester
+                .widget<Text>(
+                  find.byKey(const Key('company-join-status')).at(0),
+                )
+                .data ==
+            'Trusted peer authenticated. Verification alone does not exchange Jobs.',
+        attempts: 1200,
+      );
+      expect(tester.widget<FilledButton>(sync.at(1)).onPressed, isNull);
+      expect(find.textContaining('Pair again and verify'), findsNWidgets(2));
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
+      expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
       stdout.writeln(
         'Job sync widget: one Sync Now produced both production Job lists',
       );

@@ -163,6 +163,147 @@ Future<Map<String, Object?>> syncAttackWire(
 
 void main() {
   test(
+    'receiver channel opening and reply sealing have distinct failure stages',
+    () async {
+      final f = await JoinFixture.create();
+      await activateFixtureB(f);
+      final diagnostics = <CreatedJobSyncDiagnostic>[];
+      late ({
+        CompanyCreatedJobSync a,
+        CompanyCreatedJobSync b,
+        OwnerSession ownerB,
+      })
+      pair;
+      pair = await openSyncPair(
+        f,
+        onBDiagnostic: diagnostics.add,
+        onBStatus: (status) {
+          if (status == 'Exchanging Job holdings with the verified peer.') {
+            pair.b.availability.close();
+          }
+        },
+      );
+      final before = await sqlSnapshot(f.bDb);
+      await expectLater(pair.b.receive({}), throwsA(anything));
+      final opening = diagnostics.last.result!.failure!.stage.name;
+      final inventory = CreatedJobHoldingsInventory.local(
+        await f.aDb.select(f.aDb.companyJobs).get(),
+      );
+      final start = await syncAttackWire(
+        pair.a.controller.pairedJoinSession!,
+        base64Encode(f.b.identity!.publicKey),
+        const Uuid().v4(),
+        'start',
+        {
+          'inventory': inventory.meta,
+          'store': f.a.receivingStoreGeneration!.value,
+        },
+      );
+      await expectLater(pair.b.receive(start), throwsA(anything));
+      final sealing = diagnostics.last.result!.failure!.stage.name;
+      expect([opening, sealing], ['channelOpen', 'replySeal']);
+      expect(await sqlSnapshot(f.bDb), before);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
+    'same-Pair reproof invalidates earlier Job availability before Sync',
+    () async {
+      final f = await JoinFixture.create();
+      await activateFixtureB(f);
+      final ownerB = await f.bEnrollment.signIn('1234');
+      late NearbyController a, b;
+      final (bChannel, aChannel) = await joinChannels(
+        onPaired: (bc, ac) {
+          b = bc;
+          a = ac;
+        },
+      );
+      final aPair = a.pairedJoinSession;
+      final bPair = b.pairedJoinSession;
+      final aa = CompanyPeerAuthentication(enrollment: f.aEnrollment);
+      final ba = CompanyPeerAuthentication(enrollment: f.bEnrollment);
+      Future<({VerifiedPeerMembership a, VerifiedPeerMembership b})> verify(
+        bool fromB,
+      ) async {
+        final initiator = fromB ? ba : aa;
+        final responder = fromB ? aa : ba;
+        final owner = fromB ? ownerB : f.owner;
+        final peerOwner = fromB ? f.owner : ownerB;
+        final channel = fromB ? bChannel : aChannel;
+        final peerChannel = fromB ? aChannel : bChannel;
+        final first = await initiator.beginPeerChallenge(
+          channel,
+          (await initiator.retainedPeers(session: owner)).single,
+          session: owner,
+        );
+        final response = await responder.receivePeerChallenge(
+          peerChannel,
+          first,
+          session: peerOwner,
+        );
+        final complete = await initiator.receivePeerResponse(channel, response);
+        final done = await responder.receivePeerCompletion(
+          peerChannel,
+          complete,
+        );
+        final membership = await initiator.receivePeerAcknowledgment(
+          channel,
+          done.acknowledgment,
+        );
+        return fromB
+            ? (a: done.membership, b: membership)
+            : (a: membership, b: done.membership);
+      }
+
+      final first = await verify(true);
+      final available = await CompanyJobSyncAvailability.open(
+        enrollment: f.bEnrollment,
+        owner: ownerB,
+        peer: first.b,
+      );
+      final sync = CompanyCreatedJobSync(
+        availability: available,
+        controller: b,
+      );
+      addTearDown(sync.closeAndDrain);
+      expect(sync.isLive, isTrue);
+      final beforeA = await sqlSnapshot(f.aDb);
+      final beforeB = await sqlSnapshot(f.bDb);
+      final current = await verify(false);
+      expect(a.pairedJoinSession, same(aPair));
+      expect(b.pairedJoinSession, same(bPair));
+      await expectLater(
+        available.requireCurrent(),
+        throwsA(
+          isA<CompanyBootstrapRefusal>().having(
+            (error) => error.message,
+            'message',
+            'Retained peer context changed',
+          ),
+        ),
+      );
+      expect(sync.isLive, isFalse);
+      expect(available.requireLive, throwsA(isA<CompanyBootstrapRefusal>()));
+      final refused = await sync.syncNow();
+      expect(refused.complete, isFalse);
+      expect(
+        refused.message,
+        contains('Stage preflight. Reason verificationChanged.'),
+      );
+      final fresh = await CompanyJobSyncAvailability.open(
+        enrollment: f.bEnrollment,
+        owner: ownerB,
+        peer: current.b,
+      );
+      expect(fresh.requireLive, returnsNormally);
+      fresh.close();
+      expect(await sqlSnapshot(f.aDb), beforeA);
+      expect(await sqlSnapshot(f.bDb), beforeB);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+  test(
     'Nearby rejection exposes a fixed reason without its arbitrary message',
     () {
       final result = CreatedJobSyncResult(

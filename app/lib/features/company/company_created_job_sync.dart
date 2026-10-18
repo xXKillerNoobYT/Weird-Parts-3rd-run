@@ -26,6 +26,9 @@ final class CompanyJobSyncAvailability implements NearbyCompanyDisclosure {
         !identical(peer._owner.enrollment, enrollment)) {
       throw const CompanyBootstrapRefusal('Manual Job sync is unavailable');
     }
+    if (!identical(peer._owner._exchange, peer._held)) {
+      throw const CompanyBootstrapRefusal('Retained peer context changed');
+    }
     peer._held.channel._requireLive();
   }
 
@@ -256,6 +259,8 @@ final class CreatedJobHoldingsInventory {
 enum CreatedJobSyncStage {
   preflight,
   channel,
+  channelOpen,
+  replySeal,
   localInventory,
   startRequest,
   holdings,
@@ -265,6 +270,7 @@ enum CreatedJobSyncStage {
 
 enum CreatedJobSyncReason {
   unavailable,
+  verificationChanged,
   moreJobsPending,
   unconfirmedSnapshot,
   unsupportedAuthor,
@@ -288,6 +294,8 @@ final class CreatedJobSyncFailure {
         'Enable manual Job sync first' ||
         'Join is closed' ||
         'Join connection changed' => CreatedJobSyncReason.unavailable,
+        'Retained peer context changed' =>
+          CreatedJobSyncReason.verificationChanged,
         'More Jobs pending' ||
         'More Jobs pending; pair again' ||
         'Job sync channel budget exhausted' ||
@@ -866,7 +874,7 @@ final class CompanyCreatedJobSync {
     }
     _receivePending = true;
     final result = _receiving.then((_) async {
-      var stage = CreatedJobSyncStage.channel;
+      var stage = CreatedJobSyncStage.channelOpen;
       String? receivingRun;
       try {
         return await _receive(wire, (value) => stage = value, () {
@@ -952,7 +960,7 @@ final class CompanyCreatedJobSync {
         result = await _transfer(action, data);
       }
     }
-    atStage(CreatedJobSyncStage.channel);
+    atStage(CreatedJobSyncStage.replySeal);
     final reply = await _seal(wire['request'] as String, {
       'action': '$action.reply',
       'run': _run,
@@ -1107,7 +1115,7 @@ final class CompanyCreatedJobSync {
       lastFailure = null;
       _status('Checking Job sync permissions.');
       await availability.requireCurrent();
-      stage = CreatedJobSyncStage.channel;
+      stage = CreatedJobSyncStage.channelOpen;
       await _getChannel();
       stage = CreatedJobSyncStage.localInventory;
       await _freeze();

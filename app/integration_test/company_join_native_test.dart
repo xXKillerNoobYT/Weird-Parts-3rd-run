@@ -37,7 +37,7 @@ const _revision = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_JOIN_NATIVE_SOURCE_TREE');
 const _adapter = String.fromEnvironment('COMPANY_JOIN_NATIVE_ADAPTER_SHA256');
 const joinNativeRun = 'j60-join-v10';
-const createdJobNativeRun = 'j61-created-v12';
+const createdJobNativeRun = 'j61-created-v13';
 const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _createdProductRevision = String.fromEnvironment(
   'COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION',
