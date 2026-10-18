@@ -144,6 +144,9 @@ final class Fixture {
         snapshotStage: action == NativeTestAction.snapshot
             ? PrivateSnapshotStage.baseline
             : null,
+        jobNameStep: action == NativeTestAction.jobNameUi
+            ? NativeJobNameUiStep.inspect
+            : null,
       ),
     ),
   });

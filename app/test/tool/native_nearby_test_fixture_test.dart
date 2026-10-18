@@ -115,7 +115,7 @@ void main() {
       await seedValidationShop(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       expect(baseline.schemaVersion, kAppSchemaVersion);
-      expect(baseline.domain.length, 26);
+      expect(baseline.domain.length, 28);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
       expect(baseline.referencesValid, true);
@@ -151,7 +151,8 @@ void main() {
     'missing-table',
     'missing-history-table',
     'missing-company-jobs',
-    'unknown-schema9',
+    'nonempty-company-name-table',
+    'unknown-schema10',
     'missing-column',
   ]) {
     test(
@@ -186,8 +187,12 @@ void main() {
               corrupt.execute('DROP TABLE job_line_operations');
             } else if (mutation == 'missing-company-jobs') {
               corrupt.execute('DROP TABLE company_jobs');
-            } else if (mutation == 'unknown-schema9') {
-              corrupt.execute('PRAGMA user_version = 9');
+            } else if (mutation == 'nonempty-company-name-table') {
+              corrupt.execute(
+                "INSERT INTO company_job_names (company_id, shop_id, job_id, origin_generation, request_id, operation_commitment, command_commitment, operation_bytes, receipt_key, receipt_bytes, audit_bytes, outgoing) VALUES ('c', 's', 'j', 'g', 'r', 'o', 'c', 'op', 'k', 'receipt', 'audit', 0)",
+              );
+            } else if (mutation == 'unknown-schema10') {
+              corrupt.execute('PRAGMA user_version = 10');
             } else if (mutation == 'missing-column') {
               corrupt.execute('ALTER TABLE job_lines DROP COLUMN notes');
             } else {
@@ -252,6 +257,7 @@ void main() {
     6: 22,
     7: 25,
     8: 26,
+    9: 28,
   }.entries) {
     test(
       'frozen schema${entry.key} capture and preflight preserve declared proof and bytes',
@@ -268,7 +274,12 @@ void main() {
         await seedValidationShop(db, workspace!);
         for (final table in db.allTables) {
           final name = table.actualTableName;
-          if ((entry.key < 8 && name == 'company_job_peer_acks') ||
+          if ((entry.key < 9 &&
+                  {
+                    'company_job_names',
+                    'company_job_name_peer_acks',
+                  }.contains(name)) ||
+              (entry.key < 8 && name == 'company_job_peer_acks') ||
               (entry.key < 7 &&
                   {
                     'company_membership_certificates',
@@ -386,7 +397,8 @@ void main() {
   for (final mutation in [
     'missing-company-jobs',
     'missing-company-join',
-    'unknown-schema9',
+    'nonempty-company-name-table',
+    'unknown-schema10',
   ]) {
     test('capture rejects $mutation without altering the source', () async {
       workspace = ValidationWorkspace.open(
@@ -401,8 +413,12 @@ void main() {
         await db.customStatement('DROP TABLE company_jobs');
       } else if (mutation == 'missing-company-join') {
         await db.customStatement('DROP TABLE company_join_requests');
+      } else if (mutation == 'nonempty-company-name-table') {
+        await db.customStatement(
+          "INSERT INTO company_job_names (company_id, shop_id, job_id, origin_generation, request_id, operation_commitment, command_commitment, operation_bytes, receipt_key, receipt_bytes, audit_bytes, outgoing) VALUES ('c', 's', 'j', 'g', 'r', 'o', 'c', 'op', 'k', 'receipt', 'audit', 0)",
+        );
       } else {
-        await db.customStatement('PRAGMA user_version = 9');
+        await db.customStatement('PRAGMA user_version = 10');
       }
       final version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');

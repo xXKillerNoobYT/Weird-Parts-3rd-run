@@ -987,10 +987,18 @@ void main() {
     expect(remote.pages, 16);
     expect(remote.complete, isTrue);
     expect(aggregate, lessThanOrEqualTo(528 * 1024));
+    final maximumCombinedInventory = CreatedJobHoldingsInventory.remote({
+      'count': 1024,
+      'pages': 32,
+      'digest': digest,
+    });
+    expect(maximumCombinedInventory.count, 1024);
+    expect(maximumCombinedInventory.pages, 32);
+    expect(maximumCombinedInventory.complete, isFalse);
     expect(
       () => CreatedJobHoldingsInventory.remote({
-        'count': 513,
-        'pages': 17,
+        'count': 1025,
+        'pages': 33,
         'digest': digest,
       }),
       throwsA(anything),
