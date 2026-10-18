@@ -1332,6 +1332,41 @@ final class CompanyCreatedJobSync {
     return result;
   }
 
+  Set<String> _eligibleTransfers(
+    List<Map<String, Object?>> ordered,
+    CreatedJobHoldingsInventory sender,
+    CreatedJobHoldingsInventory receiver,
+    bool Function(Map<String, Object?>) authoredBySender,
+  ) {
+    final available = receiver.byKey.keys.toSet();
+    final operationKeys = {
+      for (final d in ordered) d['operation']: _descriptorKey(d),
+    };
+    final creationKeys = {
+      for (final d in ordered)
+        if (d['kind'] == null) d['digest']: _descriptorKey(d),
+    };
+    final eligible = <String>{};
+    for (final d in ordered) {
+      final key = _descriptorKey(d);
+      if (!sender.byKey.containsKey(key) ||
+          available.contains(key) ||
+          !authoredBySender(d)) {
+        continue;
+      }
+      if (d['kind'] == 'job.name.set@1' &&
+          (!available.contains(creationKeys[d['creation']]) ||
+              !(d['parents'] as List).every(
+                (parent) => available.contains(operationKeys[parent]),
+              ))) {
+        continue;
+      }
+      available.add(key);
+      eligible.add(key);
+    }
+    return eligible;
+  }
+
   Future<Map<String, Object?>> _transfer(
     Object? action,
     Map<String, Object?> data,
@@ -1496,6 +1531,22 @@ final class CompanyCreatedJobSync {
           .toList();
       final ourKeys = _local!.byKey;
       final theirKeys = _remote!.byKey;
+      final outgoing = _eligibleTransfers(
+        ordered,
+        _local!,
+        _remote!,
+        _authoredHere,
+      );
+      final member = availability.peer._held.peer._membership;
+      final incoming = _eligibleTransfers(
+        ordered,
+        _remote!,
+        _local!,
+        (d) =>
+            d['author'] == member.device['id'] &&
+            d['installation'] == member.device['installation'] &&
+            d['origin'] == member.device['generation'],
+      );
       stage = CreatedJobSyncStage.transfer;
       for (
         var i = 0;
@@ -1519,7 +1570,7 @@ final class CompanyCreatedJobSync {
               });
               await _saveAck(d, reply['ack']);
             }
-          } else if (_authoredHere(d)) {
+          } else if (outgoing.contains(_descriptorKey(d))) {
             _status('Sending a Job change to the retained peer.');
             final row = await _record(d);
             final bytes = utf8.encode(row.operationBytes);
@@ -1556,10 +1607,7 @@ final class CompanyCreatedJobSync {
         if (i < theirs.length) {
           final d = theirs[i];
           if (ourKeys.containsKey(_descriptorKey(d))) continue;
-          final member = availability.peer._held.peer._membership;
-          if (d['author'] != member.device['id'] ||
-              d['installation'] != member.device['installation'] ||
-              d['origin'] != member.device['generation']) {
+          if (!incoming.contains(_descriptorKey(d))) {
             unsupported++;
             continue;
           }

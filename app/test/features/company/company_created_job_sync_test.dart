@@ -51,13 +51,15 @@ Future<
 >
 openSyncPair(
   JoinFixture f, {
+  CompanyEnrollment? peerEnrollment,
   int chunkBytes = kCreatedJobSyncChunkBytes,
   void Function(String)? onAStatus,
   void Function(String)? onBStatus,
   void Function(CreatedJobSyncDiagnostic)? onADiagnostic,
   void Function(CreatedJobSyncDiagnostic)? onBDiagnostic,
 }) async {
-  final bo = f.bEnrollment.currentSession ?? await f.bEnrollment.signIn('1234');
+  final peer = peerEnrollment ?? f.bEnrollment;
+  final bo = peer.currentSession ?? await peer.signIn('1234');
   late NearbyController ac, bc;
   final (bChannel, aChannel) = await joinChannels(
     onPaired: (b, a) {
@@ -66,7 +68,7 @@ openSyncPair(
     },
   );
   final aa = CompanyPeerAuthentication(enrollment: f.aEnrollment);
-  final ba = CompanyPeerAuthentication(enrollment: f.bEnrollment);
+  final ba = CompanyPeerAuthentication(enrollment: peer);
   final first = await aa.beginPeerChallenge(
     aChannel,
     (await aa.retainedPeers(session: f.owner))
@@ -93,7 +95,7 @@ openSyncPair(
   );
   final b = CompanyCreatedJobSync(
     availability: await CompanyJobSyncAvailability.open(
-      enrollment: f.bEnrollment,
+      enrollment: peer,
       owner: bo,
       peer: done.membership,
     ),

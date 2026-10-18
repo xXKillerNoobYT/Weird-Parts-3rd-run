@@ -13,7 +13,8 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 
-import 'company_join_test.dart' show JoinFixture, activateFixtureB, sqlSnapshot;
+import 'company_join_test.dart'
+    show JoinFixture, activateFixtureB, enrollAdditionalFixtureC, sqlSnapshot;
 import 'company_created_job_sync_test.dart'
     show openSyncPair, receiverAvailability, syncAttackWire;
 import 'company_job_name_test.dart' show canonicalNameTest;
@@ -30,6 +31,218 @@ Future<void> closeNamePair(
 }
 
 void main() {
+  for (final fromA in [true, false]) {
+    test(
+      'foreign dependencies stay pending while unrelated traffic syncs from ${fromA ? 'A' : 'C'}',
+      () async {
+        final f = await JoinFixture.create(allowOwnerAdditions: true);
+        await activateFixtureB(f);
+        final ac = CompanyJobCommands(enrollment: f.aEnrollment);
+        final bc = CompanyJobCommands(enrollment: f.bEnrollment);
+        final ab = await openSyncPair(f);
+        late CompanyJobView base, foreign;
+        late JobNameCommandReceipt parent, child, grandchild, missingCreation;
+        try {
+          expect((await ab.a.syncNow()).complete, isTrue);
+          base = (await ac.listJobViews(ownerSession: f.owner)).single;
+          RenameJob edit(
+            CompanyJobView view,
+            String name,
+            List<String> heads,
+          ) => RenameJob(
+            companyId: f.owner.identity.companyId,
+            shopId: f.owner.identity.shopId,
+            jobId: view.baseJob.id,
+            requestId: const Uuid().v4(),
+            creationDigest: view.creationDigest,
+            observedHeads: heads,
+            name: name,
+          );
+          parent = await bc.renameJob(
+            edit(base, 'B parent', []),
+            ownerSession: ab.ownerB,
+          );
+          final foreignJob = const Uuid().v4();
+          await bc.createJob(
+            CreateJob(
+              companyId: f.owner.identity.companyId,
+              shopId: f.owner.identity.shopId,
+              jobId: foreignJob,
+              requestId: const Uuid().v4(),
+              name: 'B created Job',
+            ),
+            ownerSession: ab.ownerB,
+          );
+          expect((await ab.a.syncNow()).complete, isTrue);
+          foreign = (await ac.listJobViews(ownerSession: f.owner))
+              .singleWhere((v) => v.baseJob.id == foreignJob);
+          child = await ac.renameJob(
+            edit(base, 'A child', [parent.operationId]),
+            ownerSession: f.owner,
+          );
+          grandchild = await ac.renameJob(
+            edit(base, 'A grandchild', [child.operationId]),
+            ownerSession: f.owner,
+          );
+          missingCreation = await ac.renameJob(
+            edit(foreign, 'A name on B Job', []),
+            ownerSession: f.owner,
+          );
+          await ac.renameJob(
+            edit(base, 'Independent A name', []),
+            ownerSession: f.owner,
+          );
+        } finally {
+          await closeNamePair(ab);
+        }
+        final ce = await enrollAdditionalFixtureC(f);
+        final co = await ce.signIn('1234');
+        final cc = CompanyJobCommands(enrollment: ce);
+        final independent = const Uuid().v4();
+        await cc.createJob(
+          CreateJob(
+            companyId: f.owner.identity.companyId,
+            shopId: f.owner.identity.shopId,
+            jobId: independent,
+            requestId: const Uuid().v4(),
+            name: 'Independent C Job',
+          ),
+          ownerSession: co,
+        );
+        final pair = await openSyncPair(f, peerEnrollment: ce);
+        try {
+          final run = await (fromA ? pair.a : pair.b).syncNow();
+          expect(run.complete, isFalse);
+          expect(
+            run.failure?.reason,
+            CreatedJobSyncReason.unsupportedAuthor,
+            reason: safeNameFailure(pair),
+          );
+          expect(run.unsupported, 5);
+          expect(run.sent, fromA ? 2 : 1);
+          expect(run.received, fromA ? 1 : 2);
+          expect(pair.a.lastFailure, isNull);
+          expect(pair.b.lastFailure, isNull);
+          final cv = await cc.listJobViews(ownerSession: co);
+          expect(cv.map((v) => v.baseJob.id).toSet(), {
+            base.baseJob.id,
+            independent,
+          });
+          expect(
+            cv.singleWhere((v) => v.baseJob.id == base.baseJob.id).resolvedName,
+            'Independent A name',
+          );
+          expect(
+            (await ac.listJobViews(ownerSession: f.owner))
+                .singleWhere((v) => v.baseJob.id == independent)
+                .resolvedName,
+            'Independent C Job',
+          );
+          final blocked = {
+            parent.operationId,
+            child.operationId,
+            grandchild.operationId,
+            missingCreation.operationId,
+          };
+          final cNames = await ce.db.select(ce.db.companyJobNames).get();
+          expect(
+            cNames.any((r) => blocked.contains(r.operationCommitment)),
+            isFalse,
+          );
+          expect(
+            await ce.db.select(ce.db.companyJobNamePeerAcks).get(),
+            hasLength(1),
+          );
+          expect(
+            (await f.aDb.select(f.aDb.companyJobNamePeerAcks).get()).where(
+              (r) => r.peerDeviceId == co.identity.deviceId,
+            ),
+            hasLength(1),
+          );
+          expect(
+            (await f.aDb.select(f.aDb.companyJobPeerAcks).get()).where(
+              (r) => r.peerDeviceId == co.identity.deviceId,
+            ),
+            hasLength(2),
+          );
+          final aBefore = digestName(await sqlSnapshot(f.aDb));
+          final cBefore = digestName(await sqlSnapshot(ce.db));
+          final aProtected = hashes.sha256
+              .convert(f.aStore.states[f.a.namespace]!.bytes)
+              .toString();
+          final cProtected = hashes.sha256
+              .convert(
+                (await ce.installation.store.readState(
+                  ce.installation.namespace,
+                ))!.bytes,
+              )
+              .toString();
+          final repeat = await (fromA ? pair.a : pair.b).syncNow();
+          expect(repeat.complete, isFalse);
+          expect(
+            repeat.failure?.reason,
+            CreatedJobSyncReason.unsupportedAuthor,
+          );
+          expect(repeat.unsupported, 5);
+          expect(repeat.sent, 0);
+          expect(repeat.received, 0);
+          expect(digestName(await sqlSnapshot(f.aDb)), aBefore);
+          expect(digestName(await sqlSnapshot(ce.db)), cBefore);
+          expect(
+            hashes.sha256
+                .convert(f.aStore.states[f.a.namespace]!.bytes)
+                .toString(),
+            aProtected,
+          );
+          expect(
+            hashes.sha256
+                .convert(
+                  (await ce.installation.store.readState(
+                    ce.installation.namespace,
+                  ))!.bytes,
+                )
+                .toString(),
+            cProtected,
+          );
+        } finally {
+          await closeNamePair(pair);
+        }
+        final held = await openSyncPair(f);
+        try {
+          final run = await (fromA ? held.a : held.b).syncNow();
+          expect(run.complete, isFalse);
+          expect(run.failure?.reason, CreatedJobSyncReason.unsupportedAuthor);
+          expect(run.unsupported, 1);
+          expect(run.sent, fromA ? 4 : 0);
+          expect(run.received, fromA ? 0 : 4);
+          final bNames = await f.bDb.select(f.bDb.companyJobNames).get();
+          expect(
+            bNames.map((r) => r.operationCommitment),
+            containsAll([
+              parent.operationId,
+              child.operationId,
+              grandchild.operationId,
+              missingCreation.operationId,
+            ]),
+          );
+          final before = digestName(await sqlSnapshot(f.bDb));
+          final repeat = await (fromA ? held.a : held.b).syncNow();
+          expect(repeat.complete, isFalse);
+          expect(
+            repeat.failure?.reason,
+            CreatedJobSyncReason.unsupportedAuthor,
+          );
+          expect(repeat.sent, 0);
+          expect(repeat.received, 0);
+          expect(digestName(await sqlSnapshot(f.bDb)), before);
+        } finally {
+          await closeNamePair(held);
+        }
+      },
+      timeout: const Timeout(Duration(minutes: 6)),
+    );
+  }
+
   test('framing-only large parent pages respect unchanged envelope budget', () {
     final records = List.generate(64, (i) => framingNameRecord(i, 32));
     final local = CreatedJobHoldingsInventory.local(records);
