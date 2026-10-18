@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -8,11 +9,205 @@ import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_crypto.dart';
+import '../../tool/native_nearby_test_commands.dart';
 import '../features/company/company_job_details_test.dart' show details;
 import '../features/company/company_job_name_test.dart' show NameFixture;
 import 'job_name_native_ui_test.dart' as native show mount, ready, tap;
+import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
 
 void main() {
+  testWidgets(
+    'admitted details save returns once after verification crosses command deadline',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      await native.mount(tester, f);
+      final original = await tester.runAsync(
+        () => f.db.select(f.db.companyJobs).get(),
+      );
+      final cache = command_test.Fixture();
+      final wire = NativeTestCommand.encodeRequest(
+        session: cache.localSession,
+        sequence: 1,
+        action: NativeTestAction.jobDetailsUi,
+        deadlineMillis: 15000,
+        jobDetailsStep: NativeJobDetailsUiStep.editMixedOffline,
+      );
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      await adapter.saveJobDetailsThroughNativeUi(
+        tester: tester,
+        jobId: f.createCommand.jobId,
+        text: {JobDetailField.notes: 'Admitted offline save'},
+        tap: (target) => native.tap(tester, target),
+        waitUntilReady: (ready) => native.ready(tester, ready),
+        requireBeforeEffect: () => adapter.validateJoinNativeDeadline(
+          cache.now,
+          command.deadlineMillis,
+        ),
+      );
+      final views = (await tester.runAsync(
+        () => f.commands.listJobViews(ownerSession: f.owner),
+      ))!;
+      adapter.assertJobDetailsNativeViewUi(tester, views);
+      final verified = (await tester.runAsync(
+        () => f.commands.detailsSyncHoldings(ownerSession: f.owner),
+      ))!;
+      expect(verified, hasLength(1));
+      expect(views.single.details.notes.value, 'Admitted offline save');
+      cache.now = 20000;
+      expect(
+        cache.cache.submitJson(wire).state,
+        NativeTestCommandState.unknown,
+      );
+      expect(cache.cache.takeNext(), isNull);
+      var routePushes = 0;
+      var controllerReady = false;
+      var pumps = 0;
+      State? captured;
+      Future<void> wait(bool Function() ready) =>
+          adapter.waitForJoinNativeCompletion(
+            ready: ready,
+            elapsedMillis: () => cache.now,
+            commandDeadlineMillis: command.deadlineMillis,
+            pump: () async {
+              pumps++;
+              cache.now += 50;
+              await tester.pump(const Duration(milliseconds: 50));
+              if (pumps > 1) controllerReady = true;
+            },
+          );
+      await adapter.completeJobDetailsNativeUiReturn(
+        isStillCurrent: () => true,
+        waitForCompletion: wait,
+        mountPage: (waitUntilReady) async {
+          await tester.pumpWidget(
+            const MaterialApp(key: Key('details-return-app'), home: Scaffold()),
+          );
+          final navigator = Navigator.of(tester.element(find.byType(Scaffold)));
+          const key = Key('details-return-page');
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            routePushes++;
+            unawaited(
+              navigator.push<void>(
+                MaterialPageRoute(
+                  builder: (_) => const Form(key: key, child: SizedBox()),
+                ),
+              ),
+            );
+          });
+          await tester.pump();
+          expect(find.byKey(key), findsNothing);
+          captured = await adapter.captureJoinNativePageState(
+            tester: tester,
+            page: find.byKey(key),
+            waitUntilReady: waitUntilReady,
+          );
+          await waitUntilReady(() => controllerReady);
+        },
+      );
+      final reply = cache.cache.complete(
+        command,
+        const NativeTestCommandResult.effect(),
+      );
+      expect(reply.state, NativeTestCommandState.completed);
+      expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+      expect(cache.cache.takeNext(), isNull);
+      expect(routePushes, 1);
+      expect(captured!.mounted, isTrue);
+      expect(controllerReady, isTrue);
+      expect(f.owner.isValid, isTrue);
+      expect(
+        await tester.runAsync(
+          () => f.commands.detailsSyncHoldings(ownerSession: f.owner),
+        ),
+        verified,
+      );
+      expect(
+        await tester.runAsync(() => f.db.select(f.db.companyJobs).get()),
+        original,
+      );
+      expect(
+        cache.cache.submitJson(cache.request(2, deadline: 15000)).error,
+        NativeTestCommandError.deadlineExpired,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('deadline before details Save produces no signed mutation', (
+    tester,
+  ) async {
+    final f = (await tester.runAsync(NameFixture.create))!;
+    addTearDown(f.close);
+    await native.mount(tester, f);
+    var checks = 0;
+    await expectLater(
+      adapter.saveJobDetailsThroughNativeUi(
+        tester: tester,
+        jobId: f.createCommand.jobId,
+        text: {JobDetailField.notes: 'Must not save'},
+        tap: (target) => native.tap(tester, target),
+        waitUntilReady: (ready) => native.ready(tester, ready),
+        requireBeforeEffect: () {
+          checks++;
+          adapter.validateJoinNativeDeadline(checks < 4 ? 0 : 15000, 15000);
+        },
+      ),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    expect(checks, 4);
+    expect(
+      await tester.runAsync(() => f.db.select(f.db.companyJobDetails).get()),
+      isEmpty,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final lossBeforePush in [true, false]) {
+    test(
+      'details return refuses lifecycle loss ${lossBeforePush ? 'before push' : 'during completion'}',
+      () async {
+        var current = !lossBeforePush;
+        var routePushes = 0;
+        await expectLater(
+          adapter.completeJobDetailsNativeUiReturn(
+            isStillCurrent: () => current,
+            waitForCompletion: (_) async {},
+            mountPage: (_) async {
+              routePushes++;
+              current = false;
+            },
+          ),
+          throwsA(isA<NativeTestFailure>()),
+        );
+        expect(routePushes, lossBeforePush ? 0 : 1);
+      },
+    );
+  }
+
+  test('details return preserves controller readiness failure', () async {
+    var elapsed = 20000;
+    var routePushes = 0;
+    await expectLater(
+      adapter.completeJobDetailsNativeUiReturn(
+        isStillCurrent: () => true,
+        waitForCompletion: (ready) => adapter.waitForJoinNativeCompletion(
+          ready: ready,
+          elapsedMillis: () => elapsed,
+          commandDeadlineMillis: 15000,
+          pump: () async => elapsed += 180000,
+        ),
+        mountPage: (waitUntilReady) async {
+          routePushes++;
+          await waitUntilReady(() => false);
+        },
+      ),
+      throwsA(anything),
+    );
+    expect(routePushes, 1);
+  });
+
   testWidgets(
     'native details helper edits only target section and keeps creation/name bytes',
     (tester) async {
@@ -41,10 +236,7 @@ void main() {
       await adapter.saveJobDetailsThroughNativeUi(
         tester: tester,
         jobId: f.createCommand.jobId,
-        text: {
-          JobDetailField.customer: 'Acme',
-          JobDetailField.notes: null,
-        },
+        text: {JobDetailField.customer: 'Acme', JobDetailField.notes: null},
         status: CompanyJobStatus.archived,
         tap: (target) => native.tap(tester, target),
         waitUntilReady: (predicate) => native.ready(tester, predicate),

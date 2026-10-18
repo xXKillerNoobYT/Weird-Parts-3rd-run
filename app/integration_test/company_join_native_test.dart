@@ -42,7 +42,7 @@ const joinNativeRun = 'j60-join-v10';
 const createdJobNativeRun = 'j61-created-v19';
 const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
-const jobDetailsNativeRun = 'j116-details-v2';
+const jobDetailsNativeRun = 'j116-details-v3';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
 const _detailsManifestPath = String.fromEnvironment(
   'COMPANY_JOB_DETAILS_NATIVE_MANIFEST',
@@ -128,6 +128,19 @@ Future<State> captureJoinNativePageState({
 }) async {
   await waitUntilReady(() => page.evaluate().length == 1);
   return tester.state(page);
+}
+
+Future<void> completeJobDetailsNativeUiReturn({
+  required bool Function() isStillCurrent,
+  required Future<void> Function(
+    Future<void> Function(bool Function()) waitUntilReady,
+  )
+  mountPage,
+  required Future<void> Function(bool Function()) waitForCompletion,
+}) async {
+  _require(isStillCurrent());
+  await mountPage(waitForCompletion);
+  _require(isStillCurrent());
 }
 
 Future<void> waitForJoinNativeSignInReady({
@@ -3274,7 +3287,12 @@ final class _JoinNative with WidgetsBindingObserver {
       finished = true;
       return const NativeTestCommandResult.effect();
     }
-    await mountJoinPage();
+    await completeJobDetailsNativeUiReturn(
+      isStillCurrent: lifecycleCurrent,
+      mountPage: (waitUntilReady) =>
+          mountJoinPage(waitUntilReady: waitUntilReady),
+      waitForCompletion: waitForPassiveCompletion,
+    );
     _require(savedPair == null && syncUiState == CreatedJobNativeUiState.idle);
     return const NativeTestCommandResult.effect();
   }
@@ -3559,7 +3577,10 @@ final class _JoinNative with WidgetsBindingObserver {
     });
   }
 
-  Future<void> mountJoinPage() async {
+  Future<void> mountJoinPage({
+    Future<void> Function(bool Function())? waitUntilReady,
+  }) async {
+    final waitForReady = waitUntilReady ?? wait;
     stage = 'join-page';
     savedPair = null;
     final pageEpoch = ++joinPageEpoch;
@@ -3611,6 +3632,7 @@ final class _JoinNative with WidgetsBindingObserver {
         ),
       );
       final navigator = Navigator.of(tester.element(find.byType(Scaffold)));
+      if (waitUntilReady != null) _require(lifecycleCurrent());
       unawaited(
         navigator.push<bool>(MaterialPageRoute(builder: (_) => page())).then((
           _,
@@ -3628,10 +3650,10 @@ final class _JoinNative with WidgetsBindingObserver {
     _pageState = await captureJoinNativePageState(
       tester: tester,
       page: find.byType(CompanyJoinPage),
-      waitUntilReady: wait,
+      waitUntilReady: waitForReady,
     );
     stage = 'join-page-wait-controller';
-    await wait(() => controller != null && view.running);
+    await waitForReady(() => controller != null && view.running);
     stage = 'join-page-ready';
   }
 

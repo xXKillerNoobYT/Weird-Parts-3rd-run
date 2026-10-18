@@ -241,7 +241,7 @@ either first launch. Preserve `j61-created-v19`, its source, stores and evidence
 
 Require `COMPANY_JOIN_NATIVE_MODE=true`, `COMPANY_CREATED_JOB_NATIVE_MODE=true`,
 `COMPANY_JOB_DETAILS_NATIVE_MODE=true`, `COMPANY_JOB_NAME_NATIVE_MODE=false`,
-`COMPANY_JOIN_NATIVE_RUN=j116-details-v2`, the ordinary role/source/tree/adapter
+`COMPANY_JOIN_NATIVE_RUN=j116-details-v3`, the ordinary role/source/tree/adapter
 defines, and `COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION` equal to the new source
 revision. Details mode requires schema 10 and a separate synthetic details custody
 namespace. The old recovery-manifest defines must be absent.
@@ -256,7 +256,7 @@ rejects symlinks, unexpected files, missing required product/adapter files and
 hash differences. Product, build and binary qualification remains an external gate.
 
 The manifest has exactly `format: 1`, `kind: j116.details.source@1`,
-`run: j116-details-v2`, `revision`, `tree`, `adapterSha256`, `productRevision`, and
+`run: j116-details-v3`, `revision`, `tree`, `adapterSha256`, `productRevision`, and
 `sourceLfSha256`. `COMPANY_JOB_DETAILS_NATIVE_MANIFEST_SHA256` is SHA-256 of its
 exact raw immutable bytes, bounded to 65536 bytes and decoded from the same verified
 buffer. The adapter hash equals its LF-normalized entry in the source map. Generate
@@ -285,6 +285,15 @@ Run the mixed 1/1 exchange and its 0/0 repeat before invoking a UI inspection,
 because each UI step stops the LAN controller, signs in through the production
 gate and returns to a fresh Pair page. Every save verifies its signed changed
 field set, captured parents, resolution flags and immutable creation/name bytes.
+For a non-checkpoint details step, the final return to Nearby completes the
+already-admitted UI step. It uses the existing bounded passive wait for route
+build, State capture and controller readiness, even if the original command
+deadline elapsed during saved-history verification. Lifecycle must remain current
+before the route push and after completion. This starts discovery only: fresh
+Pair, authentication and explicit Enable remain required before company exchange.
+Save, Pair, Match, Verify and Enable retain their original deadline guards. Keep
+the exact command wire while its result is UNKNOWN; late completion does not
+authorize a second save or a replacement command.
 An uncertain save fails the command and retains the production pending editor;
 the adapter never retries or abandons it automatically. `finish` keeps its original
 enrollment and Close/drain transitions; details completion uses the explicit
@@ -306,6 +315,10 @@ separate gates. This does not establish mesh, mobile, OS reboot or general power
 recovery.
 
 ### Same-v2 interrupted creation baseline
+
+This section records the retired v2 recovery contract. The current fresh v3 run
+does not adopt v2 roots, failed commands, signed edits or cold copies as accepted
+evidence; preserve those artifacts separately. No new recovery contract is added.
 
 The new `COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY` path and
 `COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY_SHA256` admit only the audited
