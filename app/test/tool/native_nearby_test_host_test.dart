@@ -147,6 +147,9 @@ final class Fixture {
         jobNameStep: action == NativeTestAction.jobNameUi
             ? NativeJobNameUiStep.inspect
             : null,
+        jobDetailsStep: action == NativeTestAction.jobDetailsUi
+            ? NativeJobDetailsUiStep.inspect
+            : null,
       ),
     ),
   });

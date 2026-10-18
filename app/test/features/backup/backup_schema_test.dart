@@ -23,10 +23,12 @@ void main() {
     'company_job_peer_acks',
     'company_job_names',
     'company_job_name_peer_acks',
+    'company_job_details',
+    'company_job_detail_peer_acks',
   ]) {
     for (final malformed in ['missing', 'wrong columns']) {
       test(
-        'schema8 $malformed $table refuses backup before file mutation',
+        'current schema $malformed $table refuses backup before file mutation',
         () async {
           final dir = Directory.systemTemp.createTempSync('join-schema-file-');
           addTearDown(() => dir.deleteSync(recursive: true));
@@ -69,6 +71,8 @@ void main() {
         'company_job_peer_acks',
         'company_job_names',
         'company_job_name_peer_acks',
+        'company_job_details',
+        'company_job_detail_peer_acks',
       ]) {
         raw.execute('DROP TABLE $table');
       }
@@ -101,6 +105,8 @@ void main() {
       'company_job_peer_acks',
       'company_job_names',
       'company_job_name_peer_acks',
+      'company_job_details',
+      'company_job_detail_peer_acks',
     ]) {
       old.execute('DROP TABLE $table');
     }
@@ -207,6 +213,8 @@ void main() {
       'company_job_peer_acks',
       'company_job_names',
       'company_job_name_peer_acks',
+      'company_job_details',
+      'company_job_detail_peer_acks',
     ]) {
       await source.customStatement('DROP TABLE $table');
     }

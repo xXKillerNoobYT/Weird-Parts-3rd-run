@@ -640,6 +640,8 @@ void main() {
       'company_job_peer_acks',
       'company_job_names',
       'company_job_name_peer_acks',
+      'company_job_details',
+      'company_job_detail_peer_acks',
     ]) {
       raw.execute('DROP TABLE $table');
     }
@@ -670,10 +672,12 @@ void main() {
       await legacy.close();
     }
   });
-  test('actual schema7 pending local Create migrates to9 and returns its original sealed receipt', () async {
+  test('actual schema7 pending local Create migrates to10 and returns its original sealed receipt', () async {
     await db.customStatement('DROP TABLE company_job_peer_acks');
     await db.customStatement('DROP TABLE company_job_names');
     await db.customStatement('DROP TABLE company_job_name_peer_acks');
+    await db.customStatement('DROP TABLE company_job_details');
+    await db.customStatement('DROP TABLE company_job_detail_peer_acks');
     await db.customStatement('PRAGMA user_version = 7');
     final action = command(name: 'Created while schema7 is active');
     await expectLater(

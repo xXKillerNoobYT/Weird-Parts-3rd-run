@@ -142,6 +142,7 @@ final class CompanyJobView {
     this.baseJob,
     this.creationDigest,
     List<_NameOperation> operations,
+    this.details,
   ) {
     final referenced = operations
         .expand((op) => op.command.observedHeads)
@@ -192,6 +193,7 @@ final class CompanyJobView {
     lastAgreedName = resolvedName ?? agreed;
   }
   final Job baseJob;
+  final CompanyJobDetailsView details;
   final String creationDigest;
   late final List<String> nameHeads;
   late final List<CompanyJobNameCandidate> candidates;
@@ -623,6 +625,11 @@ extension CompanyJobNameCommands on CompanyJobCommands {
   }
 
   Future<void> _nameCapacity(RenameJob command) async {
+    try {
+      await _mutableJobCapacity(command.companyId, command.jobId);
+    } on CompanyJobDetailsCapacityRefusal {
+      throw const CompanyJobNameCapacityRefusal.history();
+    }
     final rows =
         await (_db.select(_db.companyJobNames)
               ..where((t) => t.companyId.equals(command.companyId))
@@ -782,6 +789,7 @@ extension CompanyJobNameCommands on CompanyJobCommands {
   }) async {
     final jobs = await listJobs(ownerSession: ownerSession);
     final names = await nameSyncHoldings(ownerSession: ownerSession);
+    final details = await detailsSyncHoldings(ownerSession: ownerSession);
     final result = <CompanyJobView>[];
     for (final job in jobs) {
       final base = await (_db.select(
@@ -799,6 +807,17 @@ extension CompanyJobNameCommands on CompanyJobCommands {
                 ),
               )
               .toList(),
+          CompanyJobDetailsView._(
+            job,
+            details
+                .where((r) => r.jobId == job.id)
+                .map(
+                  (r) => _DetailsOperation.parse(
+                    Uint8List.fromList(utf8.encode(r.operationBytes)),
+                  ),
+                )
+                .toList(),
+          ),
         ),
       );
     }

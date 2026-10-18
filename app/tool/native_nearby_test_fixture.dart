@@ -82,7 +82,8 @@ void _validateExistingDatabase(File file, String deviceId) {
         version != 6 &&
         version != 7 &&
         version != 8 &&
-        version != 9) {
+        version != 9 &&
+        version != 10) {
       rejectNativeTest('fixture-rejected');
     }
     final tables = db
@@ -97,6 +98,7 @@ void _validateExistingDatabase(File file, String deviceId) {
       if (version >= 7) ..._schema7Columns,
       if (version >= 8) ..._schema8Columns,
       if (version >= 9) ..._schema9Columns,
+      if (version >= 10) ..._schema10Columns,
     };
     if (tables.length != expectedTables.length ||
         !tables.containsAll(expectedTables.keys)) {
@@ -114,7 +116,11 @@ void _validateExistingDatabase(File file, String deviceId) {
             entry.key != 'app_settings')
           ..._syncColumns,
       };
-      if (!columns.containsAll(expected)) rejectNativeTest('fixture-rejected');
+      if (!columns.containsAll(expected) ||
+          (_schema10Columns.containsKey(entry.key) &&
+              columns.length != expected.length)) {
+        rejectNativeTest('fixture-rejected');
+      }
     }
     for (final table in {
       ..._companyColumns.keys,
@@ -123,6 +129,7 @@ void _validateExistingDatabase(File file, String deviceId) {
       if (version >= 7) ..._schema7Columns.keys,
       if (version >= 8) ..._schema8Columns.keys,
       if (version >= 9) ..._schema9Columns.keys,
+      if (version >= 10) ..._schema10Columns.keys,
     }.where(tables.contains)) {
       if (db.select('SELECT 1 FROM "$table" LIMIT 1').isNotEmpty) {
         rejectNativeTest('fixture-rejected');
@@ -211,6 +218,7 @@ const _schema5Columns = {
 const _schema7Columns = companyJoinTableColumns;
 const _schema8Columns = companySyncTableColumns;
 const _schema9Columns = companyNameTableColumns;
+const _schema10Columns = companyDetailsTableColumns;
 
 const _schema6Columns = {
   'company_jobs': {
@@ -369,7 +377,8 @@ final class NativeFixtureSnapshot {
           version != 6 &&
           version != 7 &&
           version != 8 &&
-          version != 9) {
+          version != 9 &&
+          version != 10) {
         rejectNativeTest('fixture-rejected');
       }
       final names =
@@ -388,10 +397,23 @@ final class NativeFixtureSnapshot {
         if (version >= 7) ..._schema7Columns.keys,
         if (version >= 8) ..._schema8Columns.keys,
         if (version >= 9) ..._schema9Columns.keys,
+        if (version >= 10) ..._schema10Columns.keys,
       };
       if (names.length != expectedNames.length ||
           !names.containsAll(expectedNames)) {
         rejectNativeTest('fixture-rejected');
+      }
+      if (version >= 10) {
+        for (final entry in _schema10Columns.entries) {
+          final columns =
+              (await db.customSelect('PRAGMA table_info("${entry.key}")').get())
+                  .map((row) => row.read<String>('name'))
+                  .toSet();
+          if (columns.length != entry.value.length ||
+              !columns.containsAll(entry.value)) {
+            rejectNativeTest('fixture-rejected');
+          }
+        }
       }
       for (final table in {
         ..._companyColumns.keys,
@@ -400,6 +422,7 @@ final class NativeFixtureSnapshot {
         if (version >= 7) ..._schema7Columns.keys,
         if (version >= 8) ..._schema8Columns.keys,
         if (version >= 9) ..._schema9Columns.keys,
+        if (version >= 10) ..._schema10Columns.keys,
       }.where(names.contains)) {
         if ((await db.customSelect('SELECT 1 FROM "$table" LIMIT 1').get())
             .isNotEmpty) {
@@ -416,6 +439,7 @@ final class NativeFixtureSnapshot {
         if (version < 7 && _schema7Columns.containsKey(name)) continue;
         if (version < 8 && _schema8Columns.containsKey(name)) continue;
         if (version < 9 && _schema9Columns.containsKey(name)) continue;
+        if (version < 10 && _schema10Columns.containsKey(name)) continue;
         final order = table.$primaryKey
             .map((column) => '"${column.$name}"')
             .join(',');

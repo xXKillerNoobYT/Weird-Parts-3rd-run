@@ -230,3 +230,77 @@ It never prints the expectation or opens the live installation, and it deletes
 only its own scratch directory. Tests prove accepted/rejected preparation leaves
 archive bytes unchanged. Reopening and deriving both sides from that reopened
 state would be self-comparison and must not count as restart proof.
+
+## Isolated Job details acceptance, issue #116 under #61
+
+This extension uses `integration_test/company_join_native_test.dart`, the existing
+resident RPC, guarded native taps, fresh PIN sign-in, Pair/Match, mutual Verify,
+both explicit Enables, Sync Now, and safe Close/drain/retry. It does not coordinate
+hosts. Qualify both native artifacts against the reviewed frozen source before
+either first launch. Preserve `j61-created-v19`, its source, stores and evidence.
+
+Require `COMPANY_JOIN_NATIVE_MODE=true`, `COMPANY_CREATED_JOB_NATIVE_MODE=true`,
+`COMPANY_JOB_DETAILS_NATIVE_MODE=true`, `COMPANY_JOB_NAME_NATIVE_MODE=false`,
+`COMPANY_JOIN_NATIVE_RUN=j116-details-v1`, the ordinary role/source/tree/adapter
+defines, and `COMPANY_CREATED_JOB_NATIVE_PRODUCT_REVISION` equal to the new source
+revision. Details mode requires schema 10 and a separate synthetic details custody
+namespace. The old recovery-manifest defines must be absent.
+
+`COMPANY_JOB_DETAILS_NATIVE_MANIFEST` points to a frozen manifest readable inside
+the app sandbox. Its sibling `source/` contains the frozen source copies, using
+repository-relative paths. No entitlement change or access to the live checkout
+is needed. The exact source inventory is `sourceLfSha256`, a map of relative paths
+to SHA-256 of UTF-8 text with CRLF normalized to LF. Copy all reviewed app/lib and
+app/tool Dart files, this adapter, app/pubspec.yaml and app/pubspec.lock. The bundle
+rejects symlinks, unexpected files, missing required product/adapter files and
+hash differences. Product, build and binary qualification remains an external gate.
+
+The manifest has exactly `format: 1`, `kind: j116.details.source@1`,
+`run: j116-details-v1`, `revision`, `tree`, `adapterSha256`, `productRevision`, and
+`sourceLfSha256`. `COMPANY_JOB_DETAILS_NATIVE_MANIFEST_SHA256` is SHA-256 of its
+exact raw immutable bytes, bounded to 65536 bytes and decoded from the same verified
+buffer. The adapter hash equals its LF-normalized entry in the source map. Generate
+deterministic JSON once after freeze, then move the same bytes and source bundle
+inside the sandbox without rewriting them. Paths and hashes never authorize changes
+to a retained fixture or a new product revision.
+
+The sole new wire action is `jobDetailsUi`, with exactly one `step` argument.
+No field/value/script arguments are accepted. These finite steps use a shared,
+deterministically selected Job after both original Jobs have synced:
+
+| Step | Required state and effect |
+| --- | --- |
+| `inspect` | Zero details operations; save each device's shared Job and immutable creation/name baseline. |
+| `editMixedOffline` | Zero details operations; owner uses the real editor for customer Acme/status archived; member saves notes Gate 3 on the same Job. |
+| `inspectMixed` | Two typed operations, Acme/archived/Gate 3, no field conflict. |
+| `checkpointMixed` | Same state after actual 1/1 then 0/0 complete results on the same Pair page within 300000 ms; save a locked cold checkpoint. |
+| `editNotesOffline` | Two operations; each device saves its distinct synthetic notes through its real editor. |
+| `inspectConflict` | Four operations, two visibly attributed notes alternatives and last agreed Gate 3. |
+| `checkpointConflict` | Same state after completed sync; save unresolved cold checkpoint. |
+| `resolveNotes` | Owner selects an actual notes candidate and saves only that field; preserves all other field frontiers. |
+| `inspectResolved` | Five operations, resolved notes, unchanged Acme/archived fields. |
+| `checkpointResolved` | Same state after completed sync; save resolved cold checkpoint. |
+
+Run the mixed 1/1 exchange and its 0/0 repeat before invoking a UI inspection,
+because each UI step stops the LAN controller, signs in through the production
+gate and returns to a fresh Pair page. Every save verifies its signed changed
+field set, captured parents, resolution flags and immutable creation/name bytes.
+An uncertain save fails the command and retains the production pending editor;
+the adapter never retries or abandons it automatically. `finish` keeps its original
+enrollment and Close/drain transitions; details completion uses the explicit
+checkpoint steps. Cancellation evidence keeps actual confirmed counts and requires
+fresh Pair and history reverification before continuing.
+
+Checkpoint filenames are immutable `join-details-checkpoint-PID-SEQUENCE.json`.
+After normal native quit, relaunch with `COMPANY_JOB_DETAILS_NATIVE_CHECKPOINT`
+and `COMPANY_JOB_DETAILS_NATIVE_CHECKPOINT_SHA256`, the exact raw checkpoint byte
+hash. No existing details root is admitted without this explicit checkpoint.
+Admission checks schema 10 and a read-only SQL hash before opening custody/Drift.
+Saved protected bytes/revisions compare before legitimate PIN sign-in, which itself
+advances custody revisions. Typed creation/name/details receipts, all three family
+ACKs, original bytes, identity and derived views compare after sign-in, before any
+Nearby controller is created. Cold readback writes a separate evidence file and
+allows the next bounded stage. All checkpoint records retain `passed: false`;
+cross-device native acceptance, process quit, source review, CI and merge remain
+separate gates. This does not establish mesh, mobile, OS reboot or general power-loss
+recovery.

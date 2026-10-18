@@ -19,6 +19,20 @@ enum NativeTestAction {
   finish,
   normalExit,
   jobNameUi,
+  jobDetailsUi,
+}
+
+enum NativeJobDetailsUiStep {
+  inspect,
+  editMixedOffline,
+  inspectMixed,
+  checkpointMixed,
+  editNotesOffline,
+  inspectConflict,
+  checkpointConflict,
+  resolveNotes,
+  inspectResolved,
+  checkpointResolved,
 }
 
 enum NativeJobNameUiStep {
@@ -76,6 +90,7 @@ final class NativeTestCommand {
     this.leg,
     this.snapshotStage,
     this.jobNameStep,
+    this.jobDetailsStep,
   });
 
   final String epoch, commandId, contentHash;
@@ -86,6 +101,7 @@ final class NativeTestCommand {
   final int? leg;
   final PrivateSnapshotStage? snapshotStage;
   final NativeJobNameUiStep? jobNameStep;
+  final NativeJobDetailsUiStep? jobDetailsStep;
 
   static NativeTestCommand parseRequest(String source, TestSession session) {
     try {
@@ -113,13 +129,19 @@ final class NativeTestCommand {
     int? leg,
     PrivateSnapshotStage? snapshotStage,
     NativeJobNameUiStep? jobNameStep,
+    NativeJobDetailsUiStep? jobDetailsStep,
   }) {
+    if ((jobNameStep != null && action != NativeTestAction.jobNameUi) ||
+        (jobDetailsStep != null && action != NativeTestAction.jobDetailsUi)) {
+      _reject(NativeTestCommandError.invalidRequest);
+    }
     final arguments = <String, Object>{
       if (comparison != null) 'comparison': comparison.toJson(),
       if (grant != null) 'grant': grant.toJson(),
       'leg': ?leg,
       if (snapshotStage != null) 'stage': snapshotStage.wireName,
       if (jobNameStep != null) 'step': jobNameStep.name,
+      if (jobDetailsStep != null) 'step': jobDetailsStep.name,
     };
     final request = <String, Object>{
       'epoch': session.epoch,
@@ -568,6 +590,7 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
   int? leg;
   PrivateSnapshotStage? snapshotStage;
   NativeJobNameUiStep? jobNameStep;
+  NativeJobDetailsUiStep? jobDetailsStep;
   final arguments = m['arguments'];
   if (kind == NativeTestAction.observe &&
       arguments is Map<String, dynamic> &&
@@ -594,6 +617,13 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
     final steps = NativeJobNameUiStep.values.where((v) => v.name == a['step']);
     if (steps.length != 1) _reject(NativeTestCommandError.invalidRequest);
     jobNameStep = steps.single;
+  } else if (kind == NativeTestAction.jobDetailsUi) {
+    final a = nativeTestMap(arguments, {'step'});
+    final steps = NativeJobDetailsUiStep.values.where(
+      (v) => v.name == a['step'],
+    );
+    if (steps.length != 1) _reject(NativeTestCommandError.invalidRequest);
+    jobDetailsStep = steps.single;
   } else {
     nativeTestMap(arguments, {});
   }
@@ -609,5 +639,6 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
     leg: leg,
     snapshotStage: snapshotStage,
     jobNameStep: jobNameStep,
+    jobDetailsStep: jobDetailsStep,
   );
 }

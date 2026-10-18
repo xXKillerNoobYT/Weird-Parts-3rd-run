@@ -51,6 +51,9 @@ final class Fixture {
     jobNameStep: action == NativeTestAction.jobNameUi
         ? jobNameStep ?? NativeJobNameUiStep.inspect
         : jobNameStep,
+    jobDetailsStep: action == NativeTestAction.jobDetailsUi
+        ? NativeJobDetailsUiStep.inspect
+        : null,
   );
 
   NativeTestCommand finish(int sequence) {

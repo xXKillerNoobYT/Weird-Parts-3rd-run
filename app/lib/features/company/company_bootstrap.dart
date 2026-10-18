@@ -41,6 +41,8 @@ final class CompanyBootstrap {
       'company_job_peer_acks',
       'company_job_names',
       'company_job_name_peer_acks',
+      'company_job_details',
+      'company_job_detail_peer_acks',
       'job_lines',
       'order_splits',
       'company_bootstrap_witnesses',

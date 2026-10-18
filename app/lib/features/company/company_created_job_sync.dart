@@ -41,14 +41,47 @@ final class CompanyJobSyncAvailability implements NearbyCompanyDisclosure {
 }
 
 const _syncKind = 'created-jobs';
-const _syncProtocol = 'company.job.sync@2';
+const _syncProtocol = 'company.job.sync@3';
 const _syncAckDomain = 'wiredpart.company.job.create.ack@1:';
 const _nameSyncAckDomain = 'wiredpart.company.job.name.ack@1:';
-String _ackDomain(Map<String, Object?> d) =>
-    d['kind'] == 'job.name.set@1' ? _nameSyncAckDomain : _syncAckDomain;
-String _ackKind(Map<String, Object?> d) => d['kind'] == 'job.name.set@1'
-    ? 'company.job.name.ack@1'
-    : 'company.job.create.ack@1';
+const _detailsSyncAckDomain = 'wiredpart.company.job.details.ack@1:';
+({String prefix, String table, String ackKind, String domain, String contract})
+_jobFamily(Object? kind) => switch (kind) {
+  null => (
+    prefix: '',
+    table: 'company_job_peer_acks',
+    ackKind: 'company.job.create.ack@1',
+    domain: _syncAckDomain,
+    contract: 'job.create@1',
+  ),
+  'job.name.set@1' => (
+    prefix: 'name/',
+    table: 'company_job_name_peer_acks',
+    ackKind: 'company.job.name.ack@1',
+    domain: _nameSyncAckDomain,
+    contract: 'job.name.set@1',
+  ),
+  'job.details.patch@1' => (
+    prefix: 'details/',
+    table: 'company_job_detail_peer_acks',
+    ackKind: 'company.job.details.ack@1',
+    domain: _detailsSyncAckDomain,
+    contract: 'job.details.patch@1',
+  ),
+  _ => throw const CompanyBootstrapRefusal('Unsupported Job operation family'),
+};
+String _ackDomain(Map<String, Object?> d) => _jobFamily(d['kind']).domain;
+String _ackKind(Map<String, Object?> d) => _jobFamily(d['kind']).ackKind;
+Map<String, Object?> _detailsDescriptorFields(Uint8List bytes) {
+  final command = PatchJobDetails.fromOperationBytes(bytes);
+  return {
+    'kind': 'job.details.patch@1',
+    'creation': command.creationDigest,
+    'fields': command.observedHeads.keys.map((f) => f.name).toList()..sort(),
+    'parents': command.parentUnion,
+  };
+}
+
 const kCreatedJobSyncChunkBytes = 24 * 1024;
 
 final class CreatedJobTransferBuffer {
@@ -100,7 +133,7 @@ String _syncDigest(Object? value) => _joinDigest(value);
 String _syncBytesDigest(List<int> bytes) =>
     hashes.sha256.convert(bytes).toString();
 String _descriptorKey(Map<String, Object?> descriptor) =>
-    '${descriptor['kind'] == 'job.name.set@1' ? 'name/' : ''}${descriptor['origin']}/${descriptor['request']}';
+    '${_jobFamily(descriptor['kind']).prefix}${descriptor['origin']}/${descriptor['request']}';
 
 ({String operationBytes, String receiptBytes}) _recordBytes(Object row) =>
     switch (row) {
@@ -109,6 +142,10 @@ String _descriptorKey(Map<String, Object?> descriptor) =>
         receiptBytes: r.receiptBytes,
       ),
       CompanyJobName r => (
+        operationBytes: r.operationBytes,
+        receiptBytes: r.receiptBytes,
+      ),
+      CompanyJobDetail r => (
         operationBytes: r.operationBytes,
         receiptBytes: r.receiptBytes,
       ),
@@ -131,6 +168,13 @@ Map<String, Object?> _jobDescriptor(Object row) {
       r.operationCommitment,
       r.commandCommitment,
     ),
+    CompanyJobDetail r => (
+      r.originGeneration,
+      r.requestId,
+      r.jobId,
+      r.operationCommitment,
+      r.commandCommitment,
+    ),
     _ => throw const CompanyBootstrapRefusal('Unsupported Job record'),
   };
   final bytes = _recordBytes(row).operationBytes;
@@ -141,6 +185,8 @@ Map<String, Object?> _jobDescriptor(Object row) {
       'creation': body['creation'],
       'parents': body['parents'],
     },
+    if (row is CompanyJobDetail)
+      ..._detailsDescriptorFields(Uint8List.fromList(utf8.encode(bytes))),
     'origin': origin,
     'request': request,
     'job': job,
@@ -154,9 +200,13 @@ Map<String, Object?> _jobDescriptor(Object row) {
 }
 
 Map<String, Object?> _parseDescriptor(Object? value) {
-  final name = value is Map && value['kind'] == 'job.name.set@1';
+  final kind = value is Map ? value['kind'] : null;
+  _jobFamily(kind);
+  final mutable = kind != null;
+  final details = kind == 'job.details.patch@1';
   final result = _joinObject(value, {
-    if (name) ...{'kind', 'creation', 'parents'},
+    if (mutable) ...{'kind', 'creation', 'parents'},
+    if (details) 'fields',
     'origin',
     'request',
     'job',
@@ -173,7 +223,7 @@ Map<String, Object?> _parseDescriptor(Object? value) {
   for (final key in ['operation', 'command', 'digest']) {
     _joinHash(result[key]);
   }
-  if (name) {
+  if (mutable) {
     _joinHash(result['creation']);
     final parents = result['parents'];
     if (parents is! List ||
@@ -187,6 +237,20 @@ Map<String, Object?> _parseDescriptor(Object? value) {
     final sorted = [...parents.cast<String>()]..sort();
     if (_securityCanonical(sorted) != _securityCanonical(parents)) {
       throw const CompanyBootstrapRefusal('Noncanonical name parents');
+    }
+  }
+  if (details) {
+    final fields = result['fields'];
+    if (fields is! List ||
+        fields.isEmpty ||
+        fields.length > 5 ||
+        fields.toSet().length != fields.length ||
+        fields.any((f) => !JobDetailField.values.any((v) => v.name == f))) {
+      throw const CompanyBootstrapRefusal('Invalid details descriptor fields');
+    }
+    final sorted = [...fields.cast<String>()]..sort();
+    if (_securityCanonical(sorted) != _securityCanonical(fields)) {
+      throw const CompanyBootstrapRefusal('Noncanonical details fields');
     }
   }
   if (result['length'] is! int ||
@@ -488,6 +552,7 @@ final class CompanyCreatedJobSync {
     final records = <Object>[
       ...await commands.syncHoldings(ownerSession: owner),
       ...await commands.nameSyncHoldings(ownerSession: owner),
+      ...await commands.detailsSyncHoldings(ownerSession: owner),
     ];
     final peers = await CompanyPeerAuthentication(enrollment: enrollment)
         .retainedPeers(session: owner);
@@ -503,10 +568,9 @@ final class CompanyCreatedJobSync {
           .add(entry.key);
     }
     final confirmed = <String, Map<String, Set<String>>>{};
-    for (final name in [false, true]) {
-      final table = name
-          ? 'company_job_name_peer_acks'
-          : 'company_job_peer_acks';
+    for (final kind in [null, 'job.name.set@1', 'job.details.patch@1']) {
+      final family = _jobFamily(kind);
+      final table = family.table;
       final rows = await enrollment.db
           .customSelect(
             'SELECT * FROM $table WHERE company_id = ? LIMIT 65537',
@@ -522,7 +586,7 @@ final class CompanyCreatedJobSync {
         final peer = row.read<String>('peer_device_id');
         final member = members[peer];
         final key =
-            '${name ? 'name/' : ''}${row.read<String>('origin_generation')}/${row.read<String>('request_id')}';
+            '${family.prefix}${row.read<String>('origin_generation')}/${row.read<String>('request_id')}';
         final descriptor = descriptors[key];
         if (member == null || descriptor == null) continue;
         final bytes = row.read<String>('ack_bytes');
@@ -817,6 +881,7 @@ final class CompanyCreatedJobSync {
     final records = <Object>[
       ...await _commands.syncHoldings(ownerSession: availability.owner),
       ...await _commands.nameSyncHoldings(ownerSession: availability.owner),
+      ...await _commands.detailsSyncHoldings(ownerSession: availability.owner),
     ];
     _requireRun(run);
     final local = CreatedJobHoldingsInventory.local(records);
@@ -861,10 +926,9 @@ final class CompanyCreatedJobSync {
         _descriptorKey(_jobDescriptor(row)): _jobDescriptor(row),
     };
     final result = <String, String>{};
-    for (final name in [false, true]) {
-      final table = name
-          ? 'company_job_name_peer_acks'
-          : 'company_job_peer_acks';
+    for (final kind in [null, 'job.name.set@1', 'job.details.patch@1']) {
+      final family = _jobFamily(kind);
+      final table = family.table;
       final rows = await _db
           .customSelect(
             'SELECT * FROM $table WHERE company_id = ? AND peer_device_id = ? LIMIT 1025',
@@ -879,7 +943,7 @@ final class CompanyCreatedJobSync {
       }
       for (final row in rows) {
         final key =
-            '${name ? 'name/' : ''}${row.read<String>('origin_generation')}/${row.read<String>('request_id')}';
+            '${family.prefix}${row.read<String>('origin_generation')}/${row.read<String>('request_id')}';
         final descriptor = expected[key];
         if (descriptor == null ||
             row.read<String>('operation_digest') != descriptor['digest']) {
@@ -900,15 +964,23 @@ final class CompanyCreatedJobSync {
   Future<({String operationBytes, String receiptBytes})> _record(
     Map<String, Object?> descriptor,
   ) async {
-    final Object row = descriptor['kind'] == 'job.name.set@1'
-        ? await _commands.verifyNameSyncRecord(
-            descriptor['operation'] as String,
-            availability.owner,
-          )
-        : await _commands.verifySyncRecord(
-            descriptor['job'] as String,
-            availability.owner,
-          );
+    final Object row = switch (descriptor['kind']) {
+      null => await _commands.verifySyncRecord(
+        descriptor['job'] as String,
+        availability.owner,
+      ),
+      'job.name.set@1' => await _commands.verifyNameSyncRecord(
+        descriptor['operation'] as String,
+        availability.owner,
+      ),
+      'job.details.patch@1' => await _commands.verifyDetailsSyncRecord(
+        descriptor['operation'] as String,
+        availability.owner,
+      ),
+      _ => throw const CompanyBootstrapRefusal(
+        'Unsupported Job operation family',
+      ),
+    };
     if (_securityCanonical(_jobDescriptor(row)) !=
         _securityCanonical(descriptor)) {
       throw const CompanyBootstrapRefusal('Job changed after inventory');
@@ -988,9 +1060,7 @@ final class CompanyCreatedJobSync {
     final signed = _joinObject(raw, {'body', 'signature'});
     await _record(descriptor);
     await availability.requireCurrent();
-    final table = descriptor['kind'] == 'job.name.set@1'
-        ? 'company_job_name_peer_acks'
-        : 'company_job_peer_acks';
+    final table = _jobFamily(descriptor['kind']).table;
     await _db.transaction(() async {
       await _db.customStatement(
         'UPDATE app_settings SET value = value WHERE key = ?',
@@ -1047,6 +1117,7 @@ final class CompanyCreatedJobSync {
     final records = <Object>[
       ...await _commands.syncHoldings(ownerSession: availability.owner),
       ...await _commands.nameSyncHoldings(ownerSession: availability.owner),
+      ...await _commands.detailsSyncHoldings(ownerSession: availability.owner),
     ];
     _requireRun(run);
     final actual = {
@@ -1242,13 +1313,16 @@ final class CompanyCreatedJobSync {
     required CompanyJobSyncAvailability availability,
   }) {
     final body = (jsonDecode(utf8.decode(bytes)) as Map)['body'] as Map;
+    final family = _jobFamily(descriptor['kind']);
     final name = descriptor['kind'] == 'job.name.set@1';
+    final details = descriptor['kind'] == 'job.details.patch@1';
     final expected = {
       if (name) ...{
         'kind': 'job.name.set@1',
         'creation': body['creation'],
         'parents': body['parents'],
       },
+      if (details) ..._detailsDescriptorFields(bytes),
       'origin': body['generation'],
       'request': body['request'],
       'job': body['job'],
@@ -1259,23 +1333,32 @@ final class CompanyCreatedJobSync {
       'digest': _syncBytesDigest(bytes),
       'length': bytes.length,
     };
-    if (body['contract'] != (name ? 'job.name.set@1' : 'job.create@1') ||
+    if (body['contract'] != family.contract ||
         _securityCanonical(expected) != _securityCanonical(descriptor)) {
       throw const CompanyBootstrapRefusal(
         'Job payload differs from frozen descriptor',
       );
     }
-    return name
-        ? _commands.applyIncomingName(
-            bytes,
-            ownerSession: ownerSession,
-            availability: availability,
-          )
-        : _commands.applyIncomingCreate(
-            bytes,
-            ownerSession: ownerSession,
-            availability: availability,
-          );
+    return switch (descriptor['kind']) {
+      null => _commands.applyIncomingCreate(
+        bytes,
+        ownerSession: ownerSession,
+        availability: availability,
+      ),
+      'job.name.set@1' => _commands.applyIncomingName(
+        bytes,
+        ownerSession: ownerSession,
+        availability: availability,
+      ),
+      'job.details.patch@1' => _commands.applyIncomingDetails(
+        bytes,
+        ownerSession: ownerSession,
+        availability: availability,
+      ),
+      _ => throw const CompanyBootstrapRefusal(
+        'Unsupported Job operation family',
+      ),
+    };
   }
 
   List<Map<String, Object?>> _dependencyOrder() {
@@ -1294,7 +1377,7 @@ final class CompanyCreatedJobSync {
       if (!visiting.add(id)) {
         throw const CompanyBootstrapRefusal('Cyclic name history');
       }
-      if (d['kind'] == 'job.name.set@1') {
+      if (d['kind'] != null) {
         final creation = all.values
             .where((c) => c['kind'] == null && c['digest'] == d['creation'])
             .firstOrNull;
@@ -1309,7 +1392,7 @@ final class CompanyCreatedJobSync {
         for (final parent in d['parents'] as List) {
           final p = byOperation[parent];
           if (p == null ||
-              p['kind'] != 'job.name.set@1' ||
+              p['kind'] != d['kind'] ||
               p['creation'] != d['creation'] ||
               p['job'] != d['job']) {
             throw const CompanyBootstrapRefusal(
@@ -1354,7 +1437,7 @@ final class CompanyCreatedJobSync {
           !authoredBySender(d)) {
         continue;
       }
-      if (d['kind'] == 'job.name.set@1' &&
+      if (d['kind'] != null &&
           (!available.contains(creationKeys[d['creation']]) ||
               !(d['parents'] as List).every(
                 (parent) => available.contains(operationKeys[parent]),
