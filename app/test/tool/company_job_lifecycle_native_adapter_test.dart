@@ -305,6 +305,11 @@ void main() {
       () => validate(run: adapter.jobDetailsNativeRun),
       throwsA(isA<NativeTestFailure>()),
     );
+    expect(() => validate(run: 'j63-lifecycle-v2'), returnsNormally);
+    expect(
+      () => validate(run: 'j63-lifecycle-v1'),
+      throwsA(isA<NativeTestFailure>()),
+    );
     expect(
       () => validate(product: 'd' * 40),
       throwsA(isA<NativeTestFailure>()),

@@ -44,7 +44,7 @@ const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
 const jobDetailsNativeRun = 'j116-details-v3';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
-const jobLifecycleNativeRun = 'j63-lifecycle-v1';
+const jobLifecycleNativeRun = 'j63-lifecycle-v2';
 const jobLifecycleNativeProductRevision =
     'c82451e2081e9cb78ba26412511064c1b1b82e93';
 const _jobLifecycleMode = bool.fromEnvironment(
@@ -7245,7 +7245,9 @@ final class _JoinNative with WidgetsBindingObserver {
       originalJobHash = await jobHash();
       writeOnce('created-before-retained-pair-$pid.json', await snapshot());
       createdStage = _CreatedJobStage.retainedPeer;
-      await mountJoinPage();
+      await mountJoinPage(
+        waitUntilReady: _jobLifecycleMode ? waitForPassiveCompletion : null,
+      );
       writeOnce('created-retained-ready-$pid.json', {
         'encounterAlias': controller!.deviceId,
         'originalJobHistorySha256': originalJobHash,
