@@ -359,15 +359,41 @@ void main() {
       () => adapter.validateLifecyclePendingEpoch('new-random-epoch', pending),
       returnsNormally,
     );
+    const fixturePath = 'app/tool/native_nearby_test_fixture.dart';
+    const oldFixture =
+        '8c1b5c94e7043a5208f6b5e35b6c68acae94b23dbafaa15358adbdd7a093b21f';
+    const newFixture =
+        'd35601a1a609c58ecceef15b9009f312bb0e8738fe592df2343d05a43c3c8f4e';
     final previous = <String, dynamic>{
-      for (var i = 0; i < 95; i++) 'path-$i': digest('$i'),
+      for (var i = 0; i < 94; i++) 'path-$i': digest('$i'),
       'app/integration_test/company_join_native_test.dart': digest('old'),
+      fixturePath: oldFixture,
     };
     final current = {
       ...previous,
       'app/integration_test/company_join_native_test.dart': digest('new'),
     };
+    adapter.validateLifecyclePendingSourceLineage(previous, previous);
     adapter.validateLifecyclePendingSourceLineage(previous, current);
+    final patched = {...current, fixturePath: newFixture};
+    adapter.validateLifecyclePendingSourceLineage(previous, patched);
+    adapter.validateLifecyclePendingSourceLineage(patched, patched);
+    for (final (before, after) in [
+      ({...previous, fixturePath: digest('other old fixture')}, patched),
+      (previous, {...patched, fixturePath: digest('other new fixture')}),
+      (patched, previous),
+      (previous, {...patched, 'path-1': newFixture}),
+      ({...previous}..remove('path-1'), patched),
+      (
+        previous,
+        {...patched, 'other-path': patched['path-1']}..remove('path-1'),
+      ),
+    ]) {
+      expect(
+        () => adapter.validateLifecyclePendingSourceLineage(before, after),
+        throwsA(isA<NativeTestFailure>()),
+      );
+    }
     expect(
       () => adapter.validateLifecyclePendingSourceLineage(previous, {
         ...current,

@@ -4248,7 +4248,14 @@ void validateLifecyclePendingSourceLineage(Map previous, Map current) {
   );
   for (final key in previous.keys) {
     if (key != 'app/integration_test/company_join_native_test.dart') {
-      _require(previous[key] == current[key]);
+      _require(
+        previous[key] == current[key] ||
+            (key == 'app/tool/native_nearby_test_fixture.dart' &&
+                previous[key] ==
+                    '8c1b5c94e7043a5208f6b5e35b6c68acae94b23dbafaa15358adbdd7a093b21f' &&
+                current[key] ==
+                    'd35601a1a609c58ecceef15b9009f312bb0e8738fe592df2343d05a43c3c8f4e'),
+      );
     }
   }
 }

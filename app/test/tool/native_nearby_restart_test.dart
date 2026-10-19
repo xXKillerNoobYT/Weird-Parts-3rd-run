@@ -7,12 +7,12 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
 
-import '../../tool/nearby_lan_validation.dart';
 import '../../tool/nearby_lan_workspace.dart';
 import '../../tool/native_nearby_restart.dart';
 import '../../tool/native_nearby_test_crypto.dart';
 import '../../tool/native_nearby_test_commands.dart';
 import '../../tool/native_nearby_test_fixture.dart';
+import 'schema10_native_test_fixture.dart';
 
 void main() {
   late Directory temp;
@@ -61,7 +61,20 @@ void main() {
     db = AppDatabase.forTesting(
       NativeDatabase(File(p.join(workspace.support.path, kSqliteFileName))),
     );
-    await seedValidationShop(db, workspace);
+    await seedSchema10NativeFixture(db, workspace);
+    expect(
+      (await db.customSelect('PRAGMA user_version').getSingle())
+          .data
+          .values
+          .single,
+      10,
+    );
+    expect(
+      await db
+          .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .get(),
+      hasLength(32),
+    );
     await db.settingsDao.setSetting('editor_pin_hash', 'private-pin-canary');
     await db.customStatement('UPDATE jobs SET notes=notes||? WHERE id=?', [
       ' [native-nearby-test:leg1] [native-nearby-test:leg2]',
@@ -212,7 +225,7 @@ void main() {
         save();
         final before = bytes();
         final admitted = read();
-        if (entry.key == kAppSchemaVersion) {
+        if (entry.key == baseline.schemaVersion) {
           admitted.verify(baseline);
         } else {
           expect(
