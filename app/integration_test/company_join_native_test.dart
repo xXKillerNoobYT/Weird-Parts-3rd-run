@@ -2586,9 +2586,9 @@ void verifyDetailsMixedRecoveryDatabase(
   _require(detailsCount == 2 || detailsCount == 3);
   final profile = original.select('SELECT * FROM device_profiles').single;
   final current = db.select('SELECT * FROM device_profiles');
+  // Member enrollment assigns a company device ID independently of this profile.
   _require(
     current.length == 1 &&
-        profile['id'] == (evidence['identity'] as Map)['device'] &&
         _canonical(Map<String, Object?>.from(current.single)) ==
             _canonical(Map<String, Object?>.from(profile)),
   );

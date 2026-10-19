@@ -168,6 +168,91 @@ final class _BaselineInspectionFixture {
 }
 
 void main() {
+  test('cold profile preserves legacy ID distinct from company device and refuses rehashed profile changes', () {
+    final original = raw.sqlite3.openInMemory();
+    final current = raw.sqlite3.openInMemory();
+    addTearDown(original.dispose);
+    addTearDown(current.dispose);
+    const binding = 'synthetic installation binding';
+    for (final db in [original, current]) {
+      db.execute('PRAGMA user_version = 10');
+      db.execute(
+        'CREATE TABLE device_profiles (id TEXT, display_name TEXT, created_at INTEGER)',
+      );
+      db.execute('INSERT INTO device_profiles VALUES (?, ?, ?)', [
+        'legacy-profile',
+        'This device',
+        123,
+      ]);
+      db.execute('CREATE TABLE app_settings (key TEXT, value TEXT)');
+      db.execute('INSERT INTO app_settings VALUES (?, ?)', [
+        kInstallationBindingKey,
+        binding,
+      ]);
+      final counts = {
+        'jobs': 2,
+        'company_jobs': 2,
+        'company_job_peer_acks': 2,
+        'company_job_names': 0,
+        'company_job_name_peer_acks': 0,
+        'company_job_details': 3,
+        'company_job_detail_peer_acks': 2,
+        for (var i = 0; i < 23; i++) 'unchanged_$i': 0,
+      };
+      for (final entry in counts.entries) {
+        db.execute('CREATE TABLE "${entry.key}" (id TEXT)');
+        for (var i = 0; i < entry.value; i++) {
+          db.execute('INSERT INTO "${entry.key}" VALUES (?)', ['$i']);
+        }
+      }
+    }
+    String snapshot() => digest(
+      canonicalNameTest({
+        for (final row in current.select(
+          "SELECT name FROM sqlite_master WHERE type = 'table'",
+        ))
+          row['name'] as String:
+              current
+                  .select('SELECT * FROM "${row['name']}"')
+                  .map((r) => canonicalNameTest(Map<String, Object?>.from(r)))
+                  .toList()
+                ..sort(),
+      }),
+    );
+    void verify() => adapter.verifyDetailsMixedRecoveryDatabase(
+      current,
+      original: original,
+      detailsCount: 3,
+      evidence: {
+        'identity': {'device': 'company-membership-device'},
+        'sqlSha256': snapshot(),
+        'bindingSha256': digest(binding),
+      },
+    );
+    final before = snapshot();
+    expect(verify, returnsNormally);
+    expect(snapshot(), before);
+    for (final change in [
+      "UPDATE device_profiles SET id = 'changed-profile'",
+      "UPDATE device_profiles SET display_name = 'changed name'",
+      'UPDATE device_profiles SET created_at = 456',
+      'DELETE FROM device_profiles',
+    ]) {
+      current.execute(change);
+      final changed = snapshot();
+      expect(verify, throwsA(isA<NativeTestFailure>()));
+      expect(snapshot(), changed);
+      current.execute('DELETE FROM device_profiles');
+      current.execute('INSERT INTO device_profiles VALUES (?, ?, ?)', [
+        'legacy-profile',
+        'This device',
+        123,
+      ]);
+    }
+    expect(verify, returnsNormally);
+    expect(snapshot(), before);
+  });
+
   final checkpointBase = ProtectedInstallationState(
     '5c4a605b-97f6-4b6c-968e-d06050605017',
     Uint8List.fromList([1, 2, 3]),
