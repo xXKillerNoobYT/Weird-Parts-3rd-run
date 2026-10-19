@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
+import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/company/company_join_page.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
@@ -96,7 +97,7 @@ void main() {
     }, JoinLoopbackHttpOverrides()),
   );
   testWidgets(
-    'proof-only Verify then explicit availability allows one two-way Sync Now',
+    'reverification requires explicit Job availability before two-way Sync and repeat',
     (tester) => HttpOverrides.runWithHttpOverrides(() async {
       late JoinFixture f;
       late OwnerSession member;
@@ -131,8 +132,8 @@ void main() {
       final beforeB = await tester.runAsync(() => sqlSnapshot(f.bDb));
       await tester.binding.setSurfaceSize(const Size(1600, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final freezeEntered = Completer<void>();
-      final releaseFreeze = Completer<void>();
+      var freezeEntered = Completer<void>();
+      var releaseFreeze = Completer<void>();
       addTearDown(() {
         f.bStore.beforeRead = null;
         if (!releaseFreeze.isCompleted) releaseFreeze.complete();
@@ -174,7 +175,7 @@ void main() {
       );
       await tester.pumpWidget(connectedPeers());
       final peer = find.byKey(
-        ValueKey('company-peer-${f.owner.identity.deviceId}'),
+        ValueKey('company-peer-${member.identity.deviceId}'),
       );
       await joinWidgetSignal(tester, () => peer.evaluate().isNotEmpty);
       stdout.writeln('Job sync widget: retained peer rendered');
@@ -182,7 +183,7 @@ void main() {
       await tester.tap(peer);
       await tester.pump();
       await tester.runAsync(
-        () => tester.tap(find.byKey(const Key('company-peer-verify')).at(1)),
+        () => tester.tap(find.byKey(const Key('company-peer-verify')).at(0)),
       );
       final enable = find.byKey(const Key('company-jobs-enable-sync'));
       await joinWidgetSignal(
@@ -202,6 +203,79 @@ void main() {
             1,
         attempts: 1200,
       );
+      final oldAvailability =
+          a.companySyncDisclosure as CompanyJobSyncAvailability;
+      final aPair = a.pairedJoinSession;
+      final bPair = b.pairedJoinSession;
+      final reversePeer = find.byKey(
+        ValueKey('company-peer-${f.owner.identity.deviceId}'),
+      );
+      await tester.ensureVisible(reversePeer);
+      await tester.tap(reversePeer);
+      await tester.pump();
+      await tester.runAsync(
+        () => tester.tap(find.byKey(const Key('company-peer-verify')).at(1)),
+      );
+      await joinWidgetSignal(
+        tester,
+        () =>
+            tester
+                .widget<Text>(
+                  find.byKey(const Key('company-join-status')).at(1),
+                )
+                .data ==
+            'Trusted peer authenticated. Verification alone does not exchange Jobs.',
+        attempts: 1200,
+      );
+      expect(a.pairedJoinSession, same(aPair));
+      expect(b.pairedJoinSession, same(bPair));
+      expect(
+        oldAvailability.requireLive,
+        throwsA(
+          isA<CompanyBootstrapRefusal>().having(
+            (error) => error.message,
+            'message',
+            'Retained peer context changed',
+          ),
+        ),
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const Key('company-jobs-sync-now')),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), beforeA);
+      expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), beforeB);
+      expect(
+        enable,
+        findsNWidgets(2),
+        reason: 'Reverification must offer explicit re-enable on the page holding stale availability',
+      );
+      await tester.runAsync(() => tester.tap(enable.at(0)));
+      await joinWidgetSignal(
+        tester,
+        () => enable.evaluate().length == 1,
+        attempts: 1200,
+      );
+      expect(a.companySyncDisclosure, isNot(same(oldAvailability)));
+      expect(
+        (a.companySyncDisclosure as CompanyJobSyncAvailability).requireLive,
+        returnsNormally,
+      );
+      expect(
+        oldAvailability.requireLive,
+        throwsA(
+          isA<CompanyBootstrapRefusal>().having(
+            (error) => error.message,
+            'message',
+            'Manual Job sync is unavailable',
+          ),
+        ),
+      );
+      final enableBAction = tester.widget<FilledButton>(enable).onPressed!;
       await tester.runAsync(() => tester.tap(enable));
       final sync = find.byKey(const Key('company-jobs-sync-now'));
       await joinWidgetSignal(
@@ -284,8 +358,60 @@ void main() {
       );
       expect(aJobs!.map((j) => j.id).toSet(), bJobs!.map((j) => j.id).toSet());
       expect(aJobs, hasLength(2));
+      await tester.runAsync(() => tester.tap(sync.at(0)));
+      await joinWidgetSignal(
+        tester,
+        () =>
+            find
+                    .text('Job snapshot synced. Sent 0, received 0.')
+                    .evaluate()
+                    .length ==
+                2 ||
+            find.byKey(const Key('company-join-error')).evaluate().isNotEmpty ||
+            find.textContaining('Job sync incomplete.').evaluate().isNotEmpty,
+        attempts: 8000,
+      );
+      expect(
+        find.text('Job snapshot synced. Sent 0, received 0.'),
+        findsNWidgets(2),
+      );
       final confirmedA = await tester.runAsync(() => sqlSnapshot(f.aDb));
       final confirmedB = await tester.runAsync(() => sqlSnapshot(f.bDb));
+      freezeEntered = Completer<void>();
+      releaseFreeze = Completer<void>();
+      await tester.runAsync(() => tester.tap(sync.at(0)));
+      await joinWidgetSignal(tester, () => freezeEntered.isCompleted);
+      final receivingAvailability =
+          b.companySyncDisclosure as CompanyJobSyncAvailability;
+      receivingAvailability.close();
+      await tester.pumpWidget(connectedPeers());
+      await tester.pump();
+      expect(enable, findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(enable).onPressed,
+        isNull,
+        reason: 'A stale receiving exchange must drain before availability can be replaced',
+      );
+      await tester.runAsync(() async => enableBAction());
+      await joinWidgetSignal(
+        tester,
+        () => find.byKey(const Key('company-join-error')).evaluate().isNotEmpty,
+      );
+      expect(b.companySyncDisclosure, same(receivingAvailability));
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
+      expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
+      f.bStore.beforeRead = null;
+      releaseFreeze.complete();
+      await joinWidgetSignal(
+        tester,
+        () =>
+            tester.widget<FilledButton>(enable).onPressed != null &&
+            tester.widget<FilledButton>(sync.at(0)).onPressed != null,
+        attempts: 1200,
+      );
+      expect(b.companySyncDisclosure, same(receivingAvailability));
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
+      expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
       (a.companySyncDisclosure as CompanyJobSyncAvailability).close();
       await tester.pumpWidget(connectedPeers());
       await tester.pump();
@@ -293,12 +419,12 @@ void main() {
       expect(find.byKey(const Key('company-join-busy')), findsNothing);
       expect(
         find.byKey(const Key('company-jobs-last-confirmed')),
-        findsOneWidget,
+        findsNWidgets(2),
       );
-      expect(find.textContaining('Pair again and verify'), findsOneWidget);
+      expect(find.textContaining('Pair again and verify'), findsNWidgets(2));
       expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
       expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
-      expect(tester.widget<FilledButton>(sync.at(1)).onPressed, isNotNull);
+      expect(tester.widget<FilledButton>(sync.at(1)).onPressed, isNull);
       final otherPeer = find.byKey(
         ValueKey('company-peer-${member.identity.deviceId}'),
       );
@@ -321,6 +447,27 @@ void main() {
       );
       expect(tester.widget<FilledButton>(sync.at(1)).onPressed, isNull);
       expect(find.textContaining('Pair again and verify'), findsNWidgets(2));
+      expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
+      expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
+      final staleB = b.companySyncDisclosure;
+      await tester.runAsync(() => f.bEnrollment.signOut());
+      await tester.runAsync(() => tester.tap(enable.at(1)));
+      await joinWidgetSignal(
+        tester,
+        () => find.byKey(const Key('company-join-error')).evaluate().isNotEmpty,
+      );
+      expect(b.companySyncDisclosure, same(staleB));
+      expect(tester.widget<FilledButton>(sync.at(1)).onPressed, isNull);
+      aPair!.revoke();
+      final staleA = a.companySyncDisclosure;
+      await tester.runAsync(() => tester.tap(enable.at(0)));
+      await joinWidgetSignal(
+        tester,
+        () =>
+            find.byKey(const Key('company-join-error')).evaluate().length == 2,
+      );
+      expect(a.companySyncDisclosure, same(staleA));
+      expect(tester.widget<FilledButton>(sync.at(0)).onPressed, isNull);
       expect(await tester.runAsync(() => sqlSnapshot(f.aDb)), confirmedA);
       expect(await tester.runAsync(() => sqlSnapshot(f.bDb)), confirmedB);
       stdout.writeln(

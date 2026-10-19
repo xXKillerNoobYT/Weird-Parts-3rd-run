@@ -88,11 +88,45 @@ const _detailsBaselineOrigin = <String, String>{
       '188758e654d61748851a82f7800ba02225f364d089e3b7f1308343d5fc196c39',
 };
 
+// #110/#116 pins this UI-only delta; pending state and other product hashes stay exact.
+const _detailsUiPageSourcePath =
+    'app/lib/features/company/company_join_page.dart';
+const _detailsUiPageSourceOldSha256 =
+    'bdaf55a859223548b146b51489e1dd53284cff160710c5a5f5dcd1456c440baf';
+const _detailsUiPageSourceCandidateSha256 =
+    '9576ed1dbaf0764b5623c455a702b0540afdbf14738f47c73b3dc3c436278da2';
+
 void validateDetailsBaselineRecoveryOrigin(Map<String, dynamic> origin) {
   _require(
     _canonical(_recoveryObject(origin, _detailsBaselineOrigin.keys.toSet())) ==
         _canonical(_detailsBaselineOrigin),
   );
+}
+
+void validateJobDetailsSourceLineage(
+  Map<String, dynamic> previous,
+  Map<String, dynamic> current,
+) {
+  _require(
+    previous.length == 95 &&
+        current.length == 95 &&
+        previous.keys.toSet().containsAll(current.keys),
+  );
+  for (final entry in previous.entries) {
+    if (entry.key == 'app/integration_test/company_join_native_test.dart') {
+      continue;
+    }
+    if (entry.key == _detailsUiPageSourcePath) {
+      final next = current[entry.key];
+      _require(
+        next == entry.value ||
+            (entry.value == _detailsUiPageSourceOldSha256 &&
+                next == _detailsUiPageSourceCandidateSha256),
+      );
+      continue;
+    }
+    _require(current[entry.key] == entry.value);
+  }
 }
 
 const _recoveryManifestPath = String.fromEnvironment(
@@ -1058,17 +1092,7 @@ Map<String, dynamic> _readDetailsBaselineRecovery(
       .cast<String, dynamic>();
   final newHashes = (currentSource['sourceLfSha256'] as Map)
       .cast<String, dynamic>();
-  _require(
-    oldHashes.length == 95 &&
-        newHashes.length == 95 &&
-        oldHashes.keys.toSet().containsAll(newHashes.keys),
-  );
-  for (final entry in oldHashes.entries) {
-    if (entry.key == 'app/integration_test/company_join_native_test.dart') {
-      continue;
-    }
-    _require(newHashes[entry.key] == entry.value);
-  }
+  validateJobDetailsSourceLineage(oldHashes, newHashes);
   _require(
     value['retiredEpoch'] is String &&
         (value['retiredEpoch'] as String).isNotEmpty &&
@@ -1834,16 +1858,10 @@ Map<String, dynamic> _readDetailsPendingRecovery(
             expectedSha256: sourceManifestSha256,
           )['sourceLfSha256']
           as Map);
-  _require(
-    savedHashes.length == 95 &&
-        nextHashes.length == 95 &&
-        savedHashes.keys.toSet().containsAll(nextHashes.keys),
+  validateJobDetailsSourceLineage(
+    savedHashes.cast<String, dynamic>(),
+    nextHashes.cast<String, dynamic>(),
   );
-  for (final key in savedHashes.keys) {
-    if (key != 'app/integration_test/company_join_native_test.dart') {
-      _require(savedHashes[key] == nextHashes[key]);
-    }
-  }
   _require(
     value['retiredEpoch'] is String &&
         (value['retiredEpoch'] as String).isNotEmpty &&

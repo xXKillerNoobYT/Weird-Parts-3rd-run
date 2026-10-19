@@ -718,6 +718,71 @@ void main() {
     expect(f.verify, throwsA(anything));
   });
 
+  test('source lineage admits only one pinned company page update', () {
+    const adapterPath =
+        'app/integration_test/company_join_native_test.dart';
+    const pagePath = 'app/lib/features/company/company_join_page.dart';
+    const protocolPath = 'app/lib/features/company/company_protocol.dart';
+    const oldPageHash =
+        'bdaf55a859223548b146b51489e1dd53284cff160710c5a5f5dcd1456c440baf';
+    const candidatePageHash =
+        '9576ed1dbaf0764b5623c455a702b0540afdbf14738f47c73b3dc3c436278da2';
+    final previous = <String, dynamic>{
+      for (var i = 0; i < 92; i++)
+        'app/lib/features/source_fixture_$i.dart': digest('source-$i'),
+      protocolPath: digest('company protocol'),
+      adapterPath: digest('previous adapter'),
+      pagePath: oldPageHash,
+    };
+    final unchanged = <String, dynamic>{
+      ...previous,
+      adapterPath: digest('current adapter'),
+    };
+    final candidate = <String, dynamic>{
+      ...unchanged,
+      pagePath: candidatePageHash,
+    };
+
+    expect(previous.length, 95);
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, unchanged),
+      returnsNormally,
+    );
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, candidate),
+      returnsNormally,
+    );
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(candidate, unchanged),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, {
+        ...candidate,
+        pagePath: digest('unreviewed page'),
+      }),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, {
+        ...candidate,
+        protocolPath: digest('changed company protocol'),
+      }),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    final missing = Map<String, dynamic>.from(candidate)..remove(protocolPath);
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, missing),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    final extra = Map<String, dynamic>.from(candidate)
+      ..['app/lib/features/company/unpinned.dart'] = digest('extra source');
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, extra),
+      throwsA(isA<NativeTestFailure>()),
+    );
+  });
+
   test('frozen source bundle verifies inside copied container location', () {
     final paths = [
       'app/lib/data/app_database.dart',

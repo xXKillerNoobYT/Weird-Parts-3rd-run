@@ -247,6 +247,9 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   }
 
   Future<void> _enableJobSync() async {
+    if (_jobSync?.isRunning ?? false) {
+      throw const CompanyBootstrapRefusal('A Job exchange is already running');
+    }
     final peer = _peerMembership;
     if (peer == null) {
       throw const CompanyBootstrapRefusal('Verify the retained peer first');
@@ -256,10 +259,11 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
       owner: widget.approver!,
       peer: peer,
     );
-    if (!mounted || _closed) {
+    if (!mounted || _closed || (_jobSync?.isRunning ?? false)) {
       available.close();
       return;
     }
+    _jobSync?.close();
     final sync = _jobSync = CompanyCreatedJobSync(
       availability: available,
       controller: _controller,
@@ -524,10 +528,12 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
                   : () => _run(_challenge),
               child: const Text('Verify selected retained peer'),
             ),
-            if (_peerMembership != null && _jobSync == null)
+            if (_peerMembership != null && (_jobSync == null || !jobsLive))
               FilledButton(
                 key: const Key('company-jobs-enable-sync'),
-                onPressed: _busy ? null : () => _run(_enableJobSync),
+                onPressed: _busy || (_jobSync?.isRunning ?? false)
+                    ? null
+                    : () => _run(_enableJobSync),
                 child: const Text('Make Jobs available to this verified peer'),
               ),
             if (_jobSync != null)
