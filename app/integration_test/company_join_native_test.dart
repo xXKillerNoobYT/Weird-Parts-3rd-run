@@ -1986,86 +1986,112 @@ Map<String, dynamic> _detailsBaselineOriginRecord(
 }
 
 void verifyDetailsPendingInventory(Directory directory, List<dynamic> files) {
-  _require(
-    files.isNotEmpty &&
-        files.length <= 256 &&
-        directory.resolveSymbolicLinksSync() == directory.path,
-  );
-  for (final name in [
-    'support',
-    'documents',
-    'temporary',
-    'cache',
-    'library',
-    'downloads',
-    'receipts',
-  ]) {
+  try {
+    _writeStartupStage('j116-startup-inventory-limits');
+    _require(files.isNotEmpty && files.length <= 256);
+    _writeStartupStage('j116-startup-inventory-canonical-path');
+    _require(directory.resolveSymbolicLinksSync() == directory.path);
+    for (final name in [
+      'support',
+      'documents',
+      'temporary',
+      'cache',
+      'library',
+      'downloads',
+      'receipts',
+    ]) {
+      _writeStartupStage('j116-startup-inventory-directory');
+      _require(
+        FileSystemEntity.typeSync(
+              p.join(directory.path, name),
+              followLinks: false,
+            ) ==
+            FileSystemEntityType.directory,
+      );
+    }
+    for (final name in [
+      kRestoreSwapMarkerName,
+      kSqliteRestoreBakName,
+      kPhotosRestoreBakName,
+      kRestoreStagingName,
+      kRestoreStagingNextName,
+    ]) {
+      _writeStartupStage('j116-startup-inventory-restore-marker');
+      _require(
+        FileSystemEntity.typeSync(
+              p.join(directory.path, 'support', name),
+              followLinks: false,
+            ) ==
+            FileSystemEntityType.notFound,
+      );
+    }
+    final expected = <String, Map<String, dynamic>>{};
+    var total = 0;
+    for (final raw in files) {
+      _writeStartupStage('j116-startup-inventory-manifest-entry');
+      final entry = _recoveryObject(raw, {'path', 'bytes', 'sha256'});
+      final relative = _recoveryRelative(entry['path']);
+      _require(
+        !expected.containsKey(relative) &&
+            entry['bytes'] is int &&
+            (entry['bytes'] as int) >= 0 &&
+            (entry['bytes'] as int) <= 64 * 1024 * 1024 &&
+            entry['sha256'] is String &&
+            _sha256Pattern.hasMatch(entry['sha256'] as String),
+      );
+      total += entry['bytes'] as int;
+      expected[relative] = entry;
+    }
+    _writeStartupStage('j116-startup-inventory-manifest-total');
     _require(
-      FileSystemEntity.typeSync(
-            p.join(directory.path, name),
-            followLinks: false,
-          ) ==
-          FileSystemEntityType.directory,
+      total <= 256 * 1024 * 1024 &&
+          expected.containsKey('support/$kSqliteFileName'),
     );
+    final seen = <String>{};
+    _writeStartupStage('j116-startup-inventory-enumeration');
+    for (final entity in directory.listSync(
+      recursive: true,
+      followLinks: false,
+    )) {
+      _writeStartupStage('j116-startup-inventory-entry-type');
+      final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+      _require(
+        type == FileSystemEntityType.directory ||
+            type == FileSystemEntityType.file,
+      );
+      if (type != FileSystemEntityType.file) continue;
+      _writeStartupStage('j116-startup-inventory-entry-name');
+      final relative = p
+          .relative(entity.path, from: directory.path)
+          .replaceAll('\\', '/');
+      final entry = expected[relative];
+      _require(entry != null && seen.add(relative));
+      final file = File(entity.path);
+      _writeStartupStage('j116-startup-inventory-entry-hash');
+      _require(
+        file.lengthSync() == entry!['bytes'] &&
+            sha256.convert(file.readAsBytesSync()).toString() ==
+                entry['sha256'],
+      );
+    }
+    _writeStartupStage('j116-startup-inventory-final-count');
+    _require(seen.length == expected.length);
+    _writeStartupStage('j116-startup-inventory-verified');
+  } on FileSystemException catch (error) {
+    switch (error.osError?.errorCode) {
+      case 1:
+        _writeStartupStage('j116-startup-inventory-errno-eperm');
+      case 13:
+        _writeStartupStage('j116-startup-inventory-errno-eacces');
+      case 2:
+        _writeStartupStage('j116-startup-inventory-errno-enoent');
+      case null:
+        _writeStartupStage('j116-startup-inventory-errno-unknown');
+      default:
+        _writeStartupStage('j116-startup-inventory-errno-other');
+    }
+    rethrow;
   }
-  for (final name in [
-    kRestoreSwapMarkerName,
-    kSqliteRestoreBakName,
-    kPhotosRestoreBakName,
-    kRestoreStagingName,
-    kRestoreStagingNextName,
-  ]) {
-    _require(
-      FileSystemEntity.typeSync(
-            p.join(directory.path, 'support', name),
-            followLinks: false,
-          ) ==
-          FileSystemEntityType.notFound,
-    );
-  }
-  final expected = <String, Map<String, dynamic>>{};
-  var total = 0;
-  for (final raw in files) {
-    final entry = _recoveryObject(raw, {'path', 'bytes', 'sha256'});
-    final relative = _recoveryRelative(entry['path']);
-    _require(
-      !expected.containsKey(relative) &&
-          entry['bytes'] is int &&
-          (entry['bytes'] as int) >= 0 &&
-          (entry['bytes'] as int) <= 64 * 1024 * 1024 &&
-          entry['sha256'] is String &&
-          _sha256Pattern.hasMatch(entry['sha256'] as String),
-    );
-    total += entry['bytes'] as int;
-    expected[relative] = entry;
-  }
-  _require(
-    total <= 256 * 1024 * 1024 &&
-        expected.containsKey('support/$kSqliteFileName'),
-  );
-  final seen = <String>{};
-  for (final entity in directory.listSync(
-    recursive: true,
-    followLinks: false,
-  )) {
-    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
-    _require(
-      type == FileSystemEntityType.directory ||
-          type == FileSystemEntityType.file,
-    );
-    if (type != FileSystemEntityType.file) continue;
-    final relative = p
-        .relative(entity.path, from: directory.path)
-        .replaceAll('\\', '/');
-    final entry = expected[relative];
-    _require(entry != null && seen.add(relative));
-    final file = File(entity.path);
-    _require(
-      file.lengthSync() == entry!['bytes'] &&
-          sha256.convert(file.readAsBytesSync()).toString() == entry['sha256'],
-    );
-  }
-  _require(seen.length == expected.length);
 }
 
 Map<String, dynamic> _readDetailsPendingRecovery(
