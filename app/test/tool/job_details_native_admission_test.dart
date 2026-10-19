@@ -19,7 +19,8 @@ import '../../tool/native_nearby_test_crypto.dart';
 import '../../tool/native_nearby_test_commands.dart';
 import 'job_name_native_ui_test.dart' as native show ready, tap;
 import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
-import '../features/company/company_job_name_test.dart' show NameFixture;
+import '../features/company/company_job_name_test.dart'
+    show NameFixture, canonicalNameTest;
 import '../features/company/company_join_test.dart'
     show JoinFixture, activateFixtureB;
 import '../features/company/company_created_job_sync_test.dart'
@@ -647,6 +648,209 @@ void main() {
         );
       }
       expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+      Future<Map<String, dynamic>> parentEvidence(
+        CompanyJobCommands commands,
+        OwnerSession session,
+      ) async {
+        final records = await commands.detailsSyncHoldings(
+          ownerSession: session,
+        );
+        final acks = await commands.enrollment.db
+            .select(commands.enrollment.db.companyJobDetailPeerAcks)
+            .get();
+        String recordsHash(Iterable<Map<String, dynamic>> rows) => digest(
+          canonicalNameTest(rows.map(canonicalNameTest).toList()..sort()),
+        );
+        return {
+          'detailsRecords': records
+              .map((r) => {'operation': r.operationCommitment})
+              .toList(),
+          'detailsRecordsSha256': recordsHash(records.map((r) => r.toJson())),
+          'detailsAckSha256': recordsHash(acks.map((r) => r.toJson())),
+        };
+      }
+
+      final parentB = await parentEvidence(bCommands, member);
+      final parentA = await parentEvidence(aCommands, f.owner);
+      for (final item in [
+        (bCommands, member, 'member'),
+        (aCommands, f.owner, 'owner'),
+      ]) {
+        await item.$1.patchJobDetails(
+          PatchJobDetails(
+            companyId: item.$2.identity.companyId,
+            shopId: item.$2.identity.shopId,
+            jobId: selected.baseJob.id,
+            requestId: const Uuid().v4(),
+            creationDigest: selected.creationDigest,
+            patch: JobDetailsPatch(
+              notes: SetField(
+                'Synthetic ${item.$3} notes ${adapter.jobDetailsNativeRun}',
+              ),
+            ),
+            observedHeads: {JobDetailField.notes: after.details.notes.heads},
+          ),
+          ownerSession: item.$2,
+        );
+      }
+      final pendingSql = await adapter.detailsNativeSqlHash(f.bDb);
+      await f.reopenB();
+      member = await f.bEnrollment.signIn('1234');
+      await adapter.verifyDetailsPendingNotesRecoveryRecords(
+        enrollment: f.bEnrollment,
+        owner: member,
+        sqlSha256: pendingSql,
+        localCreation: {'record': original.toJson()},
+        parent: parentB,
+        role: 'member',
+      );
+      final originalA = (await f.aDb.select(f.aDb.companyJobs).get())
+          .singleWhere((r) => r.outgoing);
+      await adapter.verifyDetailsPendingNotesRecoveryRecords(
+        enrollment: f.aEnrollment,
+        owner: f.owner,
+        sqlSha256: await adapter.detailsNativeSqlHash(f.aDb),
+        localCreation: {'record': originalA.toJson()},
+        parent: parentA,
+        role: 'owner',
+      );
+      expect(await adapter.detailsNativeSqlHash(f.bDb), pendingSql);
+      Future<void> verifyNotes({
+        Map<String, dynamic>? parent,
+        String role = 'member',
+      }) async => adapter.verifyDetailsPendingNotesRecoveryRecords(
+        enrollment: f.bEnrollment,
+        owner: member,
+        sqlSha256: await adapter.detailsNativeSqlHash(f.bDb),
+        localCreation: {'record': original.toJson()},
+        parent: parent ?? parentB,
+        role: role,
+      );
+      await expectLater(verifyNotes(role: 'owner'), throwsA(anything));
+      await expectLater(
+        verifyNotes(parent: {...parentB, 'detailsRecordsSha256': '0' * 64}),
+        throwsA(anything),
+      );
+      final history = await f.bDb.select(f.bDb.companyJobDetails).get();
+      final added = history.singleWhere(
+        (r) => !signed.any(
+          (old) => old.operationCommitment == r.operationCommitment,
+        ),
+      );
+      final noteBody = jsonDecode(added.operationBytes) as Map<String, dynamic>;
+      (((noteBody['body'] as Map)['units'] as Map)['notes'] as Map)['parents'] =
+          <String>[];
+      expect(
+        () => adapter.verifyDetailsPendingNotesHistory(
+          history
+              .map(
+                (r) => r == added
+                    ? r.copyWith(operationBytes: jsonEncode(noteBody))
+                    : r,
+              )
+              .toList(),
+          parent: parentB,
+          identity: identity,
+          role: 'member',
+        ),
+        throwsA(anything),
+      );
+      for (final attack in ['old-operation', 'notes-receipt', 'ack']) {
+        final detail = attack == 'old-operation' ? signed.first : added;
+        final ack =
+            (await f.bDb.select(f.bDb.companyJobDetailPeerAcks).get()).first;
+        final table = attack == 'ack'
+            ? 'company_job_detail_peer_acks'
+            : 'company_job_details';
+        final column = attack == 'ack'
+            ? 'ack_bytes'
+            : attack == 'old-operation'
+            ? 'operation_bytes'
+            : 'receipt_bytes';
+        final bytes = attack == 'ack'
+            ? ack.ackBytes
+            : attack == 'old-operation'
+            ? detail.operationBytes
+            : detail.receiptBytes;
+        final forged = jsonDecode(bytes) as Map<String, dynamic>;
+        if (attack == 'old-operation') {
+          (forged['body'] as Map)['user'] = const Uuid().v4();
+        } else {
+          forged[attack == 'ack' ? 'signature' : 'seal'] = base64Encode(
+            List<int>.filled(64, 0),
+          );
+        }
+        final request = attack == 'ack' ? ack.requestId : detail.requestId;
+        await f.bDb.customStatement(
+          'UPDATE $table SET $column = ? WHERE request_id = ?',
+          [jsonEncode(forged), request],
+        );
+        final changed = await adapter.detailsNativeSqlHash(f.bDb);
+        await expectLater(verifyNotes(), throwsA(anything));
+        expect(await adapter.detailsNativeSqlHash(f.bDb), changed);
+        await f.bDb.customStatement(
+          'UPDATE $table SET $column = ? WHERE request_id = ?',
+          [bytes, request],
+        );
+      }
+      final currentBase = (await f.bStore.readState(f.b.namespace))!;
+      final currentCustody = await f.bStore.readState(
+        companyCustodyNamespace(f.b.namespace),
+      );
+      Future<void> notesHeaders(ProtectedInstallationState held) async {
+        expect(
+          (await adapter.verifyDetailsMixedNativeHeaders(
+            db: f.bDb,
+            base: held,
+            custody: currentCustody,
+            binding: binding,
+            databasePath: '${f.root.path}/b.sqlite',
+            originalIdentity: identity,
+            originalReceipt: original.receiptBytes,
+            incomingOperations: {},
+            notesParent: parentB,
+            role: 'member',
+          ))['detailsSealsVerified'],
+          3,
+        );
+      }
+
+      await notesHeaders(currentBase);
+      final currentNative =
+          jsonDecode(utf8.decode(currentBase.bytes)) as Map<String, dynamic>;
+      final old = signed.first;
+      final unrelated = CompanyCommandIntent(
+        family: old.outgoing
+            ? CompanyCommandFamily.jobDetails
+            : CompanyCommandFamily.jobDetailsIncoming,
+        receiptKey: old.receiptKey,
+        operationCommitment: old.operationCommitment,
+        commandCommitment: old.commandCommitment,
+        storeGeneration: f.b.receivingStoreGeneration!.value,
+        companyId: old.companyId,
+        lineId: old.jobId,
+        originGeneration: old.originGeneration,
+        requestId: old.requestId,
+        beforeWitness: '0' * 64,
+        afterWitness: '0' * 64,
+      );
+      await expectLater(
+        notesHeaders(
+          ProtectedInstallationState(
+            currentBase.revision,
+            Uint8List.fromList(
+              utf8.encode(
+                jsonEncode({
+                  ...currentNative,
+                  'pendingCommand': unrelated.encode(),
+                }),
+              ),
+            ),
+          ),
+        ),
+        throwsA(anything),
+      );
+      expect(await adapter.detailsNativeSqlHash(f.bDb), pendingSql);
     }, _LoopbackHttpOverrides()),
     timeout: const Timeout(Duration(minutes: 6)),
   );
@@ -1290,6 +1494,9 @@ void main() {
       'app/pubspec.yaml',
       'app/pubspec.lock',
     ];
+    paths.addAll([
+      for (var i = paths.length; i < 95; i++) 'app/lib/frozen_source_$i.dart',
+    ]);
     for (final path in paths) {
       final file = File(p.join(temp.path, 'source', path));
       file.parent.createSync(recursive: true);
@@ -1319,6 +1526,58 @@ void main() {
           productRevision: 'a' * 40,
         );
     expect(validate, returnsNormally);
+    final savedContext = <String, String>{
+      'revision': 'a' * 40,
+      'tree': 'b' * 40,
+      'adapterSha256': sourceHash,
+      'productRevision': 'a' * 40,
+      'manifestSha256': manifestHash,
+    };
+    void validatePair(Map<String, String> current) =>
+        adapter.validateDetailsNotesSourceManifests(
+          savedManifest: manifest,
+          savedSource: savedContext,
+          currentManifest: manifest,
+          currentSource: current,
+        );
+    expect(() => validatePair(savedContext), returnsNormally);
+    final changedSource = File(p.join(temp.path, 'source', paths.first));
+    changedSource.writeAsStringSync('changed product\n');
+    final currentValue = {
+      ...value,
+      'revision': 'c' * 40,
+      'tree': 'd' * 40,
+      'productRevision': 'c' * 40,
+      'sourceLfSha256': {
+        ...value['sourceLfSha256'] as Map,
+        paths.first: digest('changed product\n'),
+      },
+    };
+    manifest.writeAsStringSync(jsonEncode(currentValue));
+    final currentContext = {
+      ...savedContext,
+      'revision': 'c' * 40,
+      'tree': 'd' * 40,
+      'productRevision': 'c' * 40,
+      'manifestSha256': digest(manifest.readAsStringSync()),
+    };
+    expect(
+      () => adapter.validateJobDetailsNativeSourceManifest(
+        manifest: manifest,
+        manifestSha256: currentContext['manifestSha256']!,
+        revision: currentContext['revision']!,
+        tree: currentContext['tree']!,
+        adapter: sourceHash,
+        productRevision: currentContext['productRevision']!,
+      ),
+      returnsNormally,
+    );
+    expect(
+      () => validatePair(currentContext),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    changedSource.writeAsStringSync('frozen\r\n');
+    manifest.writeAsStringSync(jsonEncode(value));
     manifest.writeAsStringSync(
       const JsonEncoder.withIndent('  ').convert(value),
     );
