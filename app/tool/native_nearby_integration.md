@@ -314,16 +314,16 @@ cross-device native acceptance, process quit, source review, CI and merge remain
 separate gates. This does not establish mesh, mobile, OS reboot or general power-loss
 recovery.
 
-### Same-v2 interrupted creation baseline
+### Same-v3 preserved creation baseline
 
-This section records the retired v2 recovery contract. The current fresh v3 run
-does not adopt v2 roots, failed commands, signed edits or cold copies as accepted
-evidence; preserve those artifacts separately. No new recovery contract is added.
+This reuses the existing baseline contract for the independently preserved v3
+creation baseline. Retired v2 roots, failures and signed edits remain separate;
+they are not adopted as accepted evidence. No new recovery contract is added.
 
-The new `COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY` path and
+The `COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY` path and
 `COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY_SHA256` admit only the audited
-`j116-details-v2` owner/member roots stopped before any name/details operation.
-This is a distinct `j116.interrupted-baseline.recovery@1` contract. Each role has
+`j116-details-v3` owner/member roots stopped before any name/details operation.
+The kind remains `j116.interrupted-baseline.recovery@1`. Each role has
 its own private external raw-byte-hashed manifest and cold archive. No in-root
 checkpoint is manufactured. The schema-9 name-recovery contract is unchanged.
 
@@ -331,13 +331,13 @@ The manifest has exactly these keys:
 
 | Key | Required value |
 | --- | --- |
-| `format`, `kind`, `run`, `role`, `root`, `namespace` | `1`, the new kind, `j116-details-v2`, exact role and original canonical root/custody namespace. |
-| `origin` | Revision/productRevision `ab710d81811eda567a2920a7557a5df52685c9af`, tree `073ecdf226dd4e57da25714c401e4edcdaad4302`, adapter `cb4c521e610aaa9ccd4121ff231114c82f02dea28fe4e3ed53609c7d4b831f4c`, manifest `d4791cb60877b78caad3680366eadb7408727dd463ab19ed9e763692e5349860`; keys are `revision`, `tree`, `adapterSha256`, `productRevision`, `manifestSha256`. |
+| `format`, `kind`, `run`, `role`, `root`, `namespace` | `1`, the same kind, `j116-details-v3`, exact role and original canonical root/custody namespace. |
+| `origin` | Revision/productRevision `6a417521bb80ed6614ef5a5ef71f7158c6e0f929`, tree `a3f403d4d8dfa4bcb630d481e006a722e5d9a3cd`, adapter `ae534fe3996ff64de481bf5364a9adbb1575b70f066c85a53bccde41929be8dd`, manifest `188758e654d61748851a82f7800ba02225f364d089e3b7f1308343d5fc196c39`; keys are `revision`, `tree`, `adapterSha256`, `productRevision`, `manifestSha256`. |
 | `recovery` | Same five keys matching the reviewed recovery artifact and current source-manifest defines. |
 | `originManifestPath` | Absolute path to the unchanged original raw manifest with its frozen sibling `source/` bundle, readable locally inside the app sandbox. |
 | `coldArchive` | Absolute canonical path outside the original root, containing its independently accepted complete stopped-file copy. No private file crosses hosts. |
-| `files` | Complete relative `{path, bytes, sha256}` inventory of the identical original/cold files; no links, missing/extra files, duplicates, traversal, checkpoint or details-UI files. |
-| `originalFiles` | Exactly `owner: validation-owner.json`, `ready: join-exercise-ready-PID.json`, `localCreation: created-local-job.json`, `priorSnapshot: created-before-retained-pair-PID.json`; original PIDs are owner 35228/member 41312. |
+| `files` | Complete relative `{path, bytes, sha256}` inventory of the identical original/cold files; no links, missing/extra files, duplicates, traversal or checkpoints. The only permitted details evidence is exact `details-ui-PID-20.json` plus `details-shared-baseline-ROLE.json`. |
+| `originalFiles` | Exactly `owner: validation-owner.json`, `ready: join-exercise-ready-PID.json`, `localCreation: created-local-job.json`, `priorSnapshot: created-before-retained-pair-PID.json`; original PIDs are owner 33960/member 87978. |
 | `evidence` | Exactly `identity`, `sqlSha256`, `bindingSha256`, `companyJobCount: 2`, `createAckCount: 2`, `nameCount: 0`, `detailsCount: 0`, `nameAckCount: 0`, `detailsAckCount: 0`. The identity is the unchanged eight-field original public snapshot. SQL hash uses the existing sorted-table/sorted-row canonical digest; binding hash covers the exact stored binding string. |
 | `retiredEpoch` | The original control epoch, which the resumed resident refuses to configure. |
 
@@ -347,6 +347,12 @@ identity/evidence files remain immutable and are checked against the pinned orig
 The first admission verifies the complete original and cold inventories, schema 10,
 integrity/references, two Jobs/two create ACKs, empty name/details families, exact
 SQL hash and public binding before opening Drift with migrations disabled.
+No manifest fields are added. Both frozen inspection files must match their raw
+inventory hashes and original source headers. Only `inspect`, with no UI save,
+two typed creation receipts/two create ACKs, empty name/details records and empty
+field heads/candidates, is admitted. Its identity and SQL hash must match the cold
+manifest; the selected creation digest and creation/name hashes must match the
+shared baseline. Saved, modified, unpinned or additional details evidence refuses.
 
 Before production startup, both existing native protected namespaces must be
 present. Their public installation/generation/key/store/path and company/shop/user/
@@ -362,12 +368,16 @@ anchor and raw private bytes are never exported.
 After normal PIN sign-in, the same identity, unchanged full SQL state, both typed
 creation receipts, original local signed row, both signed family ACKs and the actual
 two-Job UI must pass before any Nearby controller exists. Recovery does not decide
-the original command outcome. Owner sequence 11 remains UNKNOWN; Mac's original
-terminal record remains separate evidence. Continue with a new epoch and fresh
-Pair/Match/Verify/both Enables. Do not replay the expired sequence-11 wire. Later
+the original command outcomes; preserved terminal records remain separate evidence.
+Continue with a new epoch and fresh Pair/Match/Verify/both Enables. Do not replay
+an expired wire. Historical inspection terminals are not imported into the new
+resident's details acceptance list. Later
 real mixed/conflict/resolved checkpoints carry `detailsBaselineRecoverySha256` and
 require this same pinned origin context. They use their own current checkpoint
 hashes instead of comparing progressed state to the obsolete cold baseline.
+The original shared-baseline file remains readable only through its exact
+hash-pinned recovery member and original source provenance, including during later
+checkpoint stages. General evidence readers and header checks stay unchanged.
 
 Keep caller tool slices inside the outer 30-second lifetime: use at most 8-second
 command slices, 4-second observation slices and 250-ms polls. Catch timeout/errors
@@ -375,3 +385,10 @@ without losing the retained exact wire and command identity. Observe the same
 in-flight command before deciding the next action; do not generate another command
 or restart a native process to hide an uncertain result. Short tool returns do not
 alter native deadlines, Pair lifetime, PIN lease or protocol budgets.
+Keep Observe, signed comparison and Match in one caller operation inside the
+outer 30-second lifetime. Use at most six seconds per native command slice and
+two seconds per observation request; the existing signed HTTP request is bounded
+at eight seconds. Retain the exact effect wire before dispatch and stop on UNKNOWN
+for explicit reconciliation. These caller limits do not extend native deadlines
+or the comparison TTL; do not insert a model/tool gap or automatically retry an
+expired comparison. The retained successful v3 pipeline measured 8,312 ms.

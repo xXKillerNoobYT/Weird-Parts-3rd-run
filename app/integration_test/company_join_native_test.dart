@@ -64,13 +64,13 @@ const _detailsBaselineRecoverySha256 = String.fromEnvironment(
   'COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY_SHA256',
 );
 const _detailsBaselineOrigin = <String, String>{
-  'revision': 'ab710d81811eda567a2920a7557a5df52685c9af',
-  'tree': '073ecdf226dd4e57da25714c401e4edcdaad4302',
+  'revision': '6a417521bb80ed6614ef5a5ef71f7158c6e0f929',
+  'tree': 'a3f403d4d8dfa4bcb630d481e006a722e5d9a3cd',
   'adapterSha256':
-      'cb4c521e610aaa9ccd4121ff231114c82f02dea28fe4e3ed53609c7d4b831f4c',
-  'productRevision': 'ab710d81811eda567a2920a7557a5df52685c9af',
+      'ae534fe3996ff64de481bf5364a9adbb1575b70f066c85a53bccde41929be8dd',
+  'productRevision': '6a417521bb80ed6614ef5a5ef71f7158c6e0f929',
   'manifestSha256':
-      'd4791cb60877b78caad3680366eadb7408727dd463ab19ed9e763692e5349860',
+      '188758e654d61748851a82f7800ba02225f364d089e3b7f1308343d5fc196c39',
 };
 
 void validateDetailsBaselineRecoveryOrigin(Map<String, dynamic> origin) {
@@ -752,6 +752,194 @@ void validateJobDetailsNativeSourceManifest({
   );
 }
 
+Map<String, dynamic> verifyDetailsBaselineInspection(
+  Directory root,
+  Map<String, dynamic> recovery,
+) {
+  final role = recovery['role'];
+  _require({'owner', 'member'}.contains(role) && recovery['root'] == root.path);
+  final originalPid = role == 'owner' ? 33960 : 87978;
+  final inspectName = 'details-ui-$originalPid-20.json';
+  final sharedName = 'details-shared-baseline-$role.json';
+  final entries = (recovery['files'] as List).cast<Map>();
+  final paths = entries.map((entry) => entry['path'] as String).toList();
+  _require(
+    paths.toSet().length == paths.length &&
+        paths.contains(inspectName) &&
+        paths.contains(sharedName) &&
+        !paths.any((path) {
+          final name = p.posix.basename(path);
+          return name.startsWith('join-details-checkpoint-') ||
+              ((name.startsWith('details-ui-') ||
+                      name.startsWith('details-shared-baseline-')) &&
+                  path != inspectName &&
+                  path != sharedName);
+        }),
+  );
+  Map<String, dynamic> read(String name) {
+    final entry = _recoveryObject(
+      entries.singleWhere((entry) => entry['path'] == name),
+      {'path', 'bytes', 'sha256'},
+    );
+    return _readOwnedJson(
+      File(p.join(root.path, name)),
+      expectedBytes: entry['bytes'] as int,
+      expectedSha256: entry['sha256'] as String,
+    );
+  }
+
+  final inspect = read(inspectName);
+  final shared = read(sharedName);
+  for (final record in [inspect, shared]) {
+    _require(
+      record['format'] == 1 &&
+          record['run'] == jobDetailsNativeRun &&
+          record['role'] == role &&
+          record['pid'] == originalPid &&
+          record['root'] == root.path &&
+          record['namespace'] == recovery['namespace'] &&
+          record['namespace'] ==
+              joinNativeNamespace(
+                jobDetailsNativeRun,
+                role as String,
+                createdMode: true,
+                detailsMode: true,
+              ) &&
+          record['mode'] == 'created-jobs' &&
+          record['jobDetailsMode'] == true &&
+          record['detailsBaselineRecoverySha256'] == null &&
+          record['platform'] == (role == 'owner' ? 'windows' : 'macos') &&
+          record['detailsManifestSha256'] ==
+              _detailsBaselineOrigin['manifestSha256'],
+    );
+    verifyJoinNativeEvidenceProvenance(
+      record,
+      revision: _detailsBaselineOrigin['revision']!,
+      tree: _detailsBaselineOrigin['tree']!,
+      adapter: _detailsBaselineOrigin['adapterSha256']!,
+      productRevision: _detailsBaselineOrigin['productRevision']!,
+    );
+  }
+  _recoveryObject(shared, {
+    'format',
+    'run',
+    'role',
+    'pid',
+    'root',
+    'namespace',
+    'sourceRevision',
+    'sourceTree',
+    'adapterSha256',
+    'productRevision',
+    'detailsManifestSha256',
+    'jobDetailsMode',
+    'mode',
+    'platform',
+    'selectedJob',
+    'creationDigest',
+    'creationHistorySha256',
+    'nameRecordsSha256',
+  });
+  final expected = recovery['evidence'] as Map;
+  _recoveryIdentity(inspect['identity']);
+  _require(
+    _canonical(inspect['identity']) == _canonical(expected['identity']) &&
+        inspect['sqlSha256'] == expected['sqlSha256'] &&
+        inspect['step'] == 'inspect' &&
+        inspect['savedThroughProductionUi'] == false &&
+        inspect['passed'] == false &&
+        inspect['locked'] == false &&
+        inspect['productionJobsPanelRendered'] == true &&
+        inspect['companyControllerStoppedDuringUi'] == true &&
+        inspect['schema'] == 10 &&
+        inspect['integrityValid'] == true &&
+        inspect['referencesValid'] == true &&
+        inspect['originalLocalRecordUnchanged'] == true &&
+        inspect['receiptCountVerified'] == 2 &&
+        inspect['ackCount'] == 2 &&
+        [
+          'receiptVerification',
+          'nameReceiptVerification',
+          'detailsReceiptVerification',
+        ].every((key) => inspect[key] == 'typed-public-verifier') &&
+        inspect['ackVerification'] == 'confirmedPeerCounts',
+  );
+  for (final key in [
+    'nameOperationCount',
+    'nameReceiptCountVerified',
+    'nameAckCount',
+    'detailsOperationCount',
+    'detailsReceiptCountVerified',
+    'detailsAckCount',
+  ]) {
+    _require(inspect[key] == 0);
+  }
+  for (final key in ['nameRecords', 'detailsRecords']) {
+    _require(inspect[key] is List && (inspect[key] as List).isEmpty);
+  }
+  for (final key in [
+    'creationDigest',
+    'creationHistorySha256',
+    'nameRecordsSha256',
+  ]) {
+    _require(
+      shared[key] is String && _sha256Pattern.hasMatch(shared[key] as String),
+    );
+  }
+  _require(
+    shared['selectedJob'] == inspect['selectedJob'] &&
+        shared['creationHistorySha256'] == inspect['jobHistorySha256'] &&
+        shared['nameRecordsSha256'] == inspect['nameRecordsSha256'],
+  );
+  final records = (inspect['records'] as List).cast<Map>();
+  final confirmed = inspect['confirmedPeerCounts'] as Map;
+  final jobs = records.map((record) => record['jobId'] as String).toList()
+    ..sort();
+  _require(
+    records.length == 2 &&
+        jobs.toSet().length == 2 &&
+        shared['selectedJob'] == jobs.first &&
+        confirmed.length == 2 &&
+        confirmed.keys.toSet().containsAll(jobs) &&
+        confirmed.values.every((count) => count == 1),
+  );
+  final selected = records.singleWhere(
+    (record) => record['jobId'] == jobs.first,
+  );
+  _require(
+    shared['creationDigest'] == selected['operationSha256'] &&
+        shared['creationDigest'] ==
+            sha256
+                .convert(utf8.encode(selected['operationBytes'] as String))
+                .toString(),
+  );
+  final views = (inspect['detailsViews'] as List).cast<Map>();
+  _require(
+    views.length == 2 &&
+        views.map((view) => view['job']).toSet().containsAll(jobs),
+  );
+  for (final view in views) {
+    final fields = _recoveryObject(
+      view['fields'],
+      JobDetailField.values.map((field) => field.name).toSet(),
+    );
+    for (final field in JobDetailField.values) {
+      final value = fields[field.name] as Map;
+      final initial = field == JobDetailField.status ? 'active' : null;
+      _require(
+        value['value'] == initial &&
+            value['lastAgreedValue'] == initial &&
+            value['hasConflict'] == false &&
+            value['heads'] is List &&
+            (value['heads'] as List).isEmpty &&
+            value['candidates'] is List &&
+            (value['candidates'] as List).isEmpty,
+      );
+    }
+  }
+  return shared;
+}
+
 Map<String, dynamic> _readDetailsBaselineRecovery(
   Directory root, {
   required String path,
@@ -914,15 +1102,10 @@ Map<String, dynamic> _readDetailsBaselineRecovery(
   }
   _require(
     totalBytes <= 256 * 1024 * 1024 &&
-        entries.containsKey('support/$kSqliteFileName') &&
-        !entries.keys.any(
-          (name) =>
-              name.startsWith('join-details-checkpoint-') ||
-              name.startsWith('details-ui-') ||
-              name.startsWith('details-shared-baseline-'),
-        ),
+        entries.containsKey('support/$kSqliteFileName'),
   );
-  final pid = role == 'owner' ? 35228 : 41312;
+  verifyDetailsBaselineInspection(root, value);
+  final pid = role == 'owner' ? 33960 : 87978;
   final origins = _recoveryObject(value['originalFiles'], {
     'owner',
     'ready',
@@ -3062,20 +3245,30 @@ final class _JoinNative with WidgetsBindingObserver {
         'nameRecordsSha256': namesHash,
       });
     }
-    final baseline = _readOwnedJson(baselineFile);
-    verifyJoinNativeEvidenceProvenance(
-      baseline,
-      revision: _revision,
-      tree: _tree,
-      adapter: _adapter,
-      productRevision: productRevision,
-    );
+    final baseline = detailsBaselineRecovery == null
+        ? _readOwnedJson(baselineFile)
+        : verifyDetailsBaselineInspection(
+            workspace.root,
+            detailsBaselineRecovery!,
+          );
+    if (detailsBaselineRecovery == null) {
+      verifyJoinNativeEvidenceProvenance(
+        baseline,
+        revision: _revision,
+        tree: _tree,
+        adapter: _adapter,
+        productRevision: productRevision,
+      );
+    }
     _require(
       baseline['run'] == _run &&
           baseline['role'] == _roleName &&
           baseline['namespace'] == namespace &&
           baseline['jobDetailsMode'] == true &&
-          baseline['detailsManifestSha256'] == _detailsManifestSha256 &&
+          baseline['detailsManifestSha256'] ==
+              (detailsBaselineRecovery == null
+                  ? _detailsManifestSha256
+                  : _detailsBaselineOrigin['manifestSha256']) &&
           baseline['selectedJob'] == selected.baseJob.id &&
           baseline['creationDigest'] == selected.creationDigest &&
           baseline['creationHistorySha256'] == creationHash &&
@@ -3813,9 +4006,7 @@ final class _JoinNative with WidgetsBindingObserver {
           if (baselineResume) ...{
             'preKernelIdentityPathAndCreationSealVerified': true,
             'protectedHashesAreIndependentAnchor': false,
-            'priorCommandOutcome': owner
-                ? 'sequence 11 unknown; no terminal completion inferred'
-                : 'not adjudicated by recovery; original terminal evidence retained',
+            'priorCommandOutcome': 'not adjudicated by recovery; original command evidence retained',
             'freshEpochAndPairRequired': true,
           },
           'productionJobsPanelRendered': true,
