@@ -14,7 +14,7 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'company_job_name_test.dart' show NameFixture;
 import 'company_jobs_widget_test.dart' show waitForWidget;
 import 'company_job_test_support.dart' show JobTestStore;
-import 'company_join_test.dart' show JoinFixture, activateFixtureB;
+import 'company_join_test.dart' show JoinFixture, activateFixtureB, sqlSnapshot;
 import 'company_join_widget_test.dart' show JoinLoopbackHttpOverrides;
 import 'company_created_job_sync_test.dart' show openSyncPair;
 import 'company_job_lifecycle_sync_test.dart' show deletion;
@@ -168,25 +168,15 @@ void main() {
     },
   );
   testWidgets(
-    'delete confirmation and retained uncertain retry survive normal-list filtering',
+    'stale delete confirmation releases its request and permits a fresh choice',
     (tester) async {
       final f = (await tester.runAsync(NameFixture.create))!;
       addTearDown(f.close);
-      var loseReply = true;
-      final commands = CompanyJobCommands(
-        enrollment: f.enrollment,
-        afterCommit: () async {
-          if (loseReply) {
-            loseReply = false;
-            throw StateError('lost lifecycle completion');
-          }
-        },
-      );
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: CompanyJobsPanel(commands: commands, owner: f.owner),
+              child: CompanyJobsPanel(commands: f.commands, owner: f.owner),
             ),
           ),
         ),
@@ -199,57 +189,155 @@ void main() {
       await tester.tap(delete);
       await tester.pumpAndSettle();
       expect(find.text('Delete Job?'), findsOneWidget);
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      final renamed = await tester.runAsync(() async {
+        await f.commands.renameJob(
+          f.rename('Changed during confirmation'),
+          ownerSession: f.owner,
+        );
+        return (
+          sql: await sqlSnapshot(f.db),
+          protected: f.store.states[f.security.namespace]!,
+          view: (await f.commands.listJobViews(ownerSession: f.owner)).single,
+        );
+      });
+      await tester.runAsync(() async {
+        await tester.tap(find.widgetWithText(FilledButton, 'Delete Job'));
+        await Future<void>.delayed(const Duration(seconds: 1));
+      });
+      await waitForWidget(tester, find.text('Changed during confirmation'));
+      expect(await tester.runAsync(() => sqlSnapshot(f.db)), renamed!.sql);
       expect(
-        await tester.runAsync(
-          () => f.db.select(f.db.companyJobLifecycles).get(),
-        ),
-        isEmpty,
+        f.store.states[f.security.namespace]!.revision,
+        renamed.protected.revision,
       );
+      expect(
+        f.store.states[f.security.namespace]!.bytes,
+        renamed.protected.bytes,
+      );
+      expect(
+        find.byKey(const Key('company-job-retry-lifecycle')),
+        findsNothing,
+      );
+      expect(
+        find.text(
+          'Displayed Job context changed. Review it before deleting or resolving.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<TextButton>(delete).onPressed, isNotNull);
+      await tester.ensureVisible(delete);
       await tester.tap(delete);
       await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await tester.tap(find.widgetWithText(FilledButton, 'Delete Job'));
         await Future<void>.delayed(const Duration(seconds: 1));
       });
-      final retry = find.byKey(const Key('company-job-retry-lifecycle'));
       await waitForWidget(tester, find.text('Deleted Job history'));
-      await waitForWidget(tester, retry);
-      expect(
-        find.descendant(
-          of: find.byKey(const Key('company-jobs-list')),
-          matching: find.byKey(Key('company-job-${f.createCommand.jobId}')),
-        ),
-        findsNothing,
-      );
       final saved = (await tester.runAsync(
         () => f.db.select(f.db.companyJobLifecycles).get(),
       ))!.single;
-      await tester.ensureVisible(retry);
-      await tester.runAsync(() async {
-        await tester.tap(retry);
-        await Future<void>.delayed(const Duration(seconds: 1));
-      });
-      await tester.pump();
-      expect(
-        find.byKey(const Key('company-job-retry-lifecycle')),
-        findsNothing,
+      final command = SetJobLifecycle.fromOperationBytes(
+        Uint8List.fromList(utf8.encode(saved.operationBytes)),
       );
+      expect(command.observed.tagged, renamed.view.lifecycle.context.tagged);
       expect(
-        (await tester.runAsync(
-          () => f.db.select(f.db.companyJobLifecycles).get(),
-        ))!.single,
-        saved,
-      );
-      await tester.ensureVisible(find.text('Deleted Job history'));
-      await tester.tap(find.text('Deleted Job history'));
-      await tester.pumpAndSettle();
-      expect(find.text('Baseline'), findsOneWidget);
-      expect(
-        find.byKey(Key('company-job-delete-${f.createCommand.jobId}')),
-        findsNothing,
+        await tester.runAsync(
+          () => f.db.select(f.db.companyJobLifecyclePeerAcks).get(),
+        ),
+        isEmpty,
       );
     },
   );
+  for (final failure in [
+    StateError('lost lifecycle completion'),
+    const JobLineRefusal('post-commit lifecycle validation failed'),
+  ]) {
+    testWidgets(
+      failure is StateError
+          ? 'delete confirmation and retained uncertain retry survive normal-list filtering'
+          : 'post-commit JobLineRefusal retains exact lifecycle retry after filtering',
+      (tester) async {
+        final f = (await tester.runAsync(NameFixture.create))!;
+        addTearDown(f.close);
+        var loseReply = true;
+        final commands = CompanyJobCommands(
+          enrollment: f.enrollment,
+          afterCommit: () async {
+            if (loseReply) {
+              loseReply = false;
+              throw failure;
+            }
+          },
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: CompanyJobsPanel(commands: commands, owner: f.owner),
+              ),
+            ),
+          ),
+        );
+        final delete = find.byKey(
+          Key('company-job-delete-${f.createCommand.jobId}'),
+        );
+        await waitForWidget(tester, delete);
+        await tester.ensureVisible(delete);
+        await tester.tap(delete);
+        await tester.pumpAndSettle();
+        expect(find.text('Delete Job?'), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(
+          await tester.runAsync(
+            () => f.db.select(f.db.companyJobLifecycles).get(),
+          ),
+          isEmpty,
+        );
+        await tester.tap(delete);
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          await tester.tap(find.widgetWithText(FilledButton, 'Delete Job'));
+          await Future<void>.delayed(const Duration(seconds: 1));
+        });
+        final retry = find.byKey(const Key('company-job-retry-lifecycle'));
+        await waitForWidget(tester, find.text('Deleted Job history'));
+        await waitForWidget(tester, retry);
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('company-jobs-list')),
+            matching: find.byKey(Key('company-job-${f.createCommand.jobId}')),
+          ),
+          findsNothing,
+        );
+        final saved = (await tester.runAsync(
+          () => f.db.select(f.db.companyJobLifecycles).get(),
+        ))!.single;
+        await tester.ensureVisible(retry);
+        await tester.runAsync(() async {
+          await tester.tap(retry);
+          await Future<void>.delayed(const Duration(seconds: 1));
+        });
+        await tester.pump();
+        expect(
+          find.byKey(const Key('company-job-retry-lifecycle')),
+          findsNothing,
+        );
+        expect(
+          (await tester.runAsync(
+            () => f.db.select(f.db.companyJobLifecycles).get(),
+          ))!.single,
+          saved,
+        );
+        await tester.ensureVisible(find.text('Deleted Job history'));
+        await tester.tap(find.text('Deleted Job history'));
+        await tester.pumpAndSettle();
+        expect(find.text('Baseline'), findsOneWidget);
+        expect(
+          find.byKey(Key('company-job-delete-${f.createCommand.jobId}')),
+          findsNothing,
+        );
+      },
+    );
+  }
 }

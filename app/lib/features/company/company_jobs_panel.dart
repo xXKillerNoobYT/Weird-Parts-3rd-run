@@ -272,6 +272,10 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       );
       if (mounted) setState(() => _pendingLifecycle = null);
       await _load();
+    } on CompanyJobLifecycleContextRefusal catch (error) {
+      if (mounted) setState(() => _pendingLifecycle = null);
+      await _load();
+      if (mounted) setState(() => _error = error.reason);
     } catch (_) {
       await _load();
       if (mounted) {

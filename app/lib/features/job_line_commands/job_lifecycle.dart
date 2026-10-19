@@ -485,6 +485,13 @@ const _lifecycleReceiptDomain = 'wiredpart.job.lifecycle.receipt@1:';
 const _incomingLifecycleReceiptDomain =
     'wiredpart.job.lifecycle.incoming.receipt@1:';
 
+final class CompanyJobLifecycleContextRefusal extends JobLineRefusal {
+  const CompanyJobLifecycleContextRefusal()
+    : super(
+        'Displayed Job context changed. Review it before deleting or resolving.',
+      );
+}
+
 final class JobLifecycleDependencyRefusal extends JobLineRefusal {
   const JobLifecycleDependencyRefusal()
     : super('Job lifecycle dependency is missing');
@@ -829,9 +836,7 @@ extension CompanyJobLifecycleCommands on CompanyJobCommands {
           );
           if (_canonical(graph.context.tagged) !=
               _canonical(command.observed.tagged)) {
-            throw const JobLineRefusal(
-              'Displayed Job context changed. Review it before deleting or resolving.',
-            );
+            throw const CompanyJobLifecycleContextRefusal();
           }
           await _lifecycleCapacity(command);
           final body = <String, Object?>{

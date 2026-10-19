@@ -73,7 +73,7 @@ void main() {
       final before = await sqlSnapshot(f.db);
       await expectLater(
         f.commands.setJobLifecycle(stale, ownerSession: f.owner),
-        throwsA(isA<JobLineRefusal>()),
+        throwsA(isA<CompanyJobLifecycleContextRefusal>()),
       );
       expect(await sqlSnapshot(f.db), before);
       final view = (await f.commands.listJobViews(ownerSession: f.owner))
