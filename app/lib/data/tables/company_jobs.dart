@@ -66,3 +66,7 @@ class CompanyJobNamePeerAcks extends CompanyJobPeerAcks {}
 class CompanyJobDetails extends CompanyJobNames {}
 
 class CompanyJobDetailPeerAcks extends CompanyJobPeerAcks {}
+
+class CompanyJobLifecycles extends CompanyJobNames {}
+
+class CompanyJobLifecyclePeerAcks extends CompanyJobPeerAcks {}

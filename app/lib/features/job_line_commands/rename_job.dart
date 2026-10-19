@@ -9,7 +9,11 @@ final class RenameJob {
     required this.creationDigest,
     required List<String> observedHeads,
     required String name,
-  }) : observedHeads = List.unmodifiable([...observedHeads]..sort()),
+    List<String>? observedLifecycleHeads,
+  }) : observedLifecycleHeads = observedLifecycleHeads == null
+           ? null
+           : List.unmodifiable([...observedLifecycleHeads]..sort()),
+       observedHeads = List.unmodifiable([...observedHeads]..sort()),
        name = name.trim() {
     CreateJob(
       companyId: companyId,
@@ -24,12 +28,27 @@ final class RenameJob {
         observedHeads.any((v) => !RegExp(r'^[a-f0-9]{64}$').hasMatch(v))) {
       throw const JobLineRefusal('Invalid name history or parent capacity');
     }
+    if (observedLifecycleHeads != null) {
+      final refs = [
+        ...observedHeads.map(
+          (id) => JobOperationRef(JobOperationFamily.name, id),
+        ),
+        ...observedLifecycleHeads.map(
+          (id) => JobOperationRef(JobOperationFamily.lifecycle, id),
+        ),
+      ];
+      JobCausalContext(refs);
+    }
   }
   final String companyId, shopId, jobId, requestId, creationDigest, name;
+  final List<String>? observedLifecycleHeads;
   final List<String> observedHeads;
   Map<String, Object?> _json() => {
-    'v': 1,
-    'contract': 'job.name.set@1',
+    'v': observedLifecycleHeads == null ? 1 : 2,
+    'contract': observedLifecycleHeads == null
+        ? 'job.name.set@1'
+        : 'job.name.set@2',
+    if (observedLifecycleHeads != null) 'lifecycle': observedLifecycleHeads,
     'company': companyId,
     'shop': shopId,
     'job': jobId,
@@ -78,6 +97,7 @@ final class _NameOperation {
     creationDigest: _string(body, 'creation'),
     observedHeads: (body['parents'] as List).cast<String>(),
     name: _string(body, 'name'),
+    observedLifecycleHeads: (body['lifecycle'] as List?)?.cast<String>(),
   );
   static _NameOperation parse(Uint8List bytes) {
     if (bytes.length > _maximumBytes) {
@@ -97,6 +117,7 @@ final class _NameOperation {
       'creation',
       'parents',
       'name',
+      if (body['v'] == 2) 'lifecycle',
       'generation',
       'installation',
       'device',
@@ -105,8 +126,10 @@ final class _NameOperation {
       'facts',
     });
     if (_canonical(value) != text ||
-        body['v'] != 1 ||
-        body['contract'] != 'job.name.set@1' ||
+        !((body['v'] == 1 && body['contract'] == 'job.name.set@1') ||
+            (body['v'] == 2 &&
+                body['contract'] == 'job.name.set@2' &&
+                body['lifecycle'] is List)) ||
         body['parents'] is! List ||
         (body['parents'] as List).any((p) => p is! String)) {
       throw const JobLineRefusal('unsupported or noncanonical name operation');
@@ -143,6 +166,7 @@ final class CompanyJobView {
     this.creationDigest,
     List<_NameOperation> operations,
     this.details,
+    this.lifecycle,
   ) {
     final referenced = operations
         .expand((op) => op.command.observedHeads)
@@ -192,6 +216,7 @@ final class CompanyJobView {
     }
     lastAgreedName = resolvedName ?? agreed;
   }
+  final CompanyJobLifecycleView lifecycle;
   final Job baseJob;
   final CompanyJobDetailsView details;
   final String creationDigest;
@@ -301,6 +326,14 @@ Future<void> _validateNameDependencies(
       create.commitment != base.operationCommitment) {
     throw const JobLineRefusal('name creation baseline changed');
   }
+  await _validateMetadataLifecycle(
+    db,
+    command.companyId,
+    command.shopId,
+    command.jobId,
+    command.creationDigest,
+    command.observedLifecycleHeads,
+  );
   for (final parent in command.observedHeads) {
     final row = await (db.select(
       db.companyJobNames,
@@ -538,6 +571,15 @@ extension CompanyJobNameCommands on CompanyJobCommands {
             await _verifyNameRecord(existing);
             return existing.receiptBytes;
           }
+          await _validateMetadataLifecycle(
+            _db,
+            command.companyId,
+            command.shopId,
+            command.jobId,
+            command.creationDigest,
+            command.observedLifecycleHeads,
+            local: true,
+          );
           await _verifyNameDependencies(command);
           await _nameCapacity(command);
           final body = <String, Object?>{
@@ -570,6 +612,15 @@ extension CompanyJobNameCommands on CompanyJobCommands {
           final bytes = await _saveName(row, session, intent!);
           intent = await _installation.sealCompanyCommand(_db, intent!);
           await beforeCommit?.call();
+          await _validateMetadataLifecycle(
+            _db,
+            command.companyId,
+            command.shopId,
+            command.jobId,
+            command.creationDigest,
+            command.observedLifecycleHeads,
+            local: true,
+          );
           await _installation.validateHeldCompanyCommand(
             _db,
             intent!,
@@ -731,6 +782,14 @@ extension CompanyJobNameCommands on CompanyJobCommands {
   }) async {
     verified ??= <String>{};
     await _validateNameDependencies(_db, command);
+    await _verifyGraphReferences(
+      JobCausalContext(
+        (command.observedLifecycleHeads ?? []).map(
+          (id) => JobOperationRef(JobOperationFamily.lifecycle, id),
+        ),
+      ),
+      verified: verified,
+    );
     final baseline = await (_db.select(
       _db.companyJobs,
     )..where((t) => t.jobId.equals(command.jobId))).getSingle();
@@ -790,6 +849,7 @@ extension CompanyJobNameCommands on CompanyJobCommands {
     final jobs = await listJobs(ownerSession: ownerSession);
     final names = await nameSyncHoldings(ownerSession: ownerSession);
     final details = await detailsSyncHoldings(ownerSession: ownerSession);
+    await lifecycleSyncHoldings(ownerSession: ownerSession);
     final result = <CompanyJobView>[];
     for (final job in jobs) {
       final base = await (_db.select(
@@ -817,6 +877,13 @@ extension CompanyJobNameCommands on CompanyJobCommands {
                   ),
                 )
                 .toList(),
+          ),
+          await _loadJobGraph(
+            _db,
+            base.companyId,
+            base.shopId,
+            job.id,
+            _operationDigest(base.operationBytes),
           ),
         ),
       );

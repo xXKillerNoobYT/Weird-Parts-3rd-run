@@ -18,3 +18,4 @@ part 'create_job.dart';
 part 'create_job_sync.dart';
 part 'rename_job.dart';
 part 'job_details.dart';
+part 'job_lifecycle.dart';

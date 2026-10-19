@@ -61,6 +61,7 @@ void requireLegacyBusinessFile(File file) {
         if (schema >= 8) ...companySyncTableColumns,
         if (schema >= 9) ...companyNameTableColumns,
         if (schema >= 10) ...companyDetailsTableColumns,
+        if (schema >= 11) ...companyLifecycleTableColumns,
       };
       for (final table in expected.keys) {
         final columns = db.select('PRAGMA table_info("$table")');

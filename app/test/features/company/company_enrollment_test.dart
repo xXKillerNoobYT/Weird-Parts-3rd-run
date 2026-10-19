@@ -201,6 +201,7 @@ void main() {
               ((body[key] as List).single['capabilities'] as List).removeWhere(
                 (capability) =>
                     capability == 'editJobDetails' ||
+                    capability == 'manageJobLifecycle' ||
                     (!withJobs &&
                         ['createJob', 'renameJob'].contains(capability)),
               );

@@ -770,6 +770,9 @@ final class CompanyJoin {
           }
           final recipient = request._body;
           final capabilities = <String>[
+            if (has(user, 'manageJobLifecycle') &&
+                has(issuer, 'manageJobLifecycle'))
+              'manageJobLifecycle',
             if (has(user, 'createJob') && has(issuer, 'createJob')) 'createJob',
             if (has(user, 'renameJob') && has(issuer, 'renameJob')) 'renameJob',
             if (has(user, 'editJobDetails') && has(issuer, 'editJobDetails'))
