@@ -25,10 +25,13 @@ enum NativeTestAction {
 
 enum NativeJobLifecycleUiStep {
   inspect,
+  prepareDeleteOffline,
   deleteOffline,
+  prepareEditNotesOffline,
   editNotesOffline,
   inspectConflict,
   checkpointConflict,
+  prepareKeepEdited,
   keepEdited,
   inspectResolved,
   checkpointResolved,

@@ -9,6 +9,27 @@ String lifecycleStep(Fixture f, Object? step) => change(f.request(1), (value) {
 });
 
 void main() {
+  test('three preparations have finite typed wire names', () {
+    for (final entry in {
+      'prepareDeleteOffline': NativeJobLifecycleUiStep.prepareDeleteOffline,
+      'prepareEditNotesOffline':
+          NativeJobLifecycleUiStep.prepareEditNotesOffline,
+      'prepareKeepEdited': NativeJobLifecycleUiStep.prepareKeepEdited,
+    }.entries) {
+      final f = Fixture();
+      expect(
+        f.cache.submitJson(lifecycleStep(f, entry.key)).state,
+        NativeTestCommandState.accepted,
+      );
+      expect(f.cache.takeNext()!.jobLifecycleStep, entry.value);
+    }
+    final f = Fixture();
+    expect(
+      f.cache.submitJson(lifecycleStep(f, 'prepareAnything')).error,
+      NativeTestCommandError.invalidRequest,
+    );
+  });
+
   test('every lifecycle step round trips with its exact family', () {
     for (final step in NativeJobLifecycleUiStep.values) {
       final f = Fixture();

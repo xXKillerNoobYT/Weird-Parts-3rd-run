@@ -1,6 +1,7 @@
 @Timeout(Duration(minutes: 3))
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -13,12 +14,17 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:uuid/uuid.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/company/company_jobs_panel.dart';
+import 'package:wired_parts/features/company/company_job_details_section.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_crypto.dart';
-import '../features/company/company_job_name_test.dart' show NameFixture;
+import '../../tool/native_nearby_test_commands.dart';
+import '../../tool/native_nearby_test_tap.dart';
+import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
+import '../features/company/company_job_name_test.dart'
+    show NameFixture, nameSnapshot;
 import '../features/company/company_job_lifecycle_sync_test.dart' show deletion;
 import '../features/company/company_join_test.dart'
     show JoinFixture, activateFixtureB;
@@ -305,7 +311,11 @@ void main() {
       () => validate(run: adapter.jobDetailsNativeRun),
       throwsA(isA<NativeTestFailure>()),
     );
-    expect(() => validate(run: 'j63-lifecycle-v4'), returnsNormally);
+    expect(() => validate(run: 'j63-lifecycle-v5'), returnsNormally);
+    expect(
+      () => validate(run: 'j63-lifecycle-v4'),
+      throwsA(isA<NativeTestFailure>()),
+    );
     expect(
       () => validate(run: 'j63-lifecycle-v3'),
       throwsA(isA<NativeTestFailure>()),
@@ -558,6 +568,439 @@ void main() {
     changed.dispose();
     expect(admit, throwsA(isA<NativeTestFailure>()));
   });
+
+  testWidgets(
+    'final raw capture rejects changed causal or protected state before preparation',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      Future<Map<String, Object?>> capture() async {
+        final base = (await f.store.readState(f.security.namespace))!;
+        final custody = (await f.store.readState(
+          companyCustodyNamespace(f.security.namespace),
+        ))!;
+        final names = await f.db.select(f.db.companyJobNames).get();
+        return {
+          'sqlSha256': digest(
+            jsonEncode(names.map((r) => r.toJson()).toList()),
+          ),
+          'baseProtectedRevision': base.revision,
+          'baseProtectedSha256': sha256.convert(base.bytes).toString(),
+          'custodyProtectedRevision': custody.revision,
+          'custodyProtectedSha256': sha256.convert(custody.bytes).toString(),
+          'identity': {
+            'company': f.owner.identity.companyId,
+            'device': f.owner.identity.deviceId,
+          },
+        };
+      }
+
+      var published = 0;
+      await tester.runAsync(() async {
+        final initial = await capture();
+        adapter.verifyJobLifecycleNativePreparationRawState(initial, initial);
+        await f.commands.renameJob(
+          f.rename('Boundary causal change'),
+          ownerSession: f.owner,
+        );
+        final changedHead = await capture();
+        expect(() {
+          adapter.verifyJobLifecycleNativePreparationRawState(
+            initial,
+            changedHead,
+          );
+          published++;
+        }, throwsA(isA<NativeTestFailure>()));
+        final verified = await capture();
+        final base = (await f.store.readState(f.security.namespace))!;
+        await f.store.compareAndSwapState(
+          f.security.namespace,
+          expectedRevision: base.revision,
+          nextRevision: const Uuid().v4(),
+          bytes: base.bytes,
+        );
+        final changedProtected = await capture();
+        expect(changedProtected['sqlSha256'], verified['sqlSha256']);
+        expect(
+          changedProtected['baseProtectedSha256'],
+          verified['baseProtectedSha256'],
+        );
+        expect(
+          changedProtected['baseProtectedRevision'],
+          isNot(verified['baseProtectedRevision']),
+        );
+        expect(() {
+          adapter.verifyJobLifecycleNativePreparationRawState(
+            verified,
+            changedProtected,
+          );
+          published++;
+        }, throwsA(isA<NativeTestFailure>()));
+        expect(published, 0);
+        expect(await f.db.select(f.db.companyJobLifecycles).get(), isEmpty);
+      });
+    },
+  );
+
+  testWidgets(
+    'prepared Delete refuses page or session change during actual pointer preparation',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      var pageEpoch = 1;
+      var invalidateSession = false;
+      var pointerUps = 0;
+      Future<void>? signOut;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Listener(
+                onPointerDown: (_) {
+                  if (invalidateSession) {
+                    signOut = f.enrollment.signOut();
+                  } else {
+                    pageEpoch++;
+                  }
+                },
+                onPointerUp: (_) => pointerUps++,
+                child: CompanyJobsPanel(commands: f.commands, owner: f.owner),
+              ),
+            ),
+          ),
+        ),
+      );
+      final target = find.byKey(
+        Key('company-job-delete-${f.createCommand.jobId}'),
+      );
+      await native.ready(tester, () => target.evaluate().length == 1);
+      await tester.ensureVisible(target);
+      await tester.pump();
+      final page = tester.state(find.byType(CompanyJobsPanel));
+      for (var attempt = 0; attempt < 2; attempt++) {
+        final prepared = adapter.PreparedJobLifecycleNativeUi(
+          step: NativeJobLifecycleUiStep.deleteOffline,
+          jobId: f.createCommand.jobId,
+          stateSha256: digest('raw-state'),
+          controlEpoch: 'epoch-a',
+          ownerSession: f.owner,
+          page: page,
+          pageEpoch: pageEpoch,
+          lifecycleEpoch: 1,
+          preparationSequence: 1,
+          initial: {
+            'selectedJob': f.createCommand.jobId,
+            'creationDigest': f.creationDigest,
+          },
+          baseline: {
+            'selectedJob': f.createCommand.jobId,
+            'creationDigest': f.creationDigest,
+          },
+        );
+        var rejected = false;
+        try {
+          await guardedNativeTap(
+            tester,
+            target,
+            isStillCurrent: () => prepared.isCurrent(
+              session: f.owner,
+              currentPage: page,
+              currentPageEpoch: pageEpoch,
+              currentLifecycleEpoch: 1,
+              lifecycleCurrent: true,
+            ),
+          );
+        } on NativeTestFailure {
+          rejected = true;
+        }
+        expect(rejected, isTrue);
+        await tester.pump();
+        expect(target, findsOneWidget);
+        expect(find.text('Delete Job?'), findsNothing);
+        expect(pointerUps, 0);
+        expect(f.owner.isValid, !invalidateSession);
+        invalidateSession = true;
+      }
+      if (signOut != null) await tester.runAsync(() => signOut!);
+      expect(
+        await tester.runAsync(
+          () => f.db.select(f.db.companyJobLifecycles).get(),
+        ),
+        isEmpty,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'expired before Delete causes zero taps and zero lifecycle effects',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      await native.mount(tester, f);
+      var taps = 0;
+      await expectLater(
+        adapter.saveJobLifecycleThroughNativeUi(
+          tester: tester,
+          jobId: f.createCommand.jobId,
+          choice: JobLifecycleChoice.deleted,
+          tap: (target) async {
+            taps++;
+            await native.tap(tester, target);
+          },
+          waitUntilReady: (ready) => native.ready(tester, ready),
+          requireBeforeEffect: () =>
+              adapter.validateJoinNativeDeadline(15000, 15000),
+        ),
+        throwsA(isA<NativeTestFailure>()),
+      );
+      expect(taps, 0);
+      expect(
+        await tester.runAsync(
+          () => f.db.select(f.db.companyJobLifecycles).get(),
+        ),
+        isEmpty,
+      );
+      expect(find.text('Delete Job?'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'prepared lifecycle context refuses changed causal state session page or command',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      await native.mount(tester, f);
+      final page = tester.state(find.byType(CompanyJobsPanel));
+      final state = (await tester.runAsync(() => nameSnapshot(f)))!;
+      final initial = <String, Object?>{
+        'selectedJob': f.createCommand.jobId,
+        'creationDigest': f.creationDigest,
+      };
+      final baseline = <String, dynamic>{...initial};
+      final control = command_test.Fixture();
+      final prepared = adapter.PreparedJobLifecycleNativeUi(
+        step: NativeJobLifecycleUiStep.deleteOffline,
+        jobId: f.createCommand.jobId,
+        ownerSession: f.owner,
+        page: page,
+        pageEpoch: 7,
+        lifecycleEpoch: 3,
+        stateSha256: state,
+        preparationSequence: 1,
+        controlEpoch: control.localSession.epoch,
+        initial: initial,
+        baseline: baseline,
+      );
+      void check({
+        String? rawState,
+        int pageEpoch = 7,
+        int lifecycleEpoch = 3,
+        bool current = true,
+        NativeJobLifecycleUiStep step = NativeJobLifecycleUiStep.deleteOffline,
+      }) => prepared.requireCurrent(
+        effectStep: step,
+        session: f.owner,
+        currentPage: tester.state(find.byType(CompanyJobsPanel)),
+        currentPageEpoch: pageEpoch,
+        currentLifecycleEpoch: lifecycleEpoch,
+        lifecycleCurrent: current,
+        currentStateSha256: rawState ?? state,
+      );
+      expect(check, returnsNormally);
+      initial['selectedJob'] = 'changed';
+      baseline['creationDigest'] = 'changed';
+      expect(prepared.initial['selectedJob'], f.createCommand.jobId);
+      expect(prepared.baseline['creationDigest'], f.creationDigest);
+      expect(prepared.stage, adapter.JobLifecycleNativeStage.baseline);
+      for (final invalid in <void Function()>[
+        () => check(pageEpoch: 8),
+        () => check(lifecycleEpoch: 4),
+        () => check(current: false),
+        () => check(rawState: digest('changed-store')),
+        () => check(step: NativeJobLifecycleUiStep.keepEdited),
+      ]) {
+        expect(invalid, throwsA(isA<NativeTestFailure>()));
+      }
+      final prepareWire = NativeTestCommand.encodeRequest(
+        session: control.localSession,
+        sequence: 2,
+        action: NativeTestAction.jobLifecycleUi,
+        deadlineMillis: 1000,
+        jobLifecycleStep: NativeJobLifecycleUiStep.prepareDeleteOffline,
+      );
+      control.cache.submitJson(prepareWire);
+      final other = control.cache.takeNext()!;
+      expect(prepared.accepts(other), isFalse);
+      control.cache.complete(other, const NativeTestCommandResult.effect());
+      final effectWire = NativeTestCommand.encodeRequest(
+        session: control.localSession,
+        sequence: 3,
+        action: NativeTestAction.jobLifecycleUi,
+        deadlineMillis: 1000,
+        jobLifecycleStep: NativeJobLifecycleUiStep.deleteOffline,
+      );
+      control.cache.submitJson(effectWire);
+      expect(prepared.accepts(control.cache.takeNext()!), isTrue);
+      await tester.runAsync(
+        () => f.commands.renameJob(
+          f.rename('Changed causal head'),
+          ownerSession: f.owner,
+        ),
+      );
+      final changed = (await tester.runAsync(() => nameSnapshot(f)))!;
+      expect(changed, isNot(state));
+      expect(() => check(rawState: changed), throwsA(isA<NativeTestFailure>()));
+      await tester.pumpWidget(const SizedBox());
+      expect(f.owner.isValid, isTrue);
+      expect(
+        prepared.isCurrent(
+          session: f.owner,
+          currentPage: null,
+          currentPageEpoch: 7,
+          currentLifecycleEpoch: 3,
+          lifecycleCurrent: true,
+        ),
+        isFalse,
+      );
+      await tester.runAsync(f.enrollment.signOut);
+      expect(f.owner.isValid, isFalse);
+      expect(
+        await tester.runAsync(
+          () => f.db.select(f.db.companyJobLifecycles).get(),
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets(
+    'held real Notes Save completes once across the effect deadline',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      final view = (await tester.runAsync(
+        () => f.commands.listJobViews(ownerSession: f.owner),
+      ))!.single;
+      final committed = Completer<void>();
+      final release = Completer<void>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CompanyJobDetailsSection(
+                key: Key('company-job-details-${view.baseJob.id}'),
+                job: view,
+                commands: f.commands,
+                owner: f.owner,
+                available: true,
+                onSaved: () async {
+                  committed.complete();
+                  await release.future;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      final cache = command_test.Fixture();
+      final wire = NativeTestCommand.encodeRequest(
+        session: cache.localSession,
+        sequence: 1,
+        action: NativeTestAction.jobLifecycleUi,
+        deadlineMillis: 15000,
+        jobLifecycleStep: NativeJobLifecycleUiStep.editNotesOffline,
+      );
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      var saves = 0;
+      Future<void> activeWait(bool Function() ready) =>
+          adapter.waitForJoinNativeCompletion(
+            ready: ready,
+            elapsedMillis: () => cache.now,
+            commandDeadlineMillis: command.deadlineMillis,
+            enforceCommandDeadline: true,
+            pump: () async {
+              await tester.runAsync(
+                () => Future<void>.delayed(const Duration(milliseconds: 25)),
+              );
+              await tester.pump();
+              if (committed.isCompleted) cache.now = 15000;
+            },
+          );
+      Future<void> passiveWait(bool Function() ready) =>
+          adapter.waitForJoinNativeCompletion(
+            ready: ready,
+            elapsedMillis: () => cache.now,
+            commandDeadlineMillis: command.deadlineMillis,
+            pump: () async {
+              if (committed.isCompleted && !release.isCompleted) {
+                cache.now = 15001;
+                expect(
+                  cache.cache.submitJson(wire).state,
+                  NativeTestCommandState.unknown,
+                );
+                expect(cache.cache.takeNext(), isNull);
+                release.complete();
+              }
+              await tester.runAsync(
+                () => Future<void>.delayed(const Duration(milliseconds: 25)),
+              );
+              await tester.pump();
+            },
+          );
+      try {
+        await adapter.saveJobDetailsThroughNativeUi(
+          tester: tester,
+          jobId: view.baseJob.id,
+          text: {JobDetailField.notes: 'Once across deadline'},
+          tap: (target) async {
+            if (target.evaluate().single.widget.key ==
+                const Key('company-job-save-details')) {
+              saves++;
+            }
+            await native.tap(tester, target);
+          },
+          waitUntilReady: activeWait,
+          waitForCompletion: passiveWait,
+          requireBeforeEffect: () => adapter.validateJoinNativeDeadline(
+            cache.now,
+            command.deadlineMillis,
+          ),
+        );
+        expect(saves, 1);
+        final rows = (await tester.runAsync(
+          () => f.commands.detailsSyncHoldings(ownerSession: f.owner),
+        ))!;
+        expect(rows, hasLength(1));
+        final after = (await tester.runAsync(
+          () => f.commands.listJobViews(ownerSession: f.owner),
+        ))!.single;
+        expect(after.details.notes.value, 'Once across deadline');
+        final reply = cache.cache.complete(
+          command,
+          const NativeTestCommandResult.effect(),
+        );
+        expect(cache.cache.submitJson(wire).toJson(), reply.toJson());
+        expect(cache.cache.takeNext(), isNull);
+        expect(
+          () => adapter.validateJoinNativeDeadline(cache.now, 15000),
+          throwsA(isA<NativeTestFailure>()),
+        );
+      } finally {
+        if (!release.isCompleted) release.complete();
+        await native.ready(
+          tester,
+          () => find
+              .byKey(const Key('company-job-details-notes'))
+              .evaluate()
+              .isEmpty,
+        );
+        await tester.pumpWidget(const SizedBox());
+      }
+    },
+  );
 
   testWidgets(
     'native Delete uses confirmation and retains typed history outside the normal list',

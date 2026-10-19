@@ -16,6 +16,7 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/company/company_gate.dart';
 import 'package:wired_parts/features/company/company_join_page.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
@@ -44,7 +45,7 @@ const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
 const jobDetailsNativeRun = 'j116-details-v3';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
-const jobLifecycleNativeRun = 'j63-lifecycle-v4';
+const jobLifecycleNativeRun = 'j63-lifecycle-v5';
 const jobLifecycleNativeProductRevision =
     'c82451e2081e9cb78ba26412511064c1b1b82e93';
 const _jobLifecycleMode = bool.fromEnvironment(
@@ -364,6 +365,7 @@ Future<void> saveJobDetailsThroughNativeUi({
   String? notesCandidateOperationId,
   required Future<void> Function(Finder) tap,
   required Future<void> Function(bool Function()) waitUntilReady,
+  Future<void> Function(bool Function())? waitForCompletion,
   required void Function() requireBeforeEffect,
 }) async {
   _require(!text.containsKey(JobDetailField.status));
@@ -427,7 +429,7 @@ Future<void> saveJobDetailsThroughNativeUi({
   );
   requireBeforeEffect();
   await tap(save);
-  await waitUntilReady(
+  await (waitForCompletion ?? waitUntilReady)(
     () =>
         input.evaluate().isEmpty ||
         inside('company-job-details-error').evaluate().isNotEmpty,
@@ -3666,6 +3668,146 @@ void validateJobDetailsNativeMixedRepeat(List<Map<String, Object?>> terminals) {
 
 enum JobLifecycleNativeStage { baseline, conflict, resolved }
 
+NativeJobLifecycleUiStep? jobLifecycleNativePreparedEffect(
+  NativeJobLifecycleUiStep step,
+) => switch (step) {
+  NativeJobLifecycleUiStep.prepareDeleteOffline =>
+    NativeJobLifecycleUiStep.deleteOffline,
+  NativeJobLifecycleUiStep.prepareEditNotesOffline =>
+    NativeJobLifecycleUiStep.editNotesOffline,
+  NativeJobLifecycleUiStep.prepareKeepEdited =>
+    NativeJobLifecycleUiStep.keepEdited,
+  _ => null,
+};
+
+bool jobLifecycleNativeEffectStep(NativeJobLifecycleUiStep step) => {
+  NativeJobLifecycleUiStep.deleteOffline,
+  NativeJobLifecycleUiStep.editNotesOffline,
+  NativeJobLifecycleUiStep.keepEdited,
+}.contains(step);
+
+enum JobLifecycleNativeUiPhase {
+  idle,
+  navigation,
+  signIn,
+  verification,
+  prepared,
+  effectGuard,
+  effectOpen,
+  effectConfirm,
+  effectSave,
+  observing,
+  readback,
+  returning,
+}
+
+final class PreparedJobLifecycleNativeUi {
+  PreparedJobLifecycleNativeUi({
+    required this.step,
+    required this.jobId,
+    required this.ownerSession,
+    required this.page,
+    required this.pageEpoch,
+    required this.lifecycleEpoch,
+    required this.stateSha256,
+    required this.preparationSequence,
+    required this.controlEpoch,
+    required Map<String, Object?> initial,
+    required Map<String, dynamic> baseline,
+  }) : _initial = _canonical(initial),
+       _baseline = _canonical(baseline) {
+    _require(jobLifecycleNativeEffectStep(step));
+    _require(jobId.isNotEmpty && _sha256Pattern.hasMatch(stateSha256));
+    _require(
+      initial['selectedJob'] == jobId &&
+          baseline['selectedJob'] == jobId &&
+          initial['creationDigest'] == baseline['creationDigest'],
+    );
+  }
+  final NativeJobLifecycleUiStep step;
+  final String jobId, stateSha256, controlEpoch;
+  final OwnerSession ownerSession;
+  final State page;
+  final int pageEpoch, lifecycleEpoch, preparationSequence;
+  final String _initial, _baseline;
+  JobLifecycleNativeStage get stage =>
+      step == NativeJobLifecycleUiStep.keepEdited
+      ? JobLifecycleNativeStage.conflict
+      : JobLifecycleNativeStage.baseline;
+  Map<String, Object?> get initial =>
+      (jsonDecode(_initial) as Map).cast<String, Object?>();
+  Map<String, dynamic> get baseline =>
+      (jsonDecode(_baseline) as Map).cast<String, dynamic>();
+
+  bool accepts(NativeTestCommand command) =>
+      command.action == NativeTestAction.jobLifecycleUi &&
+      command.jobLifecycleStep == step &&
+      command.epoch == controlEpoch &&
+      command.sequence > preparationSequence;
+
+  bool isCurrent({
+    required OwnerSession? session,
+    required State? currentPage,
+    required int currentPageEpoch,
+    required int currentLifecycleEpoch,
+    required bool lifecycleCurrent,
+  }) =>
+      lifecycleCurrent &&
+      ownerSession.isValid &&
+      identical(session, ownerSession) &&
+      page.mounted &&
+      identical(page, currentPage) &&
+      pageEpoch == currentPageEpoch &&
+      lifecycleEpoch == currentLifecycleEpoch;
+
+  void requireCurrent({
+    required NativeJobLifecycleUiStep effectStep,
+    required OwnerSession? session,
+    required State? currentPage,
+    required int currentPageEpoch,
+    required int currentLifecycleEpoch,
+    required bool lifecycleCurrent,
+    required String currentStateSha256,
+  }) {
+    _require(
+      step == effectStep &&
+          stateSha256 == currentStateSha256 &&
+          isCurrent(
+            session: session,
+            currentPage: currentPage,
+            currentPageEpoch: currentPageEpoch,
+            currentLifecycleEpoch: currentLifecycleEpoch,
+            lifecycleCurrent: lifecycleCurrent,
+          ),
+    );
+  }
+}
+
+String verifyJobLifecycleNativePreparationRawState(
+  Map<String, Object?> verified,
+  Map<String, Object?> raw,
+) {
+  for (final key in const [
+    'sqlSha256',
+    'baseProtectedRevision',
+    'baseProtectedSha256',
+    'custodyProtectedRevision',
+    'custodyProtectedSha256',
+  ]) {
+    _require(
+      verified[key] is String &&
+          raw[key] is String &&
+          verified[key] == raw[key],
+    );
+  }
+  _require(
+    verified['identity'] is Map &&
+        raw['identity'] is Map &&
+        _canonical(verified['identity']) == _canonical(raw['identity']),
+  );
+  return _hash(raw);
+}
+
 void validateJobLifecycleNativeRepeat(
   List<Map<String, Object?>> terminals, {
   required JobLifecycleNativeStage stage,
@@ -4023,6 +4165,7 @@ Future<void> saveJobLifecycleThroughNativeUi({
   required JobLifecycleChoice choice,
   required Future<void> Function(Finder) tap,
   required Future<void> Function(bool Function()) waitUntilReady,
+  Future<void> Function(bool Function())? waitForCompletion,
   required void Function() requireBeforeEffect,
 }) async {
   final target = find.byKey(
@@ -4047,7 +4190,7 @@ Future<void> saveJobLifecycleThroughNativeUi({
     requireBeforeEffect();
     await tap(confirm);
   }
-  await waitUntilReady(
+  await (waitForCompletion ?? waitUntilReady)(
     () =>
         find.byKey(const Key('company-job-error')).evaluate().isEmpty &&
         find
@@ -5092,6 +5235,10 @@ final class _JoinNative with WidgetsBindingObserver {
   MatchGrantVerifier? verifier;
   _SavedPair? savedPair;
   NativeTestResidentRpc? _rpc;
+  PreparedJobLifecycleNativeUi? preparedLifecycleUi;
+  State? lifecycleUiHome;
+  int lifecycleUiPageEpoch = 0;
+  JobLifecycleNativeUiPhase lifecycleUiPhase = JobLifecycleNativeUiPhase.idle;
   bool finished = false, closed = false, exitRequested = false;
   bool conflictReadbackVerified = false;
   bool interruptedReadbackVerified = false;
@@ -5357,8 +5504,10 @@ final class _JoinNative with WidgetsBindingObserver {
     }
   }
 
-  Future<void> tap(Finder finder) async {
+  Future<void> tap(Finder finder, {bool Function()? isStillCurrent}) async {
+    bool current() => effectCurrent() && (isStillCurrent?.call() ?? true);
     requireBeforeEffect();
+    _require(current());
     await tester.scrollUntilVisible(
       finder,
       180,
@@ -5367,8 +5516,9 @@ final class _JoinNative with WidgetsBindingObserver {
     await tester.pump();
     _require(finder.evaluate().length == 1);
     requireBeforeEffect();
+    _require(current());
     await tester.runAsync(
-      () => guardedNativeTap(tester, finder, isStillCurrent: effectCurrent),
+      () => guardedNativeTap(tester, finder, isStillCurrent: current),
     );
     await tester.pump();
   }
@@ -5381,6 +5531,11 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> mountGate({
     Future<void> Function(bool Function())? waitUntilReady,
   }) async {
+    if (_jobLifecycleMode) {
+      preparedLifecycleUi = null;
+      lifecycleUiHome = null;
+      lifecycleUiPageEpoch++;
+    }
     await tester.pumpWidget(
       WiredPartsApp(
         key: ValueKey('join-native-gate-${clock.elapsedMicroseconds}'),
@@ -5407,11 +5562,15 @@ final class _JoinNative with WidgetsBindingObserver {
     );
   }
 
-  Future<void> signInUi() async {
+  Future<void> signInUi({
+    Future<void> Function(bool Function())? waitForCompletion,
+  }) async {
     _require(find.text('Company locked').evaluate().length == 1);
     await enter('company-signin-pin', _pin);
     await tap(find.byKey(const Key('company-signin')));
-    await waitForJoinNativeSignInReady(waitUntilReady: wait);
+    await waitForJoinNativeSignInReady(
+      waitUntilReady: waitForCompletion ?? wait,
+    );
   }
 
   Future<void> signOutUi() async {
@@ -5632,9 +5791,82 @@ final class _JoinNative with WidgetsBindingObserver {
     };
   }
 
+  State? get currentLifecycleUiPage {
+    final page = find.byType(CompanyBootstrapGate);
+    return page.evaluate().length == 1 ? tester.state(page) : null;
+  }
+
+  bool get lifecycleUiHomeMounted =>
+      lifecycleCurrent() &&
+      lifecycleUiHome?.mounted == true &&
+      !view.running &&
+      identical(lifecycleUiHome, currentLifecycleUiPage);
+
+  bool preparedLifecycleUiCurrent(PreparedJobLifecycleNativeUi prepared) =>
+      prepared.isCurrent(
+        session: adapterSession,
+        currentPage: currentLifecycleUiPage,
+        currentPageEpoch: lifecycleUiPageEpoch,
+        currentLifecycleEpoch: lifecycleEvent,
+        lifecycleCurrent: lifecycleCurrent(),
+      );
+
+  Future<Map<String, Object?>> lifecycleUiRawState() async {
+    final base = await _nativeStore.readState(namespace);
+    final custody = await _nativeStore.readState(
+      companyCustodyNamespace(namespace),
+    );
+    final held = adapterSession;
+    _require(base != null && custody != null && held != null && held.isValid);
+    return {
+      'sqlSha256': await sqlHash(),
+      'namespace': namespace,
+      'baseProtectedRevision': base!.revision,
+      'baseProtectedSha256': sha256.convert(base.bytes).toString(),
+      'custodyProtectedRevision': custody!.revision,
+      'custodyProtectedSha256': sha256.convert(custody.bytes).toString(),
+      'identity': {
+        'installation': security.identity!.id.value,
+        'generation': security.identity!.generation.value,
+        'storeGeneration': security.receivingStoreGeneration!.value,
+        'publicKeySha256': sha256
+            .convert(security.identity!.publicKey)
+            .toString(),
+        'company': held!.identity.companyId,
+        'shop': held.identity.shopId,
+        'user': held.identity.userId,
+        'device': held.identity.deviceId,
+      },
+    };
+  }
+
+  Future<void> requirePreparedLifecycleUi(
+    PreparedJobLifecycleNativeUi prepared,
+    NativeJobLifecycleUiStep step,
+  ) async {
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.effectGuard;
+    requireBeforeEffect();
+    _require(preparedLifecycleUiCurrent(prepared));
+    final state = _hash(await lifecycleUiRawState());
+    requireBeforeEffect();
+    prepared.requireCurrent(
+      effectStep: step,
+      session: adapterSession,
+      currentPage: currentLifecycleUiPage,
+      currentPageEpoch: lifecycleUiPageEpoch,
+      currentLifecycleEpoch: lifecycleEvent,
+      lifecycleCurrent: lifecycleCurrent(),
+      currentStateSha256: state,
+    );
+  }
+
   Future<NativeTestCommandResult> exerciseJobLifecycleUi(
     NativeJobLifecycleUiStep step,
   ) async {
+    final requestedStep = step;
+    final preparedEffect = jobLifecycleNativePreparedEffect(step);
+    final preparing = preparedEffect != null;
+    step = preparedEffect ?? step;
     _require(
       _jobLifecycleMode &&
           _createdMode &&
@@ -5670,14 +5902,113 @@ final class _JoinNative with WidgetsBindingObserver {
     }
     _require(step != NativeJobLifecycleUiStep.deleteOffline || owner);
     _require(step != NativeJobLifecycleUiStep.editNotesOffline || !owner);
+    if (!preparing && jobLifecycleNativeEffectStep(step)) {
+      final prepared = preparedLifecycleUi;
+      preparedLifecycleUi = null;
+      _require(prepared != null && prepared.accepts(activeCommand!));
+      await requirePreparedLifecycleUi(prepared!, step);
+      return completeLifecycleUiStep(
+        step,
+        prepared.jobId,
+        prepared.initial,
+        prepared.baseline,
+        prepared: prepared,
+      );
+    }
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.navigation;
     requireBeforeEffect();
     await controller!.dispose();
     _require(!view.running);
     await enrollment.signOut();
     adapterSession = null;
     await mountGate();
-    await signInUi();
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.signIn;
+    await signInUi(
+      waitForCompletion: preparing ? waitForPassiveCompletion : null,
+    );
+    if (preparing) requireBeforeEffect();
     adapterSession = await tester.runAsync(() => enrollment.signIn(_pin));
+    final heldSession = adapterSession!;
+    final heldPage = tester.state(find.byType(CompanyBootstrapGate));
+    final heldPageEpoch = lifecycleUiPageEpoch;
+    final heldLifecycleEpoch = lifecycleEvent;
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.verification;
+    final verification = readLifecycleUiPreparation(step);
+    final data = preparing
+        ? await verification.timeout(const Duration(minutes: 3))
+        : await verification;
+    _require(
+      lifecycleCurrent() &&
+          identical(adapterSession, heldSession) &&
+          heldSession.isValid &&
+          heldPage.mounted &&
+          identical(
+            tester.state(find.byType(CompanyBootstrapGate)),
+            heldPage,
+          ) &&
+          lifecycleUiPageEpoch == heldPageEpoch &&
+          lifecycleEvent == heldLifecycleEpoch,
+    );
+    if (preparing) {
+      final raw = await lifecycleUiRawState();
+      final state = verifyJobLifecycleNativePreparationRawState(
+        data.initial,
+        raw,
+      );
+      _require(
+        lifecycleCurrent() &&
+            identical(adapterSession, heldSession) &&
+            heldSession.isValid &&
+            heldPage.mounted &&
+            identical(currentLifecycleUiPage, heldPage) &&
+            lifecycleUiPageEpoch == heldPageEpoch &&
+            lifecycleEvent == heldLifecycleEpoch,
+      );
+      lifecycleUiHome = heldPage;
+      preparedLifecycleUi = PreparedJobLifecycleNativeUi(
+        step: step,
+        jobId: data.jobId,
+        ownerSession: heldSession,
+        page: heldPage,
+        pageEpoch: heldPageEpoch,
+        lifecycleEpoch: heldLifecycleEpoch,
+        stateSha256: state,
+        preparationSequence: activeCommand!.sequence,
+        controlEpoch: activeCommand!.epoch,
+        initial: data.initial,
+        baseline: data.baseline,
+      );
+      lifecycleUiPhase = JobLifecycleNativeUiPhase.prepared;
+      writeOnce('lifecycle-prepared-$pid-${activeCommand!.sequence}.json', {
+        ...data.initial,
+        'step': requestedStep.name,
+        'preparedEffect': step.name,
+        'preparationSequence': activeCommand!.sequence,
+        'preparedStateSha256': state,
+        'preparedPageEpoch': heldPageEpoch,
+        'preparedLifecycleEpoch': heldLifecycleEpoch,
+        'companyControllerStoppedDuringUi': !view.running,
+        'savedThroughProductionUi': false,
+        'passed': false,
+      });
+      return const NativeTestCommandResult.effect();
+    }
+    return completeLifecycleUiStep(
+      step,
+      data.jobId,
+      data.initial,
+      data.baseline,
+    );
+  }
+
+  Future<
+    ({
+      String jobId,
+      Map<String, dynamic> baseline,
+      Map<String, Object?> initial,
+    })
+  >
+  readLifecycleUiPreparation(NativeJobLifecycleUiStep step) async {
     final commands = CompanyJobCommands(enrollment: enrollment);
     final before = await commands.listJobViews(ownerSession: adapterSession!);
     _require(before.length == 2);
@@ -5755,42 +6086,103 @@ final class _JoinNative with WidgetsBindingObserver {
     final initial = await snapshot();
     final expectedStage = switch (step) {
       NativeJobLifecycleUiStep.inspect ||
+      NativeJobLifecycleUiStep.prepareDeleteOffline ||
+      NativeJobLifecycleUiStep.prepareEditNotesOffline ||
       NativeJobLifecycleUiStep.deleteOffline ||
       NativeJobLifecycleUiStep.editNotesOffline =>
         JobLifecycleNativeStage.baseline,
       NativeJobLifecycleUiStep.inspectConflict ||
       NativeJobLifecycleUiStep.checkpointConflict ||
+      NativeJobLifecycleUiStep.prepareKeepEdited ||
       NativeJobLifecycleUiStep.keepEdited => JobLifecycleNativeStage.conflict,
       NativeJobLifecycleUiStep.inspectResolved ||
       NativeJobLifecycleUiStep.checkpointResolved =>
         JobLifecycleNativeStage.resolved,
     };
     validateJobLifecycleNativeEvidence(initial, expectedStage);
+    return (jobId: selected.baseJob.id, baseline: baseline, initial: initial);
+  }
+
+  Future<NativeTestCommandResult> completeLifecycleUiStep(
+    NativeJobLifecycleUiStep step,
+    String jobId,
+    Map<String, Object?> initial,
+    Map<String, dynamic> baseline, {
+    PreparedJobLifecycleNativeUi? prepared,
+  }) async {
+    final commands = CompanyJobCommands(enrollment: enrollment);
+    final checkpointStage = switch (step) {
+      NativeJobLifecycleUiStep.checkpointConflict =>
+        JobLifecycleNativeStage.conflict,
+      NativeJobLifecycleUiStep.checkpointResolved =>
+        JobLifecycleNativeStage.resolved,
+      _ => null,
+    };
     final deleting = step == NativeJobLifecycleUiStep.deleteOffline;
     final keeping = step == NativeJobLifecycleUiStep.keepEdited;
     final editing = step == NativeJobLifecycleUiStep.editNotesOffline;
+    var effectTaps = 0;
+    Future<void> preparedTap(Finder target) async {
+      _require(prepared != null);
+      await requirePreparedLifecycleUi(prepared!, step);
+      lifecycleUiPhase = effectTaps++ == 0
+          ? JobLifecycleNativeUiPhase.effectOpen
+          : deleting
+          ? JobLifecycleNativeUiPhase.effectConfirm
+          : JobLifecycleNativeUiPhase.effectSave;
+      await tap(
+        target,
+        isStillCurrent: () =>
+            preparedLifecycleUiCurrent(prepared) && !view.running,
+      );
+    }
+
+    void preparedEffectGuard() {
+      lifecycleUiPhase = JobLifecycleNativeUiPhase.effectGuard;
+      requireBeforeEffect();
+      _require(prepared != null && preparedLifecycleUiCurrent(prepared));
+    }
+
+    Future<void> observeEffect(bool Function() ready) async {
+      lifecycleUiPhase = JobLifecycleNativeUiPhase.observing;
+      await waitForPassiveCompletion(ready);
+    }
+
     if (deleting || keeping) {
       await saveJobLifecycleThroughNativeUi(
         tester: tester,
-        jobId: selected.baseJob.id,
+        jobId: jobId,
         choice: deleting ? JobLifecycleChoice.deleted : JobLifecycleChoice.kept,
-        tap: tap,
+        tap: preparedTap,
         waitUntilReady: wait,
-        requireBeforeEffect: requireBeforeEffect,
+        waitForCompletion: observeEffect,
+        requireBeforeEffect: preparedEffectGuard,
       );
     } else if (editing) {
       await saveJobDetailsThroughNativeUi(
         tester: tester,
-        jobId: selected.baseJob.id,
+        jobId: jobId,
         text: {JobDetailField.notes: 'Synthetic member lifecycle notes $_run'},
-        tap: tap,
+        tap: preparedTap,
         waitUntilReady: wait,
-        requireBeforeEffect: requireBeforeEffect,
+        waitForCompletion: observeEffect,
+        requireBeforeEffect: preparedEffectGuard,
       );
     }
-    final after = await commands.listJobViews(ownerSession: adapterSession!);
-    assertJobLifecycleNativeViewUi(tester, after);
-    final evidence = await snapshot();
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.readback;
+    final readback = () async {
+      final views = await commands.listJobViews(ownerSession: adapterSession!);
+      assertJobLifecycleNativeViewUi(tester, views);
+      return (views: views, evidence: await snapshot());
+    }();
+    final observed = prepared == null
+        ? await readback
+        : await readback.timeout(const Duration(minutes: 3));
+    if (prepared != null) {
+      _require(preparedLifecycleUiCurrent(prepared));
+    }
+    final after = observed.views;
+    final evidence = observed.evidence;
     _require(
       evidence['jobHistorySha256'] == initial['jobHistorySha256'] &&
           evidence['nameRecordsSha256'] == initial['nameRecordsSha256'],
@@ -5809,9 +6201,7 @@ final class _JoinNative with WidgetsBindingObserver {
             evidence['lifecycleAckCount'] == initial['lifecycleAckCount'] &&
             evidence['detailsAckCount'] == initial['detailsAckCount'],
       );
-      final next = after.singleWhere(
-        (v) => v.baseJob.id == selected.baseJob.id,
-      );
+      final next = after.singleWhere((v) => v.baseJob.id == jobId);
       _require(
         next.lifecycle.state ==
             (deleting
@@ -5831,6 +6221,7 @@ final class _JoinNative with WidgetsBindingObserver {
       'productionJobsPanelRendered': true,
       'companyControllerStoppedDuringUi': !view.running,
       'lifecycleTerminals': detailsTerminals,
+      if (prepared != null) 'preparationSequence': prepared.preparationSequence,
       'passed': false,
     });
     if (checkpointStage != null) {
@@ -5876,6 +6267,7 @@ final class _JoinNative with WidgetsBindingObserver {
       finished = true;
       return const NativeTestCommandResult.effect();
     }
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.returning;
     await completeJobDetailsNativeUiReturn(
       isStillCurrent: lifecycleCurrent,
       mountPage: (ready) => mountJoinPage(waitUntilReady: ready),
@@ -6655,6 +7047,10 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> mountJoinPage({
     Future<void> Function(bool Function())? waitUntilReady,
   }) async {
+    if (_jobLifecycleMode) {
+      preparedLifecycleUi = null;
+      lifecycleUiHome = null;
+    }
     final waitForReady = waitUntilReady ?? wait;
     stage = 'join-page';
     savedPair = null;
@@ -7370,7 +7766,13 @@ final class _JoinNative with WidgetsBindingObserver {
     if (!finished) {
       _require(
         pageMounted ||
-            (_createdMode && createdStage == _CreatedJobStage.cancelling),
+            (_createdMode && createdStage == _CreatedJobStage.cancelling) ||
+            (_jobLifecycleMode &&
+                command.action == NativeTestAction.jobLifecycleUi &&
+                lifecycleUiHomeMounted &&
+                (jobLifecycleNativePreparedEffect(command.jobLifecycleStep!) !=
+                        null ||
+                    jobLifecycleNativeEffectStep(command.jobLifecycleStep!))),
       );
     }
     if (_createdMode && createdStage == _CreatedJobStage.cancelling) {
@@ -7982,6 +8384,10 @@ final class _JoinNative with WidgetsBindingObserver {
       final command = cache?.takeNext();
       NativeTestCommandResult? result;
       if (command != null) {
+        if (preparedLifecycleUi != null &&
+            !preparedLifecycleUi!.accepts(command)) {
+          preparedLifecycleUi = null;
+        }
         activeCommand = command;
         stage = 'command-${command.action.name}';
         try {
@@ -7993,6 +8399,27 @@ final class _JoinNative with WidgetsBindingObserver {
             effect: NativeTestEffect.completed,
           );
         } catch (_) {
+          if (_jobLifecycleMode &&
+              command.action == NativeTestAction.jobLifecycleUi) {
+            preparedLifecycleUi = null;
+            try {
+              writeOnce(
+                'lifecycle-command-failure-$pid-${command.sequence}.json',
+                {
+                  'passed': false,
+                  'step': command.jobLifecycleStep!.name,
+                  'phase': lifecycleUiPhase.name,
+                  'elapsedMillis': clock.elapsedMilliseconds,
+                  'deadlineMillis': command.deadlineMillis,
+                  'errorCode': 'lifecycle-ui-failed',
+                  'deadlineExpired':
+                      clock.elapsedMilliseconds >= command.deadlineMillis,
+                },
+              );
+            } catch (_) {
+              // Diagnostic failure cannot change command-cache failure semantics.
+            }
+          }
           cache!.fail(
             command,
             NativeTestCommandError.harnessFailed,
@@ -8001,7 +8428,11 @@ final class _JoinNative with WidgetsBindingObserver {
         }
       }
       activeCommand = null;
-      if (!finished && !pageMounted) {
+      if (preparedLifecycleUi != null &&
+          !preparedLifecycleUiCurrent(preparedLifecycleUi!)) {
+        preparedLifecycleUi = null;
+      }
+      if (!finished && !pageMounted && preparedLifecycleUi == null) {
         await enrollment.signOut();
         adapterSession = null;
       }
@@ -8023,6 +8454,8 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> close() async {
     if (closed) return;
     closed = true;
+    preparedLifecycleUi = null;
+    lifecycleUiHome = null;
     _rpc?.close();
     await controller?.dispose();
     await enrollment.signOut();
@@ -8033,6 +8466,8 @@ final class _JoinNative with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final event = ++lifecycleEvent;
+    preparedLifecycleUi = null;
+    lifecycleUiHome = null;
     Map<String, Object?>? before;
     try {
       before = _lifecycleDetails(state);
