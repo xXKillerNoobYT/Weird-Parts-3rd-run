@@ -3,14 +3,22 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:uuid/uuid.dart';
+import 'package:wired_parts/app.dart';
+import 'package:wired_parts/features/company/company_jobs_panel.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
+import 'package:wired_parts/features/pin/pin_service.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_crypto.dart';
+import '../../tool/native_nearby_test_commands.dart';
+import 'job_name_native_ui_test.dart' as native show ready, tap;
+import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
 import '../features/company/company_job_name_test.dart' show NameFixture;
 import '../features/company/company_join_test.dart'
     show JoinFixture, activateFixtureB;
@@ -159,6 +167,419 @@ final class _BaselineInspectionFixture {
 }
 
 void main() {
+  testWidgets(
+    'checkpoint cleanup remounts the real locked gate after deadline without another action',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      Future<void> mount(
+        Future<void> Function(bool Function()) waitUntilReady,
+      ) async {
+        await tester.pumpWidget(
+          WiredPartsApp(
+            key: UniqueKey(),
+            db: f.db,
+            pin: PinService(f.db.settingsDao),
+            deviceId: f.owner.identity.deviceId,
+            installation: f.security,
+            enableCompanyBootstrap: true,
+          ),
+        );
+        await waitUntilReady(
+          () => find.text('Company locked').evaluate().length == 1,
+        );
+      }
+
+      await mount((ready) => native.ready(tester, ready));
+      await tester.enterText(
+        find.byKey(const Key('company-signin-pin')),
+        '1234',
+      );
+      await native.tap(tester, find.byKey(const Key('company-signin')));
+      await adapter.waitForJoinNativeSignInReady(
+        waitUntilReady: (ready) => native.ready(tester, ready),
+      );
+      final uiSession = tester
+          .widget<CompanyJobsPanel>(find.byType(CompanyJobsPanel))
+          .owner;
+      expect(uiSession.isValid, isTrue);
+      final sql = await tester.runAsync(
+        () => adapter.detailsNativeSqlHash(f.db),
+      );
+      final cache = command_test.Fixture();
+      final wire = NativeTestCommand.encodeRequest(
+        session: cache.localSession,
+        sequence: 1,
+        action: NativeTestAction.jobDetailsUi,
+        deadlineMillis: 15000,
+        jobDetailsStep: NativeJobDetailsUiStep.checkpointMixed,
+      );
+      cache.cache.submitJson(wire);
+      final command = cache.cache.takeNext()!;
+      cache.now = 20000;
+      expect(
+        () => adapter.validateJoinNativeDeadline(
+          cache.now,
+          command.deadlineMillis,
+        ),
+        throwsA(isA<NativeTestFailure>()),
+      );
+      await tester.runAsync(f.enrollment.signOut);
+      // The gate owns its own session; signing out the adapter alone leaves it visible.
+      expect(uiSession.isValid, isTrue);
+      var pumps = 0;
+      await adapter.completeJobDetailsNativeUiReturn(
+        isStillCurrent: () => true,
+        mountPage: mount,
+        waitForCompletion: (ready) => adapter.waitForJoinNativeCompletion(
+          ready: () => pumps >= 2 && ready(),
+          elapsedMillis: () => cache.now,
+          commandDeadlineMillis: command.deadlineMillis,
+          pump: () async {
+            pumps++;
+            cache.now += 50;
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 25)),
+            );
+            await tester.pump(const Duration(milliseconds: 25));
+          },
+        ),
+      );
+      expect(pumps, greaterThanOrEqualTo(2));
+      expect(find.text('Company locked'), findsOneWidget);
+      expect(find.byType(CompanyJobsPanel), findsNothing);
+      expect(uiSession.isValid, isFalse);
+      expect(
+        await tester.runAsync(() => adapter.detailsNativeSqlHash(f.db)),
+        sql,
+      );
+      final completed = cache.cache.complete(
+        command,
+        const NativeTestCommandResult.effect(),
+      );
+      expect(completed.state, NativeTestCommandState.completed);
+      expect(cache.cache.submitJson(wire).toJson(), completed.toJson());
+      expect(cache.cache.takeNext(), isNull);
+      expect(
+        cache.cache.submitJson(cache.request(2, deadline: 15000)).error,
+        NativeTestCommandError.deadlineExpired,
+      );
+      for (final loseBeforeMount in [true, false]) {
+        var current = !loseBeforeMount;
+        var mounts = 0;
+        await expectLater(
+          adapter.completeJobDetailsNativeUiReturn(
+            isStillCurrent: () => current,
+            mountPage: (_) async {
+              mounts++;
+              current = false;
+            },
+            waitForCompletion: (_) async {},
+          ),
+          throwsA(isA<NativeTestFailure>()),
+        );
+        expect(mounts, loseBeforeMount ? 0 : 1);
+      }
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  test('prior genuine checkpoint bridge pins exact seven-c source and protocol map', () {
+    final checkpoint = <String, dynamic>{
+      'sourceRevision': '7c41169845820ac03c0f9cd4fd9e40b8cb83ba53',
+      'sourceTree': '34a7a9cd1f3f966f55663fc34b9f0f2e29b7efa3',
+      'adapterSha256':
+          'ae62b6a2fa353046a71faaea2e2a3f387278e7f21fd0964b83866ec4ff981786',
+      'productRevision': '7c41169845820ac03c0f9cd4fd9e40b8cb83ba53',
+      'detailsManifestSha256':
+          '4ce106cbe1497c3a76e3c4c01173d27dd98cb7b2e6e71cee6ef75284ce090c67',
+    };
+    expect(adapter.validateDetailsPriorCheckpointSource(checkpoint), isTrue);
+    for (final key in checkpoint.keys) {
+      expect(
+        () => adapter.validateDetailsPriorCheckpointSource({
+          ...checkpoint,
+          key: '0' * 64,
+        }),
+        throwsA(isA<NativeTestFailure>()),
+      );
+    }
+    final previous = <String, dynamic>{
+      for (var i = 0; i < 93; i++) 'app/lib/frozen$i.dart': 'a' * 64,
+      'app/tool/native_nearby_test_commands.dart': 'b' * 64,
+      'app/integration_test/company_join_native_test.dart': 'c' * 64,
+    };
+    final current = {
+      ...previous,
+      'app/integration_test/company_join_native_test.dart': 'd' * 64,
+    };
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, current),
+      returnsNormally,
+    );
+    expect(
+      () => adapter.validateJobDetailsSourceLineage(previous, {
+        ...current,
+        'app/tool/native_nearby_test_commands.dart': 'e' * 64,
+      }),
+      throwsA(isA<NativeTestFailure>()),
+    );
+  });
+
+  test(
+    'interrupted mixed details admit signed two-way state after cold restart and refuse rehashed forgeries',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      var member = await f.bEnrollment.signIn('1234');
+      await f.bDb.settingsDao.keepLocalDeviceId(member.identity.deviceId);
+      final aCommands = CompanyJobCommands(enrollment: f.aEnrollment);
+      var bCommands = CompanyJobCommands(enrollment: f.bEnrollment);
+      await bCommands.createJob(
+        CreateJob(
+          companyId: member.identity.companyId,
+          shopId: member.identity.shopId,
+          jobId: const Uuid().v4(),
+          requestId: const Uuid().v4(),
+          name: 'Synthetic member mixed details',
+        ),
+        ownerSession: member,
+      );
+      final pair = await openSyncPair(f);
+      final created = await pair.a.syncNow();
+      expect([created.complete, created.sent, created.received], [true, 1, 1]);
+      final original = (await f.bDb.select(f.bDb.companyJobs).get())
+          .singleWhere((r) => r.outgoing);
+      final views = await aCommands.listJobViews(ownerSession: f.owner);
+      final selected =
+          (views.toList()..sort((a, b) => a.baseJob.id.compareTo(b.baseJob.id)))
+              .first;
+      Future<void> patch(
+        CompanyJobCommands commands,
+        OwnerSession session,
+        JobDetailsPatch patch,
+        List<JobDetailField> fields,
+      ) => commands
+          .patchJobDetails(
+            PatchJobDetails(
+              companyId: session.identity.companyId,
+              shopId: session.identity.shopId,
+              jobId: selected.baseJob.id,
+              requestId: const Uuid().v4(),
+              creationDigest: selected.creationDigest,
+              patch: patch,
+              observedHeads: {for (final field in fields) field: []},
+            ),
+            ownerSession: session,
+          )
+          .then((_) {});
+      await patch(
+        aCommands,
+        f.owner,
+        const JobDetailsPatch(
+          customer: SetField('Acme'),
+          status: SetField(CompanyJobStatus.archived),
+        ),
+        [JobDetailField.customer, JobDetailField.status],
+      );
+      await patch(
+        bCommands,
+        member,
+        const JobDetailsPatch(notes: SetField('Gate 3')),
+        [JobDetailField.notes],
+      );
+      final mixed = await pair.a.syncNow();
+      final repeat = await pair.a.syncNow();
+      expect([mixed.complete, mixed.sent, mixed.received], [true, 1, 1]);
+      expect([repeat.complete, repeat.sent, repeat.received], [true, 0, 0]);
+      await pair.a.closeAndDrain();
+      await pair.b.closeAndDrain();
+      await pair.a.controller.dispose();
+      await pair.b.controller.dispose();
+      final sql = await adapter.detailsNativeSqlHash(f.bDb);
+      final signed = await f.bDb.select(f.bDb.companyJobDetails).get();
+      final base = (await f.bStore.readState(f.b.namespace))!;
+      final custody = await f.bStore.readState(
+        companyCustodyNamespace(f.b.namespace),
+      );
+      final binding = (await f.bDb.settingsDao.getSetting(
+        kInstallationBindingKey,
+      ))!;
+      final identity = <String, Object?>{
+        'installation': f.b.identity!.id.value,
+        'generation': f.b.identity!.generation.value,
+        'storeGeneration': f.b.receivingStoreGeneration!.value,
+        'publicKeySha256': sha256.convert(f.b.identity!.publicKey).toString(),
+        'company': member.identity.companyId,
+        'shop': member.identity.shopId,
+        'user': member.identity.userId,
+        'device': member.identity.deviceId,
+      };
+      Future<void> headers(ProtectedInstallationState held) async {
+        expect(
+          (await adapter.verifyDetailsMixedNativeHeaders(
+            db: f.bDb,
+            base: held,
+            custody: custody,
+            binding: binding,
+            databasePath: '${f.root.path}/b.sqlite',
+            originalIdentity: identity,
+            originalReceipt: original.receiptBytes,
+            incomingOperations: (await f.bDb.select(f.bDb.companyJobs).get())
+                .where((r) => !r.outgoing)
+                .map((r) => r.operationCommitment)
+                .toSet(),
+          ))['detailsSealsVerified'],
+          2,
+        );
+      }
+
+      await headers(base);
+      final nativeHeader =
+          jsonDecode(utf8.decode(base.bytes)) as Map<String, dynamic>;
+      final held = signed.first;
+      for (final pending in [
+        {'family': 'unknown'},
+        CompanyCommandIntent(
+          family: held.outgoing
+              ? CompanyCommandFamily.jobDetails
+              : CompanyCommandFamily.jobDetailsIncoming,
+          receiptKey: held.receiptKey,
+          operationCommitment: held.operationCommitment,
+          commandCommitment: held.commandCommitment,
+          storeGeneration: f.b.receivingStoreGeneration!.value,
+          companyId: held.companyId,
+          lineId: held.jobId,
+          originGeneration: held.originGeneration,
+          requestId: held.requestId,
+        ).encode(),
+      ]) {
+        await expectLater(
+          headers(
+            ProtectedInstallationState(
+              base.revision,
+              Uint8List.fromList(
+                utf8.encode(
+                  jsonEncode({...nativeHeader, 'pendingCommand': pending}),
+                ),
+              ),
+            ),
+          ),
+          throwsA(anything),
+        );
+        expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+      }
+      await f.reopenB();
+      member = await f.bEnrollment.signIn('1234');
+      bCommands = CompanyJobCommands(enrollment: f.bEnrollment);
+      Future<void> verify() async => adapter.verifyDetailsMixedRecoveryRecords(
+        enrollment: f.bEnrollment,
+        owner: member,
+        sqlSha256: await adapter.detailsNativeSqlHash(f.bDb),
+        localCreation: {'record': original.toJson()},
+      );
+      await verify();
+      expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+      expect(await f.bDb.select(f.bDb.companyJobDetails).get(), signed);
+      final after = (await bCommands.listJobViews(ownerSession: member))
+          .singleWhere((v) => v.baseJob.id == selected.baseJob.id);
+      expect(after.details.customer.value, 'Acme');
+      expect(after.details.status.value, CompanyJobStatus.archived);
+      expect(after.details.notes.value, 'Gate 3');
+      final originalDb = raw.sqlite3.openInMemory();
+      final currentDb = raw.sqlite3.open(
+        '${f.root.path}/b.sqlite',
+        mode: raw.OpenMode.readOnly,
+      );
+      try {
+        final profile = currentDb
+            .select('SELECT * FROM device_profiles')
+            .single;
+        originalDb.execute(
+          'CREATE TABLE device_profiles (id TEXT, display_name TEXT, created_at INTEGER)',
+        );
+        originalDb.execute('INSERT INTO device_profiles VALUES (?, ?, ?)', [
+          profile['id'],
+          profile['display_name'],
+          profile['created_at'],
+        ]);
+        originalDb.execute('CREATE TABLE app_settings (key TEXT, value TEXT)');
+        originalDb.execute('INSERT INTO app_settings VALUES (?, ?)', [
+          kInstallationBindingKey,
+          binding,
+        ]);
+        Future<void> checkCold() async =>
+            adapter.verifyDetailsMixedRecoveryDatabase(
+              currentDb,
+              original: originalDb,
+              evidence: {
+                'identity': identity,
+                'sqlSha256': await adapter.detailsNativeSqlHash(f.bDb),
+                'bindingSha256': digest(binding),
+              },
+            );
+        await checkCold();
+        await f.bDb.customStatement('DELETE FROM device_profiles');
+        final missingProfile = await adapter.detailsNativeSqlHash(f.bDb);
+        await expectLater(checkCold(), throwsA(anything));
+        expect(await adapter.detailsNativeSqlHash(f.bDb), missingProfile);
+        expect(currentDb.select('SELECT * FROM device_profiles'), isEmpty);
+        await f.bDb.customStatement(
+          'INSERT INTO device_profiles VALUES (?, ?, ?)',
+          [profile['id'], profile['display_name'], profile['created_at']],
+        );
+        await f.bDb.settingsDao.setSetting(kInstallationBindingKey, '{}');
+        final changedBinding = await adapter.detailsNativeSqlHash(f.bDb);
+        await expectLater(checkCold(), throwsA(anything));
+        expect(await adapter.detailsNativeSqlHash(f.bDb), changedBinding);
+        await f.bDb.settingsDao.setSetting(kInstallationBindingKey, binding);
+        await checkCold();
+      } finally {
+        currentDb.dispose();
+        originalDb.dispose();
+      }
+      for (final attack in ['operation', 'receipt', 'ack']) {
+        final detail = signed.first;
+        final ack =
+            (await f.bDb.select(f.bDb.companyJobDetailPeerAcks).get()).first;
+        final table = attack == 'ack'
+            ? 'company_job_detail_peer_acks'
+            : 'company_job_details';
+        final column = attack == 'operation'
+            ? 'operation_bytes'
+            : attack == 'receipt'
+            ? 'receipt_bytes'
+            : 'ack_bytes';
+        final originalBytes = attack == 'operation'
+            ? detail.operationBytes
+            : attack == 'receipt'
+            ? detail.receiptBytes
+            : ack.ackBytes;
+        final forged = jsonDecode(originalBytes) as Map<String, dynamic>;
+        if (attack == 'operation') {
+          (forged['body'] as Map)['user'] = const Uuid().v4();
+        } else {
+          forged[attack == 'receipt' ? 'seal' : 'signature'] = base64Encode(
+            List<int>.filled(64, 0),
+          );
+        }
+        final request = attack == 'ack' ? ack.requestId : detail.requestId;
+        await f.bDb.customStatement(
+          'UPDATE $table SET $column = ? WHERE request_id = ?',
+          [jsonEncode(forged), request],
+        );
+        final changedSql = await adapter.detailsNativeSqlHash(f.bDb);
+        await expectLater(verify(), throwsA(anything));
+        expect(await adapter.detailsNativeSqlHash(f.bDb), changedSql);
+        await f.bDb.customStatement(
+          'UPDATE $table SET $column = ? WHERE request_id = ?',
+          [originalBytes, request],
+        );
+      }
+      expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+    }, _LoopbackHttpOverrides()),
+    timeout: const Timeout(Duration(minutes: 6)),
+  );
   test(
     'pending local details survive cold admission with original signed creation and ACKs',
     () => HttpOverrides.runWithHttpOverrides(() async {
@@ -719,8 +1140,7 @@ void main() {
   });
 
   test('source lineage admits only one pinned company page update', () {
-    const adapterPath =
-        'app/integration_test/company_join_native_test.dart';
+    const adapterPath = 'app/integration_test/company_join_native_test.dart';
     const pagePath = 'app/lib/features/company/company_join_page.dart';
     const protocolPath = 'app/lib/features/company/company_protocol.dart';
     const oldPageHash =
