@@ -44,7 +44,7 @@ const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
 const jobDetailsNativeRun = 'j116-details-v3';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
-const jobLifecycleNativeRun = 'j63-lifecycle-v2';
+const jobLifecycleNativeRun = 'j63-lifecycle-v3';
 const jobLifecycleNativeProductRevision =
     'c82451e2081e9cb78ba26412511064c1b1b82e93';
 const _jobLifecycleMode = bool.fromEnvironment(
@@ -7068,6 +7068,26 @@ final class _JoinNative with WidgetsBindingObserver {
         sameNearbyState: pageMounted,
         discovered: view.peers.length == 1,
         codePresent: view.verifyCode != null,
+        allowedActions: {
+          NativeTestAction.observe,
+          NativeTestAction.pair,
+          NativeTestAction.matchWithGrant,
+          NativeTestAction.send,
+          NativeTestAction.accept,
+          NativeTestAction.snapshot,
+          if (!_jobLifecycleMode ||
+              createdStage != _CreatedJobStage.retainedPeer ||
+              (createdStage == _CreatedJobStage.retainedPeer &&
+                  (incomingSyncPending ||
+                      syncUiState == CreatedJobNativeUiState.incomplete ||
+                      syncUiState == CreatedJobNativeUiState.error)))
+            NativeTestAction.finish,
+          if (_jobNameMode && _createdMode) NativeTestAction.jobNameUi,
+          if (_detailsMode && _createdMode) NativeTestAction.jobDetailsUi,
+          if (_jobLifecycleMode && _createdMode)
+            NativeTestAction.jobLifecycleUi,
+          if (!_createdMode) NativeTestAction.normalExit,
+        },
       ),
     );
     rpc.refreshInfoInLoop();
@@ -7113,30 +7133,7 @@ final class _JoinNative with WidgetsBindingObserver {
             : cache
                       ?.submitJson(
                         values['data']!,
-                        allowedActions: {
-                          NativeTestAction.observe,
-                          NativeTestAction.pair,
-                          NativeTestAction.matchWithGrant,
-                          NativeTestAction.send,
-                          NativeTestAction.accept,
-                          NativeTestAction.snapshot,
-                          if (!_jobLifecycleMode ||
-                              createdStage != _CreatedJobStage.retainedPeer ||
-                              (createdStage == _CreatedJobStage.retainedPeer &&
-                                  (incomingSyncPending ||
-                                      syncUiState ==
-                                          CreatedJobNativeUiState.incomplete ||
-                                      syncUiState ==
-                                          CreatedJobNativeUiState.error)))
-                            NativeTestAction.finish,
-                          if (_jobNameMode && _createdMode)
-                            NativeTestAction.jobNameUi,
-                          if (_detailsMode && _createdMode)
-                            NativeTestAction.jobDetailsUi,
-                          if (_jobLifecycleMode && _createdMode)
-                            NativeTestAction.jobLifecycleUi,
-                          if (!_createdMode) NativeTestAction.normalExit,
-                        },
+                        allowedActions: rpc.allowedActions,
                       )
                       .toJson() ??
                   {'version': 1, 'outcome': 'not-configured'},
