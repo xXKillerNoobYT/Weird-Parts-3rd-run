@@ -2830,6 +2830,20 @@ bool validateDetailsPriorCheckpointSource(Map<String, dynamic> checkpoint) {
   return true;
 }
 
+void verifyJobDetailsCheckpointProtectedState({
+  required ProtectedInstallationState base,
+  required ProtectedInstallationState custody,
+  required Map<String, dynamic> expected,
+}) {
+  _require(
+    base.revision == expected['baseProtectedRevision'] &&
+        sha256.convert(base.bytes).toString() ==
+            expected['baseProtectedSha256'] &&
+        sha256.convert(custody.bytes).toString() ==
+            expected['custodyProtectedSha256'],
+  );
+}
+
 void verifyJobDetailsNativeReadback(
   Map<String, dynamic> checkpoint,
   Map<String, Object?> actual,
@@ -6471,13 +6485,10 @@ void main() {
         final custody = (await _nativeStore.readState(
           companyCustodyNamespace(namespace),
         ))!;
-        _require(
-          base.revision == expected['baseProtectedRevision'] &&
-              sha256.convert(base.bytes).toString() ==
-                  expected['baseProtectedSha256'] &&
-              custody.revision == expected['custodyProtectedRevision'] &&
-              sha256.convert(custody.bytes).toString() ==
-                  expected['custodyProtectedSha256'],
+        verifyJobDetailsCheckpointProtectedState(
+          base: base,
+          custody: custody,
+          expected: expected.cast<String, dynamic>(),
         );
       }
       final db = openedDb = AppDatabase.forTesting(

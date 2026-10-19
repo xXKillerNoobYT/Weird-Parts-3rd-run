@@ -167,6 +167,76 @@ final class _BaselineInspectionFixture {
 }
 
 void main() {
+  final checkpointBase = ProtectedInstallationState(
+    '5c4a605b-97f6-4b6c-968e-d06050605017',
+    Uint8List.fromList([1, 2, 3]),
+  );
+  final checkpointCustody = ProtectedInstallationState(
+    '6d72da4c-587b-48bd-83a4-912edc514fe4',
+    Uint8List.fromList([4, 5, 6]),
+  );
+  final rotatedCustody = ProtectedInstallationState(
+    '478b8ea0-adbd-4b4b-9bdf-2b034ce7bc8d',
+    checkpointCustody.bytes,
+  );
+  final expectedProtected = <String, dynamic>{
+    'baseProtectedRevision': checkpointBase.revision,
+    'baseProtectedSha256': sha256.convert(checkpointBase.bytes).toString(),
+    'custodyProtectedRevision': checkpointCustody.revision,
+    'custodyProtectedSha256': sha256
+        .convert(checkpointCustody.bytes)
+        .toString(),
+  };
+  void verifyProtected(
+    ProtectedInstallationState base,
+    ProtectedInstallationState custody,
+  ) => adapter.verifyJobDetailsCheckpointProtectedState(
+    base: base,
+    custody: custody,
+    expected: expectedProtected,
+  );
+  test('checkpoint protected state accepts byte-identical custody after PIN revision rotation', () {
+    expect(
+      () => verifyProtected(checkpointBase, checkpointCustody),
+      returnsNormally,
+    );
+    expect(
+      () => verifyProtected(checkpointBase, rotatedCustody),
+      returnsNormally,
+    );
+  });
+  test('checkpoint protected state refuses changed custody bytes', () {
+    for (final revision in [
+      checkpointCustody.revision,
+      rotatedCustody.revision,
+    ]) {
+      expect(
+        () => verifyProtected(
+          checkpointBase,
+          ProtectedInstallationState(revision, Uint8List.fromList([4, 5, 7])),
+        ),
+        throwsA(isA<NativeTestFailure>()),
+      );
+    }
+  });
+  test('checkpoint protected state refuses changed base revision or bytes', () {
+    for (final base in [
+      ProtectedInstallationState(
+        '11715385-1fb4-4b2d-984c-b46cd15291f4',
+        checkpointBase.bytes,
+      ),
+      ProtectedInstallationState(
+        checkpointBase.revision,
+        Uint8List.fromList([1, 2, 4]),
+      ),
+    ]) {
+      expect(
+        () => verifyProtected(base, rotatedCustody),
+        throwsA(isA<NativeTestFailure>()),
+      );
+    }
+  });
+
   testWidgets(
     'checkpoint cleanup remounts the real locked gate after deadline without another action',
     (tester) async {
