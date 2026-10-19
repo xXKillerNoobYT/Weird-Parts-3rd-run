@@ -122,6 +122,7 @@ class _DetailsSectionState extends State<CompanyJobDetailsSection> {
               : const Omitted(),
         ),
         observedHeads: {for (final f in _dirty) f: _value(_captured!, f).heads},
+        observedLifecycleHeads: _captured!.lifecycle.lifecycleHeads,
         resolvingFields: _resolving,
       );
     } on JobLineRefusal catch (e) {
@@ -212,7 +213,14 @@ class _DetailsSectionState extends State<CompanyJobDetailsSection> {
             ),
         ],
         if (!widget.available)
-          const Text('Details editing requires explicit company permission.'),
+          Text(switch (job.lifecycle.state) {
+            CompanyJobLifecycleState.deleted =>
+              'Deleted Job history is read-only.',
+            CompanyJobLifecycleState.deleteConflict =>
+              'Resolve the deletion conflict before editing details.',
+            CompanyJobLifecycleState.live =>
+              'Details editing requires explicit company permission.',
+          }),
         if (widget.available && _captured == null)
           TextButton(
             key: Key('company-job-edit-details-${job.baseJob.id}'),

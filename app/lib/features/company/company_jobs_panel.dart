@@ -24,6 +24,8 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   final _editName = TextEditingController();
   CompanyJobView? _editing;
   RenameJob? _pendingRename;
+  SetJobLifecycle? _pendingLifecycle;
+  Map<String, String?> _lifecycleReasons = const {};
   bool _renameAvailable = false;
   bool _detailsAvailable = false;
   Map<String, int> _confirmedPeers = const {};
@@ -52,6 +54,11 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         ownerSession: widget.owner,
       );
       final renameAvailable = await widget.commands.canRenameJobs(widget.owner);
+      final lifecycleReasons = <String, String?>{};
+      for (final job in jobs) {
+        lifecycleReasons[job.baseJob.id] = await widget.commands
+            .lifecycleUnavailableReason(job, widget.owner);
+      }
       final detailsAvailable = await widget.commands.canEditJobDetails(
         widget.owner,
       );
@@ -62,6 +69,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
         _jobs = jobs;
+        _lifecycleReasons = lifecycleReasons;
         _renameAvailable = renameAvailable;
         _detailsAvailable = detailsAvailable;
         _confirmedPeers = confirmed;
@@ -102,15 +110,12 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
     });
     try {
       await widget.commands.createJob(_pending!, ownerSession: widget.owner);
-      final jobs = await widget.commands.listJobViews(
-        ownerSession: widget.owner,
-      );
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
-        _jobs = jobs;
         _pending = null;
         _name.clear();
       });
+      await _load();
     } on CompanyJobCapacityRefusal catch (error) {
       if (mounted) {
         setState(() {
@@ -153,6 +158,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         requestId: const Uuid().v4(),
         creationDigest: job.creationDigest,
         observedHeads: job.nameHeads,
+        observedLifecycleHeads: job.lifecycle.lifecycleHeads,
         name: _editName.text,
       );
     } on JobLineRefusal catch (error) {
@@ -203,6 +209,81 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
     }
   }
 
+  Future<void> _setLifecycle(
+    CompanyJobView job,
+    JobLifecycleChoice choice,
+  ) async {
+    if (_busy || _pendingLifecycle != null || !_lifecycleAllowed(job)) return;
+    if (choice == JobLifecycleChoice.deleted) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Job?'),
+          content: Text(
+            '${job.displayName} will move to deleted history. Concurrent edits will remain visible as a deletion conflict.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete Job'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    try {
+      _pendingLifecycle = SetJobLifecycle(
+        companyId: widget.owner.identity.companyId,
+        shopId: widget.owner.identity.shopId,
+        jobId: job.baseJob.id,
+        requestId: const Uuid().v4(),
+        creationDigest: job.creationDigest,
+        observed: job.lifecycle.context,
+        choice: choice,
+        resolvingConflict:
+            job.lifecycle.state == CompanyJobLifecycleState.deleteConflict,
+      );
+    } on JobLineRefusal catch (e) {
+      setState(() => _error = e.reason);
+      return;
+    }
+    await _saveLifecycle();
+  }
+
+  bool _lifecycleAllowed(CompanyJobView job) =>
+      _lifecycleReasons.containsKey(job.baseJob.id) &&
+      _lifecycleReasons[job.baseJob.id] == null;
+
+  Future<void> _saveLifecycle() async {
+    if (_busy || _pendingLifecycle == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.commands.setJobLifecycle(
+        _pendingLifecycle!,
+        ownerSession: widget.owner,
+      );
+      if (mounted) setState(() => _pendingLifecycle = null);
+      await _load();
+    } catch (_) {
+      await _load();
+      if (mounted) {
+        setState(
+          () => _error = 'This lifecycle choice may already be saved. Retry the same choice to check its result.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Widget _jobTile(CompanyJobView job) => Column(
     key: Key('company-job-view-${job.baseJob.id}'),
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -213,7 +294,10 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         subtitle: Text(
           'Job ID: ${job.baseJob.id}\n${(_confirmedPeers[job.baseJob.id] ?? 0) > 0 ? 'Last confirmed by ${_confirmedPeers[job.baseJob.id]} retained peer(s)' : 'Peer delivery status unknown'}',
         ),
-        trailing: !job.hasConflict && _renameAvailable
+        trailing:
+            !job.hasConflict &&
+                _renameAvailable &&
+                job.lifecycle.state == CompanyJobLifecycleState.live
             ? TextButton(
                 key: Key('company-job-edit-${job.baseJob.id}'),
                 onPressed: _busy || _pendingRename != null
@@ -236,11 +320,16 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
                 subtitle: Text(
                   'User: ${candidate.originalUserId}\nDevice: ${candidate.originalDeviceId}\nOperation: ${candidate.operationId}',
                 ),
-                onTap: _renameAvailable && !_busy && _pendingRename == null
+                onTap:
+                    _renameAvailable &&
+                        job.lifecycle.state == CompanyJobLifecycleState.live &&
+                        !_busy &&
+                        _pendingRename == null
                     ? () => _edit(job, candidate.name)
                     : null,
               ),
-            if (_renameAvailable)
+            if (_renameAvailable &&
+                job.lifecycle.state == CompanyJobLifecycleState.live)
               TextButton(
                 key: Key('company-job-resolve-name-${job.baseJob.id}'),
                 onPressed: _busy || _pendingRename != null
@@ -255,9 +344,48 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         job: job,
         commands: widget.commands,
         owner: widget.owner,
-        available: _detailsAvailable,
+        available:
+            _detailsAvailable &&
+            job.lifecycle.state == CompanyJobLifecycleState.live,
         onSaved: _load,
       ),
+      if (job.lifecycle.state == CompanyJobLifecycleState.deleteConflict) ...[
+        Text(
+          'Deletion conflict',
+          key: Key('company-job-delete-conflict-${job.baseJob.id}'),
+        ),
+        for (final alternative in job.lifecycle.alternatives)
+          ListTile(
+            title: Text(
+              '${alternative.reference.family.name}: ${alternative.value}',
+            ),
+            subtitle: Text(
+              'User: ${alternative.originalUserId}\nDevice: ${alternative.originalDeviceId}\nOperation: ${alternative.operationId}',
+            ),
+          ),
+        if (_lifecycleAllowed(job))
+          TextButton(
+            key: Key('company-job-keep-${job.baseJob.id}'),
+            onPressed: _busy || _pendingLifecycle != null
+                ? null
+                : () => _setLifecycle(job, JobLifecycleChoice.kept),
+            child: const Text('Keep edited Job'),
+          ),
+      ],
+      if (job.lifecycle.state != CompanyJobLifecycleState.deleted)
+        if (_lifecycleAllowed(job))
+          TextButton(
+            key: Key('company-job-delete-${job.baseJob.id}'),
+            onPressed: _busy || _pendingLifecycle != null
+                ? null
+                : () => _setLifecycle(job, JobLifecycleChoice.deleted),
+            child: const Text('Delete Job'),
+          )
+        else
+          Text(
+            _lifecycleReasons[job.baseJob.id] ??
+                'Checking Job deletion availability.',
+          ),
     ],
   );
 
@@ -332,10 +460,38 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
               ),
           ],
           if (_jobs.isEmpty) const Text('No company Jobs yet.'),
+          if (_pendingLifecycle != null) ...[
+            Text(
+              'Pending lifecycle choice for Job ${_pendingLifecycle!.jobId}',
+            ),
+            FilledButton(
+              key: const Key('company-job-retry-lifecycle'),
+              onPressed: _busy ? null : _saveLifecycle,
+              child: const Text('Retry same lifecycle choice'),
+            ),
+          ],
           Column(
             key: const Key('company-jobs-list'),
-            children: [for (final job in _jobs) _jobTile(job)],
+            children: [
+              for (final job in _jobs.where(
+                (j) => j.lifecycle.state != CompanyJobLifecycleState.deleted,
+              ))
+                _jobTile(job),
+            ],
           ),
+          if (_jobs.any(
+            (j) => j.lifecycle.state == CompanyJobLifecycleState.deleted,
+          ))
+            ExpansionTile(
+              key: const Key('company-deleted-jobs'),
+              title: const Text('Deleted Job history'),
+              children: [
+                for (final job in _jobs.where(
+                  (j) => j.lifecycle.state == CompanyJobLifecycleState.deleted,
+                ))
+                  _jobTile(job),
+              ],
+            ),
         ],
         if (_error != null)
           Text(

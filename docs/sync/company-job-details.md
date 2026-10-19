@@ -1,5 +1,7 @@
 # Causal company Job details
 
+The [bounded Job lifecycle extension](company-job-lifecycle.md) adds optional signed lifecycle observations to names and details. A null context retains the exact v1 encoding. An explicit context uses metadata v2, schema 11 and `company.job.sync@4`. Field reduction and archived status retain the rules below. Lifecycle keep resolves visibility only.
+
 Governing [#116](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/116), within [#61](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/61). Base `d0413b76d7f137ff66192df1ac373bdb32d68ead`, branch `codex/issue116-job-details`. This is the implementation contract; unchecked acceptance remains NOT_RUN. Root owns coordination, independent review and native integration. This builder owns common source and the sole Windows SDK lease after root's design clearance.
 
 ## Functional increment and throughput checkpoint
