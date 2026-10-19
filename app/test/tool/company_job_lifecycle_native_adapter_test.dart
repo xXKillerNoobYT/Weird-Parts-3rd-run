@@ -495,6 +495,205 @@ void main() {
     }
   });
 
+  test(
+    'interrupted conflict verifies four real receipt seals in both roles without changing SQL',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      addTearDown(f.closeAndCheckOwnerData);
+      await activateFixtureB(f);
+      final pair = await openSyncPair(f);
+      addTearDown(() async {
+        await pair.a.closeAndDrain();
+        await pair.b.closeAndDrain();
+      });
+      final ac = CompanyJobCommands(enrollment: f.aEnrollment);
+      final bc = CompanyJobCommands(enrollment: f.bEnrollment);
+      await bc.createJob(
+        CreateJob(
+          companyId: pair.ownerB.identity.companyId,
+          shopId: pair.ownerB.identity.shopId,
+          jobId: const Uuid().v4(),
+          requestId: const Uuid().v4(),
+          name: 'Synthetic second conflict Job',
+        ),
+        ownerSession: pair.ownerB,
+      );
+      final baseline = await pair.a.syncNow();
+      expect(
+        [baseline.complete, baseline.sent, baseline.received],
+        [true, 1, 1],
+      );
+      final local = (await f.aDb.select(f.aDb.companyJobs).get()).singleWhere(
+        (r) => r.outgoing,
+      );
+      final av = (await ac.listJobViews(ownerSession: f.owner))
+          .singleWhere((v) => v.baseJob.id == local.jobId);
+      final bv = (await bc.listJobViews(ownerSession: pair.ownerB))
+          .singleWhere((v) => v.baseJob.id == local.jobId);
+      await ac.setJobLifecycle(deletion(av, f.owner), ownerSession: f.owner);
+      await bc.patchJobDetails(
+        PatchJobDetails(
+          companyId: pair.ownerB.identity.companyId,
+          shopId: pair.ownerB.identity.shopId,
+          jobId: bv.baseJob.id,
+          requestId: const Uuid().v4(),
+          creationDigest: bv.creationDigest,
+          patch: const JobDetailsPatch(
+            notes: SetField('Real interrupted Notes v2'),
+          ),
+          observedHeads: {JobDetailField.notes: []},
+          observedLifecycleHeads: [],
+        ),
+        ownerSession: pair.ownerB,
+      );
+      final changed = await pair.a.syncNow();
+      final repeat = await pair.a.syncNow();
+      expect([changed.complete, changed.sent, changed.received], [true, 1, 1]);
+      expect([repeat.complete, repeat.sent, repeat.received], [true, 0, 0]);
+      await pair.a.closeAndDrain();
+      await pair.b.closeAndDrain();
+      for (final (role, db, security, store, owner, commands, filename) in [
+        ('owner', f.aDb, f.a, f.aStore, f.owner, ac, 'a.sqlite'),
+        ('member', f.bDb, f.b, f.bStore, pair.ownerB, bc, 'b.sqlite'),
+      ]) {
+        expect(await commands.syncHoldings(ownerSession: owner), hasLength(2));
+        expect(
+          await commands.lifecycleSyncHoldings(ownerSession: owner),
+          hasLength(1),
+        );
+        expect(
+          await commands.detailsSyncHoldings(ownerSession: owner),
+          hasLength(1),
+        );
+        expect(await db.select(db.companyJobPeerAcks).get(), hasLength(2));
+        expect(
+          await db.select(db.companyJobLifecyclePeerAcks).get(),
+          hasLength(1),
+        );
+        expect(
+          await db.select(db.companyJobDetailPeerAcks).get(),
+          hasLength(1),
+        );
+        final view = (await commands.listJobViews(ownerSession: owner))
+            .singleWhere((v) => v.baseJob.id == local.jobId);
+        expect(view.lifecycle.state, CompanyJobLifecycleState.deleteConflict);
+        expect(view.lifecycle.alternatives, hasLength(2));
+        final base = (await store.readState(security.namespace))!;
+        final custody = await store.readState(
+          companyCustodyNamespace(security.namespace),
+        );
+        final identity = <String, Object?>{
+          'installation': security.identity!.id.value,
+          'generation': security.identity!.generation.value,
+          'storeGeneration': security.receivingStoreGeneration!.value,
+          'publicKeySha256': sha256
+              .convert(security.identity!.publicKey)
+              .toString(),
+          'company': owner.identity.companyId,
+          'shop': owner.identity.shopId,
+          'user': owner.identity.userId,
+          'device': owner.identity.deviceId,
+        };
+        final original = (await db.select(db.companyJobs).get()).singleWhere(
+          (r) => r.outgoing,
+        );
+        final binding = (await db.settingsDao.getSetting(
+          kInstallationBindingKey,
+        ))!;
+        Future<Map<String, Object?>> verify({
+          ProtectedInstallationState? nativeBase,
+        }) => adapter.verifyLifecycleConflictNativeHeaders(
+          db: db,
+          base: nativeBase ?? base,
+          custody: custody,
+          binding: binding,
+          databasePath: '${f.root.path}/$filename',
+          originalIdentity: identity,
+          originalReceipt: original.receiptBytes,
+          role: role,
+        );
+        final before = await adapter.detailsNativeSqlHash(db);
+        final result = await verify();
+        expect(result['creationSealsVerified'], 2);
+        expect(result['detailsSealsVerified'], 1);
+        expect(result['lifecycleSealsVerified'], 1);
+        final native = jsonDecode(utf8.decode(base.bytes)) as Map;
+        await expectLater(
+          verify(
+            nativeBase: ProtectedInstallationState(
+              base.revision,
+              Uint8List.fromList(
+                utf8.encode(jsonEncode({...native, 'pendingCommand': {}})),
+              ),
+            ),
+          ),
+          throwsA(isA<NativeTestFailure>()),
+        );
+        expect(await adapter.detailsNativeSqlHash(db), before);
+        final life = (await db.select(db.companyJobLifecycles).get()).single;
+        await db.customStatement(
+          'UPDATE company_job_lifecycles SET receipt_bytes = ?',
+          ['{}'],
+        );
+        final mutated = await adapter.detailsNativeSqlHash(db);
+        await expectLater(verify(), throwsA(anything));
+        expect(await adapter.detailsNativeSqlHash(db), mutated);
+        await db.customStatement(
+          'UPDATE company_job_lifecycles SET receipt_bytes = ?',
+          [life.receiptBytes],
+        );
+        expect(await adapter.detailsNativeSqlHash(db), before);
+      }
+    }, JoinLoopbackHttpOverrides()),
+  );
+
+  test('interrupted conflict keeps both retired epochs and exact post-PIN SQL boundaries', () {
+    final recovery = <String, dynamic>{};
+    for (final epoch in [
+      'epoch-OMklLvwoZO2dOdmz2UV4wf2db_gIphOXdIiybOYrtyM',
+      'epoch-qgjk3QFpgmod3nao5vj0wMO1PuU-bSwVZ4VFPTgrKF0',
+    ]) {
+      expect(
+        () =>
+            adapter.validateLifecycleInterruptedConflictEpoch(epoch, recovery),
+        throwsA(isA<NativeTestFailure>()),
+      );
+    }
+    expect(
+      () => adapter.validateLifecycleInterruptedConflictEpoch(
+        'fresh-random-epoch',
+        recovery,
+      ),
+      returnsNormally,
+    );
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final saved = evidence(
+      db.allTables.map((table) => table.actualTableName).toList(),
+    )..['sqlSha256'] = 'a' * 64;
+    final checkpoint = <String, dynamic>{
+      'lifecycleStage': 'conflict',
+      'interruptedConflictRecovery': recovery,
+      'lifecycleEvidence': saved,
+      'lockedSqlSha256': saved['sqlSha256'],
+    };
+    adapter.verifyJobLifecycleNativeReadback(checkpoint, saved);
+    expect(
+      () => adapter.verifyJobLifecycleNativeReadback(checkpoint, {
+        ...saved,
+        'sqlSha256': 'b' * 64,
+      }),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    expect(
+      () => adapter.verifyJobLifecycleNativeReadback({
+        ...checkpoint,
+        'lockedSqlSha256': '',
+      }, saved),
+      throwsA(isA<NativeTestFailure>()),
+    );
+  });
+
   test('lifecycle source manifest binds the frozen product separately from adapter revision', () {
     final root = Directory.systemTemp.createTempSync('lifecycle-source-');
     addTearDown(() => root.deleteSync(recursive: true));
