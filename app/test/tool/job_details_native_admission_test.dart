@@ -1123,6 +1123,94 @@ void main() {
     }, _LoopbackHttpOverrides()),
     timeout: const Timeout(Duration(minutes: 3)),
   );
+  test('Notes archive replica is bound to member root and original closure inventory without writes', () {
+    final temp = Directory.systemTemp.createTempSync('notes-archive-copy-');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final parent = Directory(temp.resolveSymbolicLinksSync());
+    final root = Directory(p.join(parent.path, 'isolated-member'))
+      ..createSync();
+    final original = Directory(p.join(parent.path, 'original-closed-archive'))
+      ..createSync();
+    final copy = Directory('${root.path}-notes-archive')..createSync();
+    for (final archive in [original, copy]) {
+      for (final name in [
+        'support',
+        'documents',
+        'temporary',
+        'cache',
+        'library',
+        'downloads',
+        'receipts',
+      ]) {
+        Directory(p.join(archive.path, name)).createSync();
+      }
+      File(p.join(archive.path, 'support', 'wired_parts.sqlite'))
+          .writeAsStringSync('immutable closed bytes');
+    }
+    final originalSql = File(
+      p.join(original.path, 'support', 'wired_parts.sqlite'),
+    );
+    final copySql = File(p.join(copy.path, 'support', 'wired_parts.sqlite'));
+    final files = [
+      {
+        'path': 'support/wired_parts.sqlite',
+        'bytes': originalSql.lengthSync(),
+        'sha256': digest(originalSql.readAsStringSync()),
+      },
+    ];
+    const closure =
+        '73f28bcafb43a3da1dd949cafb81032a33fd6f0cccbfd3cc9776b957b40d1b77';
+    final binding = {'path': copy.path, 'closedReceiptSha256': closure};
+    void verify({Object? archiveCopy, String role = 'member'}) =>
+        adapter.verifyDetailsNotesArchive(
+          root: root,
+          originalArchive: original,
+          role: role,
+          closedReceiptSha256: closure,
+          files: files,
+          archiveCopy: archiveCopy,
+        );
+    expect(verify, returnsNormally);
+    expect(() => verify(archiveCopy: binding), returnsNormally);
+    for (final bad in [
+      {...binding, 'path': original.path},
+      {...binding, 'path': root.path},
+      {...binding, 'path': p.join(root.path, 'nested-copy')},
+      {...binding, 'path': p.join(parent.path, 'unbound-copy')},
+      {...binding, 'path': 'relative-copy'},
+      {...binding, 'closedReceiptSha256': '0' * 64},
+      {...binding, 'extra': true},
+    ]) {
+      expect(() => verify(archiveCopy: bad), throwsA(isA<NativeTestFailure>()));
+    }
+    expect(
+      () => verify(archiveCopy: binding, role: 'owner'),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    copySql.writeAsStringSync('changed closed bytes');
+    expect(
+      () => verify(archiveCopy: binding),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    copySql.writeAsStringSync('immutable closed bytes');
+    final extra = File(p.join(copy.path, 'extra.json'))
+      ..writeAsStringSync('{}');
+    expect(
+      () => verify(archiveCopy: binding),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    extra.deleteSync();
+    copySql.deleteSync();
+    expect(
+      () => verify(archiveCopy: binding),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    copySql.writeAsStringSync('immutable closed bytes');
+    expect(() => verify(archiveCopy: binding), returnsNormally);
+    expect(originalSql.readAsStringSync(), 'immutable closed bytes');
+    adapter.verifyDetailsPendingInventory(original, files);
+  });
+
   test('pending cold inventory rejects missing extra changed duplicate and traversal members without writes', () {
     final root = Directory.systemTemp.createTempSync('pending-inventory-');
     addTearDown(() => root.deleteSync(recursive: true));

@@ -2696,6 +2696,38 @@ void validateDetailsNotesSourceManifests({
   );
 }
 
+void verifyDetailsNotesArchive({
+  required Directory root,
+  required Directory originalArchive,
+  required String role,
+  required String closedReceiptSha256,
+  required List<dynamic> files,
+  Object? archiveCopy,
+}) {
+  if (archiveCopy == null) {
+    verifyDetailsPendingInventory(originalArchive, files);
+    return;
+  }
+  final binding = _recoveryObject(archiveCopy, {'path', 'closedReceiptSha256'});
+  final path = binding['path'];
+  _require(
+    role == 'member' &&
+        closedReceiptSha256 == _detailsNotesPins['member']!['closure'] &&
+        binding['closedReceiptSha256'] == closedReceiptSha256 &&
+        path is String &&
+        path == '${root.path}-notes-archive' &&
+        p.isAbsolute(path) &&
+        p.normalize(path) == path &&
+        path != originalArchive.path &&
+        !p.isWithin(originalArchive.path, path) &&
+        !p.isWithin(path, originalArchive.path) &&
+        path != root.path &&
+        !p.isWithin(root.path, path) &&
+        !p.isWithin(path, root.path),
+  );
+  verifyDetailsPendingInventory(Directory(path as String), files);
+}
+
 Map<String, dynamic> _readDetailsNotesRecovery(
   Directory root, {
   required String path,
@@ -2712,6 +2744,7 @@ Map<String, dynamic> _readDetailsNotesRecovery(
         File(path).resolveSymbolicLinksSync() == path,
   );
   final value = _readOwnedJson(File(path), expectedSha256: digest);
+  final hasArchiveCopy = value['format'] == 2;
   _recoveryObject(value, {
     'format',
     'kind',
@@ -2723,10 +2756,15 @@ Map<String, dynamic> _readDetailsNotesRecovery(
     'savedUi',
     'savedSourceManifest',
     'parentAdmission',
+    if (hasArchiveCopy) 'archiveCopy',
   });
   _require(
-    value['format'] == 1 &&
-        value['kind'] == 'j116.interrupted-pending-notes.recovery@1' &&
+    (hasArchiveCopy
+            ? role == 'member' &&
+                  value['kind'] == 'j116.interrupted-pending-notes.recovery@2'
+            : value['format'] == 1 &&
+                  value['kind'] ==
+                      'j116.interrupted-pending-notes.recovery@1') &&
         value['run'] == jobDetailsNativeRun &&
         value['role'] == role &&
         value['root'] == root.path,
@@ -2797,7 +2835,16 @@ Map<String, dynamic> _readDetailsNotesRecovery(
         !p.isWithin(archive.path, root.path),
   );
   _writeStartupStage('j116-startup-notes-archive-inventory');
-  verifyDetailsPendingInventory(archive, files);
+  verifyDetailsNotesArchive(
+    root: root,
+    originalArchive: archive,
+    role: role,
+    closedReceiptSha256: pins['closure']!,
+    files: files,
+    archiveCopy: hasArchiveCopy
+        ? _recoveryObject(value['archiveCopy'], {'path', 'closedReceiptSha256'})
+        : null,
+  );
   _writeStartupStage('j116-startup-notes-saved-evidence');
   final coldName = _recoveryRelative(coldRef['file']);
   final uiName = _recoveryRelative(uiRef['file']);
