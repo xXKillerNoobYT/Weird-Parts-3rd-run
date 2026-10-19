@@ -2678,6 +2678,7 @@ Map<String, dynamic> _readDetailsNotesRecovery(
   required Map<String, String> source,
   required String sourceManifestPath,
 }) {
+  _writeStartupStage('j116-startup-notes-reference');
   _require(
     p.isAbsolute(path) &&
         p.normalize(path) == path &&
@@ -2769,7 +2770,9 @@ Map<String, dynamic> _readDetailsNotesRecovery(
         !p.isWithin(root.path, archive.path) &&
         !p.isWithin(archive.path, root.path),
   );
+  _writeStartupStage('j116-startup-notes-archive-inventory');
   verifyDetailsPendingInventory(archive, files);
+  _writeStartupStage('j116-startup-notes-saved-evidence');
   final coldName = _recoveryRelative(coldRef['file']);
   final uiName = _recoveryRelative(uiRef['file']);
   final cold = _readOwnedJson(
@@ -2796,12 +2799,14 @@ Map<String, dynamic> _readDetailsNotesRecovery(
     'productRevision': cold['productRevision'] as String,
     'manifestSha256': cold['detailsManifestSha256'] as String,
   };
+  _writeStartupStage('j116-startup-notes-source-manifests');
   validateDetailsNotesSourceManifests(
     savedManifest: File(manifestRef['path'] as String),
     savedSource: savedSource,
     currentManifest: File(sourceManifestPath),
     currentSource: source,
   );
+  _writeStartupStage('j116-startup-notes-evidence-headers');
   for (final evidence in [cold, saved]) {
     verifyJoinNativeEvidenceProvenance(
       evidence,
@@ -2867,6 +2872,7 @@ Map<String, dynamic> _readDetailsNotesRecovery(
             ? cold['detailsMixedRecoverySha256']
             : closure['mixedCheckpointSha256']),
   );
+  _writeStartupStage('j116-startup-notes-reference-verified');
   return {
     ...value,
     'parentEvidence': cold,
@@ -2887,6 +2893,7 @@ Map<String, dynamic> _finishDetailsNotesRecovery(
   required String mixedSha256,
   required bool coldAdmission,
 }) {
+  _writeStartupStage('j116-startup-notes-parent-readback');
   final cold = notes['parentEvidence'] as Map<String, dynamic>;
   final parent = notes['parentAdmission'] as Map;
   final hashes = <String, String?>{
@@ -2925,7 +2932,9 @@ Map<String, dynamic> _finishDetailsNotesRecovery(
     'bindingSha256': (pending['evidence'] as Map)['bindingSha256'],
   };
   if (coldAdmission) {
+    _writeStartupStage('j116-startup-notes-current-inventory');
     verifyDetailsPendingInventory(root, notes['files'] as List);
+    _writeStartupStage('j116-startup-notes-current-database');
     final original = raw.sqlite3.open(
       p.join(pending['coldArchive'] as String, 'support', kSqliteFileName),
       mode: raw.OpenMode.readOnly,
@@ -2946,6 +2955,7 @@ Map<String, dynamic> _finishDetailsNotesRecovery(
       original.dispose();
     }
   }
+  _writeStartupStage('j116-startup-notes-admission-verified');
   return {...notes, 'evidence': evidence};
 }
 
@@ -3127,6 +3137,7 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
           ? null
           : checkpointSourceManifestPath);
   if (priorManifestPath != null) {
+    _writeStartupStage('j116-startup-prior-source-context');
     _require(pendingRecoveryPath.isNotEmpty);
     validateJobDetailsNativeSourceManifest(
       manifest: File(priorManifestPath),
@@ -3152,6 +3163,7 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
     );
   }
   if (pendingRecoveryPath.isNotEmpty || pendingRecoverySha256.isNotEmpty) {
+    _writeStartupStage('j116-startup-pending-context');
     _require(
       baselineRecoveryPath.isNotEmpty &&
           _sha256Pattern.hasMatch(baselineRecoverySha256),
@@ -3181,6 +3193,7 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
     );
   }
   if (baselineRecoveryPath.isNotEmpty || baselineRecoverySha256.isNotEmpty) {
+    _writeStartupStage('j116-startup-baseline-context');
     baselineRecovery = _readDetailsBaselineRecovery(
       root,
       path: baselineRecoveryPath,
@@ -6900,7 +6913,16 @@ final class _JoinNative with WidgetsBindingObserver {
   }
 }
 
+void _writeStartupStage(String label) {
+  try {
+    stdout.writeln(label);
+  } catch (_) {
+    // Diagnostics must not change admission or startup behavior.
+  }
+}
+
 void main() {
+  _writeStartupStage('j116-startup-main-defines');
   _require(!_jobNameMode || _createdMode);
   _require(
     !_detailsMode ||
@@ -6948,6 +6970,7 @@ void main() {
             : 7),
   );
   if (_detailsMode) {
+    _writeStartupStage('j116-startup-main-source-manifest');
     validateJobDetailsNativeSourceManifest(
       manifest: File(_detailsManifestPath),
       manifestSha256: _detailsManifestSha256,
@@ -6956,6 +6979,7 @@ void main() {
       adapter: _adapter,
       productRevision: _createdProductRevision,
     );
+    _writeStartupStage('j116-startup-main-source-verified');
   }
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('isolated native authorized Join resident', (tester) async {
@@ -6980,6 +7004,7 @@ void main() {
           'wired-parts-lan-$workspaceRun-${role.name}',
         ),
       );
+      _writeStartupStage('j116-startup-root-admission');
       final admission = _detailsMode
           ? validateJobDetailsNativeRootAdmission(
               root,
@@ -7019,11 +7044,13 @@ void main() {
               recoveryManifestPath: _recoveryManifestPath,
               recoveryManifestSha256: _recoveryManifestSha256,
             );
+      _writeStartupStage('j116-startup-root-admitted');
       final restart = admission.stage != JoinNativeRootStage.fresh;
       final conflictCheckpoint =
           admission.stage == JoinNativeRootStage.unresolvedConflict
           ? admission.conflictCheckpoint
           : null;
+      _writeStartupStage('j116-startup-workspace-open');
       final workspace = openedWorkspace = ValidationWorkspace.open(
         run: workspaceRun,
         role: role,
@@ -7051,7 +7078,9 @@ void main() {
         );
       }
       if (admission.recoveryManifest != null || (_detailsMode && restart)) {
+        _writeStartupStage('j116-startup-native-custody-read');
         await verifyJoinNativeRecoveryCustody(_nativeStore, namespace);
+        _writeStartupStage('j116-startup-native-custody-verified');
       }
       if (_detailsMode && admission.detailsCheckpoint != null) {
         final expected = admission.detailsCheckpoint!['detailsEvidence'] as Map;
@@ -7082,6 +7111,7 @@ void main() {
         namespace: namespace,
       );
       if (admission.recoveryManifest != null || (_detailsMode && restart)) {
+        _writeStartupStage('j116-startup-database-binding');
         await verifyJoinNativeRecoveryBinding(db);
       }
       if (admission.stage == JoinNativeRootStage.interruptedDetailsBaseline ||
@@ -7109,6 +7139,7 @@ void main() {
             .where((row) => !row.outgoing)
             .map((row) => row.operationCommitment)
             .toSet();
+        _writeStartupStage('j116-startup-native-header-verification');
         final observation = mixed != null || notes != null
             ? await verifyDetailsMixedNativeHeaders(
                 db: db,
@@ -7154,6 +7185,7 @@ void main() {
                     (localCreation['record'] as Map)['receiptBytes'] as String,
                 incomingOperations: incoming,
               );
+        _writeStartupStage('j116-startup-native-headers-verified');
         final observationFile = File(
           p.join(root.path, 'join-details-baseline-pre-kernel-$pid.json'),
         );
@@ -7177,8 +7209,10 @@ void main() {
           flush: true,
         );
       }
+      _writeStartupStage('j116-startup-production-reconcile');
       await security.start(db);
       _require(security.readiness == InstallationReadiness.ready);
+      _writeStartupStage('j116-startup-production-ready');
       if (!restart) workspace.markInitialized();
       resident = _JoinNative(
         tester,
@@ -7216,6 +7250,7 @@ void main() {
       await resident.initialize();
       await resident.run();
     } catch (_) {
+      _writeStartupStage('j116-startup-failed');
       if (resident != null && !resident.closed) {
         resident.writeOnce('join-failure-$pid.json', {
           'passed': false,
