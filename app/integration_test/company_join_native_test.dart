@@ -44,7 +44,7 @@ const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
 const jobDetailsNativeRun = 'j116-details-v3';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
-const jobLifecycleNativeRun = 'j63-lifecycle-v3';
+const jobLifecycleNativeRun = 'j63-lifecycle-v4';
 const jobLifecycleNativeProductRevision =
     'c82451e2081e9cb78ba26412511064c1b1b82e93';
 const _jobLifecycleMode = bool.fromEnvironment(
