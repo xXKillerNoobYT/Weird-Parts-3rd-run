@@ -485,6 +485,7 @@ final class _Resident {
         rejectNativeTest('exit-unverified');
       case NativeTestAction.jobNameUi:
       case NativeTestAction.jobDetailsUi:
+      case NativeTestAction.jobLifecycleUi:
         rejectNativeTest('wrong-phase');
     }
   }

@@ -150,6 +150,9 @@ final class Fixture {
         jobDetailsStep: action == NativeTestAction.jobDetailsUi
             ? NativeJobDetailsUiStep.inspect
             : null,
+        jobLifecycleStep: action == NativeTestAction.jobLifecycleUi
+            ? NativeJobLifecycleUiStep.inspect
+            : null,
       ),
     ),
   });
