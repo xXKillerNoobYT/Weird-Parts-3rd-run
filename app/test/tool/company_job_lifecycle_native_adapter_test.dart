@@ -22,6 +22,7 @@ import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_crypto.dart';
 import '../../tool/native_nearby_test_commands.dart';
 import '../../tool/native_nearby_test_tap.dart';
+import '../../tool/native_nearby_test_rpc.dart';
 import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
 import '../features/company/company_job_name_test.dart'
     show NameFixture, nameSnapshot;
@@ -184,7 +185,290 @@ Map<String, dynamic> evidence(List<String> tables, {bool resolved = false}) {
   };
 }
 
+Map<String, dynamic> pendingEvidence(List<String> tables, String role) {
+  final value = evidence(tables);
+  final owner = role == 'owner';
+  (value['counts'] as Map).addAll(<String, int>{
+    'company_job_details': owner ? 0 : 1,
+    'company_job_detail_peer_acks': 0,
+    'company_job_lifecycles': owner ? 1 : 0,
+    'company_job_lifecycle_peer_acks': 0,
+  });
+  value.addAll({
+    'sqlSha256': digest('complete pending SQL'),
+    'detailsOperationCount': owner ? 0 : 1,
+    'detailsReceiptCountVerified': owner ? 0 : 1,
+    'detailsAckCount': 0,
+    'lifecycleOperationCount': owner ? 1 : 0,
+    'lifecycleReceiptCountVerified': owner ? 1 : 0,
+    'lifecycleAckCount': 0,
+    'confirmedPeerCounts': {'job-a': 0, 'job-b': 1},
+  });
+  ((value['lifecycleViews'] as List).first as Map)['state'] = owner
+      ? 'deleted'
+      : 'live';
+  if (owner) {
+    value['lifecycleMetadataRecords'] = [];
+    ((value['lifecycleRecords'] as List).single as Map)['originalDevice'] =
+        'device';
+  } else {
+    value['lifecycleRecords'] = [];
+    ((value['lifecycleMetadataRecords'] as List).single
+            as Map)['originalDevice'] =
+        'device';
+  }
+  return value;
+}
+
 void main() {
+  test('pending retired epoch is rejected by actual RPC configuration before installation', () async {
+    final session = command_test.Fixture().localSession;
+    for (final retired in [true, false]) {
+      final rpc = NativeTestResidentRpc(
+        appPid: 1,
+        run: session.run,
+        role: session.role,
+        deviceId: session.deviceId,
+        peerId: session.peerId,
+        clockMillis: () => 0,
+        readInfoInLoop: () => const NativeTestResidentViewInfo(
+          phase: NativeTestPhase.looking,
+          sameNearbyState: true,
+          discovered: false,
+          codePresent: false,
+        ),
+      );
+      final reply = rpc.configure(jsonEncode(session.toJson()));
+      var installed = 0;
+      rpc.processConfigurationInLoop((next) {
+        adapter.validateLifecyclePendingEpoch(next.epoch, {
+          'retiredEpoch': retired ? session.epoch : 'a-different-retired-epoch',
+        });
+        installed++;
+      });
+      expect((await reply)['outcome'], retired ? 'rejected' : 'configured');
+      expect(installed, retired ? 0 : 1);
+      rpc.close();
+    }
+  });
+
+  test('pending lifecycle readback is exact by role and cannot masquerade as acknowledged conflict', () {
+    final tables = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(tables.close);
+    final names = tables.allTables.map((t) => t.actualTableName).toList();
+    for (final role in ['owner', 'member']) {
+      final value = pendingEvidence(names, role);
+      void validate(Map<String, dynamic> e) =>
+          adapter.validateJobLifecycleNativePendingEvidence(
+            e.cast<String, Object?>(),
+            role,
+          );
+      expect(() => validate(value), returnsNormally);
+      final checkpoint = <String, dynamic>{
+        'lifecycleStage': 'pending',
+        'role': role,
+        'lifecycleEvidence': value,
+      };
+      expect(
+        () => adapter.verifyJobLifecycleNativeReadback(checkpoint, value),
+        returnsNormally,
+      );
+      for (final sql in [
+        digest('unrelated SQL table changed'),
+        'invalid-sha',
+        null,
+      ]) {
+        expect(
+          () => adapter.verifyJobLifecycleNativeReadback(checkpoint, {
+            ...value,
+            'sqlSha256': sql,
+          }),
+          throwsA(isA<NativeTestFailure>()),
+        );
+      }
+      expect(
+        () => adapter.validateJobLifecycleNativePendingEvidence(
+          value,
+          role == 'owner' ? 'member' : 'owner',
+        ),
+        throwsA(anything),
+      );
+      for (final key in [
+        'schema',
+        'receiptCountVerified',
+        'ackCount',
+        'detailsAckCount',
+        'lifecycleAckCount',
+      ]) {
+        final changed = (jsonDecode(jsonEncode(value)) as Map)
+            .cast<String, dynamic>();
+        changed[key] = (changed[key] as int) + 1;
+        expect(() => validate(changed), throwsA(anything));
+      }
+      final wrongContract = (jsonDecode(jsonEncode(value)) as Map)
+          .cast<String, dynamic>();
+      ((wrongContract[role == 'owner'
+                          ? 'lifecycleRecords'
+                          : 'lifecycleMetadataRecords']
+                      as List)
+                  .single
+              as Map)['contract'] =
+          'job.details.patch@1';
+      expect(() => validate(wrongContract), throwsA(anything));
+      expect(
+        () => adapter.validateJobLifecycleNativeEvidence(
+          value,
+          adapter.JobLifecycleNativeStage.conflict,
+        ),
+        throwsA(anything),
+      );
+    }
+  });
+
+  test('pending lifecycle requires latest custody revision and a new command epoch', () {
+    final base = ProtectedInstallationState('base', Uint8List.fromList([1]));
+    final custody = ProtectedInstallationState(
+      'latest-custody',
+      Uint8List.fromList([2]),
+    );
+    final expected = <String, dynamic>{
+      'baseProtectedRevision': base.revision,
+      'baseProtectedSha256': sha256.convert(base.bytes).toString(),
+      'custodyProtectedRevision': custody.revision,
+      'custodyProtectedSha256': sha256.convert(custody.bytes).toString(),
+    };
+    adapter.verifyLifecyclePendingProtectedState(
+      base: base,
+      custody: custody,
+      expected: expected,
+    );
+    expect(
+      () => adapter.verifyLifecyclePendingProtectedState(
+        base: base,
+        custody: ProtectedInstallationState('other-revision', custody.bytes),
+        expected: expected,
+      ),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    final pending = <String, dynamic>{'retiredEpoch': 'old-v5-epoch'};
+    expect(
+      () => adapter.validateLifecyclePendingEpoch('old-v5-epoch', pending),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    expect(
+      () => adapter.validateLifecyclePendingEpoch('new-random-epoch', pending),
+      returnsNormally,
+    );
+    final previous = <String, dynamic>{
+      for (var i = 0; i < 95; i++) 'path-$i': digest('$i'),
+      'app/integration_test/company_join_native_test.dart': digest('old'),
+    };
+    final current = {
+      ...previous,
+      'app/integration_test/company_join_native_test.dart': digest('new'),
+    };
+    adapter.validateLifecyclePendingSourceLineage(previous, current);
+    expect(
+      () => adapter.validateLifecyclePendingSourceLineage(previous, {
+        ...current,
+        'path-1': digest('changed product'),
+      }),
+      throwsA(isA<NativeTestFailure>()),
+    );
+  });
+
+  test('pending pre-kernel headers verify real signed lifecycle and Notes v2 without changing SQL', () async {
+    for (final role in ['owner', 'member']) {
+      final f = await NameFixture.create();
+      try {
+        final view = (await f.commands.listJobViews(ownerSession: f.owner))
+            .single;
+        if (role == 'owner') {
+          await f.commands.setJobLifecycle(
+            deletion(view, f.owner),
+            ownerSession: f.owner,
+          );
+          expect(
+            await f.commands.lifecycleSyncHoldings(ownerSession: f.owner),
+            hasLength(1),
+          );
+        } else {
+          await f.commands.patchJobDetails(
+            PatchJobDetails(
+              companyId: f.owner.identity.companyId,
+              shopId: f.owner.identity.shopId,
+              jobId: view.baseJob.id,
+              requestId: const Uuid().v4(),
+              creationDigest: view.creationDigest,
+              patch: const JobDetailsPatch(notes: SetField('Pending Notes v2')),
+              observedHeads: {JobDetailField.notes: []},
+              observedLifecycleHeads: [],
+            ),
+            ownerSession: f.owner,
+          );
+          expect(
+            await f.commands.detailsSyncHoldings(ownerSession: f.owner),
+            hasLength(1),
+          );
+        }
+        final base = await f.store.readState(f.security.namespace);
+        final custody = await f.store.readState(
+          companyCustodyNamespace(f.security.namespace),
+        );
+        final local = (await f.db.select(f.db.companyJobs).get()).single;
+        final before = await adapter.detailsNativeSqlHash(f.db);
+        final identity = <String, Object?>{
+          'installation': f.security.identity!.id.value,
+          'generation': f.security.identity!.generation.value,
+          'storeGeneration': f.security.receivingStoreGeneration!.value,
+          'publicKeySha256': sha256
+              .convert(f.security.identity!.publicKey)
+              .toString(),
+          'company': f.owner.identity.companyId,
+          'shop': f.owner.identity.shopId,
+          'user': f.owner.identity.userId,
+          'device': f.owner.identity.deviceId,
+        };
+        final binding = (await f.db.settingsDao.getSetting(
+          kInstallationBindingKey,
+        ))!;
+        final result = await adapter.verifyLifecyclePendingNativeHeaders(
+          db: f.db,
+          base: base,
+          custody: custody,
+          binding: binding,
+          databasePath: '${f.root.path}/shop.sqlite',
+          originalIdentity: identity,
+          originalReceipt: local.receiptBytes,
+          incomingOperations: {},
+          role: role,
+        );
+        expect(result['custodyProtectedRevision'], custody!.revision);
+        expect(await adapter.detailsNativeSqlHash(f.db), before);
+        await f.db.customStatement(
+          'UPDATE ${role == 'owner' ? 'company_job_lifecycles' : 'company_job_details'} SET receipt_bytes = ?',
+          ['{}'],
+        );
+        await expectLater(
+          adapter.verifyLifecyclePendingNativeHeaders(
+            db: f.db,
+            base: base,
+            custody: custody,
+            binding: binding,
+            databasePath: '${f.root.path}/shop.sqlite',
+            originalIdentity: identity,
+            originalReceipt: local.receiptBytes,
+            incomingOperations: {},
+            role: role,
+          ),
+          throwsA(anything),
+        );
+      } finally {
+        await f.close();
+      }
+    }
+  });
+
   test('lifecycle source manifest binds the frozen product separately from adapter revision', () {
     final root = Directory.systemTemp.createTempSync('lifecycle-source-');
     addTearDown(() => root.deleteSync(recursive: true));
