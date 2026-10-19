@@ -379,6 +379,63 @@ The original shared-baseline file remains readable only through its exact
 hash-pinned recovery member and original source provenance, including during later
 checkpoint stages. General evidence readers and header checks stay unchanged.
 
+### Same-v3 interrupted pending local details
+
+`COMPANY_JOB_DETAILS_NATIVE_PENDING_RECOVERY` and
+`COMPANY_JOB_DETAILS_NATIVE_PENDING_RECOVERY_SHA256` add one separate cold
+admission state. Both existing baseline recovery defines remain required. This
+state preserves each device's one genuine `editMixedOffline` save before actual
+Sync. It does not create or substitute for a mixed checkpoint. The original
+zero-details baseline and mixed 1/1 followed by same-page 0/0 gates are unchanged.
+
+The external raw-byte-hashed manifest has exactly these keys:
+
+| Key | Required value |
+| --- | --- |
+| `format`, `kind`, `run`, `role`, `root`, `namespace` | `1`, `j116.interrupted-pending-details.recovery@1`, `j116-details-v3`, exact original role/root/namespace. |
+| `creationOrigin` | The unchanged five-key `6a41752` origin described above. |
+| `savedOrigin` | Five keys `revision`, `tree`, `adapterSha256`, `productRevision`, `manifestSha256`; values are `f3a061e064bdc83585434dbaf479b42b06753ee0`, `ad1c7a95d6901ff40bf0e949d7b6f7af8de9f933`, `a7eca4365c2d9018d5beb2af0c551ec83d08bfc1ab959813830e581857129511`, the same `f3a061e` revision, and `7eae1b69e9eb5663feb971623cadf0173b3c42a6ddd8a79768a088e091fcc809`. |
+| `recovery` | The same five keys matching the next reviewed build's defines and source manifest. |
+| `savedManifestPath` | Absolute local path to the frozen f3 manifest and its sibling `source/` bundle. |
+| `baselineRecoverySha256` | Exact unchanged baseline recovery hash, also present in the genuine saved UI record. The baseline manifest is validated against its original f3 recovery provenance. |
+| `coldArchive`, `files` | Independent stopped-file copy outside the live root, plus complete relative `{path, bytes, sha256}` inventory. All original/live cold bytes must match. Required auxiliary directories must exist. Links, missing/extra/duplicate members, traversal, restore markers, backups and staging refuse. No protected custody bytes cross hosts. |
+| `savedFile` | Owner `details-ui-29804-1.json`; member `details-ui-21403-1.json`. Their immutable whole-file hashes are owner `f4d3e91634535ca5059f2fb69ef202e6982178ad868269a12b9125c3aa843b91` and member `e13f6b77899035b1475bdfb621cec94e35919ec7838d5b33a0d42cec7b7c6cd1`. These are not typed-receipt hashes. |
+| `evidence` | Same exact keys as baseline evidence, with `detailsCount: 1` and `detailsAckCount: 0`; creation 2/ACK 2/names 0 remain required. SQL and identity must also match the immutable saved evidence. |
+| `retiredEpoch` | The interrupted f3 control epoch. Both this epoch and the original baseline retired epoch are refused. |
+
+Creation, saved-edit and recovery source identities stay separate. The creation
+and saved manifests, followed by saved and recovery manifests, must retain all
+95 source paths and every LF hash except the adapter. All 17 product files remain
+unchanged. Admission opens SQL read-only and checks the full canonical SQL hash,
+schema 10, 32 tables, integrity/references, exact family counts and binding hash.
+It never restores the old database or writes protected credentials.
+
+Before production startup, the existing native identity, company custody and
+database-path checks run, the original creation admission seal is verified, and
+the one outgoing details receipt is verified with the original public key/store.
+A pending command may be absent. Otherwise the pre-kernel guard requires that
+exact already-committed local details operation, both witness fields, and matching
+operation, row, receipt and command identifiers through the production commit
+verifier. Unknown, unrelated, incoming or partial pending commands refuse.
+Unchanged production startup verifies actual `afterWitness` equality before
+installation readiness and controller creation. The prior `beforeWitness` is not
+compared to current postcommit SQL. Normal production startup owns reconciliation.
+
+Normal locked UI/PIN, original public identity, unchanged full SQL, both typed
+creation receipts, signed creation ACKs and typed details/dependency verification
+must pass before any Nearby controller is created. Actual signed operation units,
+authorship and empty original field parents define the local edit. Production UI
+is checked against production-derived views. Saved JSON claims are never a
+substitute for receipt verification. The cold readback remains `passed: false`.
+
+Continue with a fresh epoch, Pair/Match/Verify and both Enables. Do not save the
+edit again or import old commands/Sync terminals. Later genuine checkpoints carry
+both `detailsBaselineRecoverySha256` and `detailsPendingRecoverySha256`; they
+require both frozen lineages while verifying their own current SQL and protected
+bytes. Pending-edit restart is only accepted after both actual devices cold-open
+and display the preserved local fields. Sync, conflict, restore and identity
+acceptance remain separate required gates.
+
 Keep caller tool slices inside the outer 30-second lifetime: use at most 8-second
 command slices, 4-second observation slices and 250-ms polls. Catch timeout/errors
 without losing the retained exact wire and command identity. Observe the same

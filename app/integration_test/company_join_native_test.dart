@@ -63,6 +63,21 @@ const _detailsBaselineRecoveryPath = String.fromEnvironment(
 const _detailsBaselineRecoverySha256 = String.fromEnvironment(
   'COMPANY_JOB_DETAILS_NATIVE_BASELINE_RECOVERY_SHA256',
 );
+const _detailsPendingRecoveryPath = String.fromEnvironment(
+  'COMPANY_JOB_DETAILS_NATIVE_PENDING_RECOVERY',
+);
+const _detailsPendingRecoverySha256 = String.fromEnvironment(
+  'COMPANY_JOB_DETAILS_NATIVE_PENDING_RECOVERY_SHA256',
+);
+const _detailsSavedOrigin = <String, String>{
+  'revision': 'f3a061e064bdc83585434dbaf479b42b06753ee0',
+  'tree': 'ad1c7a95d6901ff40bf0e949d7b6f7af8de9f933',
+  'adapterSha256':
+      'a7eca4365c2d9018d5beb2af0c551ec83d08bfc1ab959813830e581857129511',
+  'productRevision': 'f3a061e064bdc83585434dbaf479b42b06753ee0',
+  'manifestSha256':
+      '7eae1b69e9eb5663feb971623cadf0173b3c42a6ddd8a79768a088e091fcc809',
+};
 const _detailsBaselineOrigin = <String, String>{
   'revision': '6a417521bb80ed6614ef5a5ef71f7158c6e0f929',
   'tree': 'a3f403d4d8dfa4bcb630d481e006a722e5d9a3cd',
@@ -615,6 +630,7 @@ enum JoinNativeRootStage {
   completed,
   detailsCheckpoint,
   interruptedDetailsBaseline,
+  interruptedDetailsPending,
 }
 
 final class JoinNativeRootAdmission {
@@ -624,6 +640,7 @@ final class JoinNativeRootAdmission {
     this.recoveryManifest,
     this.detailsCheckpoint,
     this.detailsBaselineRecovery,
+    this.detailsPendingRecovery,
   });
 
   final JoinNativeRootStage stage;
@@ -631,6 +648,7 @@ final class JoinNativeRootAdmission {
   final Map<String, dynamic>? recoveryManifest;
   final Map<String, dynamic>? detailsCheckpoint;
   final Map<String, dynamic>? detailsBaselineRecovery;
+  final Map<String, dynamic>? detailsPendingRecovery;
 }
 
 Map<String, dynamic> _recoveryObject(Object? value, Set<String> keys) {
@@ -1284,6 +1302,66 @@ Future<Map<String, Object?>> verifyDetailsBaselineNativeHeaders({
   required Map<String, Object?> originalIdentity,
   required String originalReceipt,
   required Set<String> incomingOperations,
+}) => _verifyDetailsNativeHeaders(
+  base: base,
+  custody: custody,
+  binding: binding,
+  databasePath: databasePath,
+  originalIdentity: originalIdentity,
+  originalReceipt: originalReceipt,
+  incomingOperations: incomingOperations,
+);
+
+Future<Map<String, Object?>> verifyDetailsPendingNativeHeaders({
+  required AppDatabase db,
+  required ProtectedInstallationState? base,
+  required ProtectedInstallationState? custody,
+  required String binding,
+  required String databasePath,
+  required Map<String, Object?> originalIdentity,
+  required String originalReceipt,
+  required Set<String> incomingOperations,
+}) async {
+  final detail = (await db.select(db.companyJobDetails).get()).single;
+  _require(detail.outgoing && base != null);
+  final native = jsonDecode(utf8.decode(base!.bytes)) as Map;
+  if (native['pendingCommand'] != null) {
+    final intent = CompanyCommandIntent.decode(native['pendingCommand']);
+    _require(
+      intent.family == CompanyCommandFamily.jobDetails &&
+          intent.companyId == detail.companyId &&
+          intent.lineId == detail.jobId &&
+          intent.receiptKey == detail.receiptKey &&
+          intent.commandCommitment == detail.commandCommitment &&
+          intent.operationCommitment == detail.operationCommitment &&
+          intent.originGeneration == detail.originGeneration &&
+          intent.requestId == detail.requestId &&
+          intent.beforeWitness != null &&
+          intent.afterWitness != null,
+    );
+    await validateJobDetailsCommit(db, intent);
+  }
+  return _verifyDetailsNativeHeaders(
+    base: base,
+    custody: custody,
+    binding: binding,
+    databasePath: databasePath,
+    originalIdentity: originalIdentity,
+    originalReceipt: originalReceipt,
+    incomingOperations: incomingOperations,
+    pendingDetail: detail,
+  );
+}
+
+Future<Map<String, Object?>> _verifyDetailsNativeHeaders({
+  required ProtectedInstallationState? base,
+  required ProtectedInstallationState? custody,
+  required String binding,
+  required String databasePath,
+  required Map<String, Object?> originalIdentity,
+  required String originalReceipt,
+  required Set<String> incomingOperations,
+  CompanyJobDetail? pendingDetail,
 }) async {
   _require(
     base != null &&
@@ -1370,10 +1448,14 @@ Future<Map<String, Object?>> verifyDetailsBaselineNativeHeaders({
   if (pending != null) {
     final intent = CompanyCommandIntent.decode(pending);
     _require(
-      intent.family == CompanyCommandFamily.jobCreateIncoming &&
+      (pendingDetail == null
+              ? intent.family == CompanyCommandFamily.jobCreateIncoming &&
+                    incomingOperations.contains(intent.operationCommitment)
+              : intent.family == CompanyCommandFamily.jobDetails &&
+                    intent.operationCommitment ==
+                        pendingDetail.operationCommitment) &&
           intent.companyId == originalIdentity['company'] &&
-          intent.storeGeneration == originalIdentity['storeGeneration'] &&
-          incomingOperations.contains(intent.operationCommitment),
+          intent.storeGeneration == originalIdentity['storeGeneration'],
     );
   }
   await JobLineCommandReceipt.verifyAdmissionSeal(
@@ -1387,12 +1469,26 @@ Future<Map<String, Object?>> verifyDetailsBaselineNativeHeaders({
     native['store'] as String,
     expectedFamily: CompanyCommandFamily.jobCreate,
   );
+  if (pendingDetail != null) {
+    await verifyJobDetailsReceipt(
+      pendingDetail.receiptBytes,
+      InstallationIdentity(
+        InstallationId(native['id'] as String),
+        InstallationGeneration(native['generation'] as String),
+        native['key'] as String,
+        Uint8List.fromList(public),
+      ),
+      native['store'] as String,
+      CompanyCommandFamily.jobDetails,
+    );
+  }
   return {
     'baseProtectedRevision': base.revision,
     'baseProtectedSha256': sha256.convert(base.bytes).toString(),
     'custodyProtectedRevision': custody.revision,
     'custodyProtectedSha256': sha256.convert(custody.bytes).toString(),
-    'pendingIncomingCreation': pending != null,
+    'pendingIncomingCreation': pendingDetail == null && pending != null,
+    if (pendingDetail != null) 'pendingLocalDetails': pending != null,
     'hashesAreIndependentAnchor': false,
   };
 }
@@ -1443,6 +1539,89 @@ Future<void> verifyDetailsBaselineRecoveryRecords({
   _require(await detailsNativeSqlHash(db) == sqlSha256);
 }
 
+Future<void> verifyDetailsPendingRecoveryRecords({
+  required CompanyEnrollment enrollment,
+  required OwnerSession owner,
+  required String sqlSha256,
+  required Map<String, dynamic> localCreation,
+  required Map<String, dynamic> savedDetail,
+  required String role,
+}) async {
+  _require({'owner', 'member'}.contains(role));
+  final db = enrollment.db;
+  _require(await detailsNativeSqlHash(db) == sqlSha256);
+  final commands = CompanyJobCommands(enrollment: enrollment);
+  final creates = await commands.syncHoldings(ownerSession: owner);
+  _require(
+    creates.length == 2 &&
+        creates
+                .where(
+                  (r) =>
+                      _canonical(r.toJson()) ==
+                      _canonical(localCreation['record']),
+                )
+                .length ==
+            1 &&
+        (await commands.nameSyncHoldings(ownerSession: owner)).isEmpty,
+  );
+  final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
+    enrollment,
+    owner,
+  );
+  final jobs = creates.map((r) => r.jobId).toList()..sort();
+  final createAcks = await db.select(db.companyJobPeerAcks).get();
+  _require(
+    createAcks.length == 2 &&
+        creates.every(
+          (create) =>
+              createAcks
+                  .where(
+                    (ack) =>
+                        ack.companyId == create.companyId &&
+                        ack.originGeneration == create.originGeneration &&
+                        ack.requestId == create.requestId &&
+                        ack.operationDigest ==
+                            sha256
+                                .convert(utf8.encode(create.operationBytes))
+                                .toString(),
+                  )
+                  .length ==
+              1,
+        ) &&
+        createAcks.map((ack) => ack.peerDeviceId).toSet().length == 1 &&
+        confirmed.length == 2 &&
+        confirmed[jobs.first] == 0 &&
+        confirmed[jobs.last] == 1 &&
+        (await db.select(db.companyJobNamePeerAcks).get()).isEmpty &&
+        (await db.select(db.companyJobDetailPeerAcks).get()).isEmpty,
+  );
+  final detail = (await commands.detailsSyncHoldings(ownerSession: owner))
+      .single;
+  _require(
+    detail.outgoing && _canonical(detail.toJson()) == _canonical(savedDetail),
+  );
+  final body = (jsonDecode(detail.operationBytes) as Map)['body'] as Map;
+  final units = body['units'] as Map;
+  final expected = role == 'owner'
+      ? {'customer': 'Acme', 'status': 'archived'}
+      : {'notes': 'Gate 3'};
+  _require(
+    detail.jobId == jobs.first &&
+        body['user'] == owner.identity.userId &&
+        body['device'] == owner.identity.deviceId &&
+        _canonical(body['resolve']) == '[]' &&
+        units.length == expected.length &&
+        units.keys.toSet().containsAll(expected.keys),
+  );
+  for (final entry in expected.entries) {
+    final unit = units[entry.key] as Map;
+    _require(
+      unit['value'] == entry.value && _canonical(unit['parents']) == '[]',
+    );
+  }
+  _require(await detailsNativeSqlHash(db) == sqlSha256);
+}
+
 Map<String, dynamic> _detailsBaselineOriginRecord(
   Map<String, dynamic> recovery,
   String key,
@@ -1458,6 +1637,375 @@ Map<String, dynamic> _detailsBaselineOriginRecord(
   );
 }
 
+void verifyDetailsPendingInventory(Directory directory, List<dynamic> files) {
+  _require(
+    files.isNotEmpty &&
+        files.length <= 256 &&
+        directory.resolveSymbolicLinksSync() == directory.path,
+  );
+  for (final name in [
+    'support',
+    'documents',
+    'temporary',
+    'cache',
+    'library',
+    'downloads',
+    'receipts',
+  ]) {
+    _require(
+      FileSystemEntity.typeSync(
+            p.join(directory.path, name),
+            followLinks: false,
+          ) ==
+          FileSystemEntityType.directory,
+    );
+  }
+  for (final name in [
+    kRestoreSwapMarkerName,
+    kSqliteRestoreBakName,
+    kPhotosRestoreBakName,
+    kRestoreStagingName,
+    kRestoreStagingNextName,
+  ]) {
+    _require(
+      FileSystemEntity.typeSync(
+            p.join(directory.path, 'support', name),
+            followLinks: false,
+          ) ==
+          FileSystemEntityType.notFound,
+    );
+  }
+  final expected = <String, Map<String, dynamic>>{};
+  var total = 0;
+  for (final raw in files) {
+    final entry = _recoveryObject(raw, {'path', 'bytes', 'sha256'});
+    final relative = _recoveryRelative(entry['path']);
+    _require(
+      !expected.containsKey(relative) &&
+          entry['bytes'] is int &&
+          (entry['bytes'] as int) >= 0 &&
+          (entry['bytes'] as int) <= 64 * 1024 * 1024 &&
+          entry['sha256'] is String &&
+          _sha256Pattern.hasMatch(entry['sha256'] as String),
+    );
+    total += entry['bytes'] as int;
+    expected[relative] = entry;
+  }
+  _require(
+    total <= 256 * 1024 * 1024 &&
+        expected.containsKey('support/$kSqliteFileName'),
+  );
+  final seen = <String>{};
+  for (final entity in directory.listSync(
+    recursive: true,
+    followLinks: false,
+  )) {
+    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+    _require(
+      type == FileSystemEntityType.directory ||
+          type == FileSystemEntityType.file,
+    );
+    if (type != FileSystemEntityType.file) continue;
+    final relative = p
+        .relative(entity.path, from: directory.path)
+        .replaceAll('\\', '/');
+    final entry = expected[relative];
+    _require(entry != null && seen.add(relative));
+    final file = File(entity.path);
+    _require(
+      file.lengthSync() == entry!['bytes'] &&
+          sha256.convert(file.readAsBytesSync()).toString() == entry['sha256'],
+    );
+  }
+  _require(seen.length == expected.length);
+}
+
+Map<String, dynamic> _readDetailsPendingRecovery(
+  Directory root, {
+  required String path,
+  required String digest,
+  required String role,
+  required String revision,
+  required String tree,
+  required String adapter,
+  required String productRevision,
+  required String sourceManifestPath,
+  required String sourceManifestSha256,
+  required String baselineRecoverySha256,
+  required bool coldAdmission,
+}) {
+  _require(
+    p.isAbsolute(path) &&
+        p.normalize(path) == path &&
+        !p.isWithin(root.path, path) &&
+        path != root.path &&
+        File(path).resolveSymbolicLinksSync() == path &&
+        _sha256Pattern.hasMatch(digest),
+  );
+  final value = _readOwnedJson(File(path), expectedSha256: digest);
+  _recoveryObject(value, {
+    'format',
+    'kind',
+    'run',
+    'role',
+    'root',
+    'namespace',
+    'creationOrigin',
+    'savedOrigin',
+    'recovery',
+    'savedManifestPath',
+    'baselineRecoverySha256',
+    'coldArchive',
+    'files',
+    'savedFile',
+    'evidence',
+    'retiredEpoch',
+  });
+  _require(
+    value['format'] == 1 &&
+        value['kind'] == 'j116.interrupted-pending-details.recovery@1' &&
+        value['run'] == jobDetailsNativeRun &&
+        value['role'] == role &&
+        value['root'] == root.path &&
+        root.resolveSymbolicLinksSync() == root.path &&
+        value['namespace'] ==
+            joinNativeNamespace(
+              jobDetailsNativeRun,
+              role,
+              createdMode: true,
+              detailsMode: true,
+            ) &&
+        value['baselineRecoverySha256'] == baselineRecoverySha256 &&
+        _sha256Pattern.hasMatch(baselineRecoverySha256),
+  );
+  validateDetailsBaselineRecoveryOrigin(
+    _recoveryObject(
+      value['creationOrigin'],
+      _detailsBaselineOrigin.keys.toSet(),
+    ),
+  );
+  _require(
+    _canonical(
+          _recoveryObject(
+            value['savedOrigin'],
+            _detailsSavedOrigin.keys.toSet(),
+          ),
+        ) ==
+        _canonical(_detailsSavedOrigin),
+  );
+  _require(
+    _canonical(
+          _recoveryObject(value['recovery'], _detailsSavedOrigin.keys.toSet()),
+        ) ==
+        _canonical({
+          'revision': revision,
+          'tree': tree,
+          'adapterSha256': adapter,
+          'productRevision': productRevision,
+          'manifestSha256': sourceManifestSha256,
+        }),
+  );
+  final savedManifest = File(value['savedManifestPath'] as String);
+  validateJobDetailsNativeSourceManifest(
+    manifest: savedManifest,
+    manifestSha256: _detailsSavedOrigin['manifestSha256']!,
+    revision: _detailsSavedOrigin['revision']!,
+    tree: _detailsSavedOrigin['tree']!,
+    adapter: _detailsSavedOrigin['adapterSha256']!,
+    productRevision: _detailsSavedOrigin['productRevision']!,
+  );
+  validateJobDetailsNativeSourceManifest(
+    manifest: File(sourceManifestPath),
+    manifestSha256: sourceManifestSha256,
+    revision: revision,
+    tree: tree,
+    adapter: adapter,
+    productRevision: productRevision,
+  );
+  final savedHashes =
+      (_readOwnedJson(
+            savedManifest,
+            expectedSha256: _detailsSavedOrigin['manifestSha256'],
+          )['sourceLfSha256']
+          as Map);
+  final nextHashes =
+      (_readOwnedJson(
+            File(sourceManifestPath),
+            expectedSha256: sourceManifestSha256,
+          )['sourceLfSha256']
+          as Map);
+  _require(
+    savedHashes.length == 95 &&
+        nextHashes.length == 95 &&
+        savedHashes.keys.toSet().containsAll(nextHashes.keys),
+  );
+  for (final key in savedHashes.keys) {
+    if (key != 'app/integration_test/company_join_native_test.dart') {
+      _require(savedHashes[key] == nextHashes[key]);
+    }
+  }
+  _require(
+    value['retiredEpoch'] is String &&
+        (value['retiredEpoch'] as String).isNotEmpty &&
+        (value['retiredEpoch'] as String).length <= 128,
+  );
+  final evidence = _recoveryObject(value['evidence'], {
+    'identity',
+    'sqlSha256',
+    'bindingSha256',
+    'companyJobCount',
+    'createAckCount',
+    'nameCount',
+    'detailsCount',
+    'nameAckCount',
+    'detailsAckCount',
+  });
+  _recoveryIdentity(evidence['identity']);
+  _require(
+    evidence['companyJobCount'] == 2 &&
+        evidence['createAckCount'] == 2 &&
+        evidence['nameCount'] == 0 &&
+        evidence['detailsCount'] == 1 &&
+        evidence['nameAckCount'] == 0 &&
+        evidence['detailsAckCount'] == 0 &&
+        ['sqlSha256', 'bindingSha256'].every(
+          (key) =>
+              evidence[key] is String &&
+              _sha256Pattern.hasMatch(evidence[key] as String),
+        ),
+  );
+  final archive = value['coldArchive'] as String;
+  _require(
+    p.isAbsolute(archive) &&
+        p.normalize(archive) == archive &&
+        archive != root.path &&
+        !p.isWithin(root.path, archive) &&
+        !p.isWithin(archive, root.path),
+  );
+  final files = value['files'] as List;
+  verifyDetailsPendingInventory(Directory(archive), files);
+  if (coldAdmission) verifyDetailsPendingInventory(root, files);
+  final savedName = 'details-ui-${role == 'owner' ? 29804 : 21403}-1.json';
+  _require(value['savedFile'] == savedName);
+  final member = files.cast<Map>().singleWhere((f) => f['path'] == savedName);
+  _require(
+    member['sha256'] ==
+        (role == 'owner'
+            ? 'f4d3e91634535ca5059f2fb69ef202e6982178ad868269a12b9125c3aa843b91'
+            : 'e13f6b77899035b1475bdfb621cec94e35919ec7838d5b33a0d42cec7b7c6cd1'),
+  );
+  final saved = _readOwnedJson(
+    File(p.join(root.path, savedName)),
+    expectedBytes: member['bytes'] as int,
+    expectedSha256: member['sha256'] as String,
+  );
+  verifyJoinNativeEvidenceProvenance(
+    saved,
+    revision: _detailsSavedOrigin['revision']!,
+    tree: _detailsSavedOrigin['tree']!,
+    adapter: _detailsSavedOrigin['adapterSha256']!,
+    productRevision: _detailsSavedOrigin['productRevision']!,
+  );
+  _require(
+    saved['format'] == 1 &&
+        saved['run'] == jobDetailsNativeRun &&
+        saved['role'] == role &&
+        saved['root'] == root.path &&
+        saved['pid'] == (role == 'owner' ? 29804 : 21403) &&
+        saved['namespace'] == value['namespace'] &&
+        saved['jobDetailsMode'] == true &&
+        saved['mode'] == 'created-jobs' &&
+        saved['platform'] == (role == 'owner' ? 'windows' : 'macos') &&
+        saved['detailsManifestSha256'] ==
+            _detailsSavedOrigin['manifestSha256'] &&
+        saved['detailsBaselineRecoverySha256'] == baselineRecoverySha256 &&
+        saved['step'] == 'editMixedOffline' &&
+        saved['savedThroughProductionUi'] == true &&
+        saved['passed'] == false &&
+        saved['locked'] == false &&
+        saved['productionJobsPanelRendered'] == true &&
+        saved['companyControllerStoppedDuringUi'] == true &&
+        saved['schema'] == 10 &&
+        saved['integrityValid'] == true &&
+        saved['referencesValid'] == true &&
+        saved['originalLocalRecordUnchanged'] == true &&
+        _canonical(saved['identity']) == _canonical(evidence['identity']) &&
+        saved['sqlSha256'] == evidence['sqlSha256'] &&
+        saved['receiptCountVerified'] == 2 &&
+        saved['ackCount'] == 2 &&
+        saved['nameOperationCount'] == 0 &&
+        saved['nameReceiptCountVerified'] == 0 &&
+        saved['nameAckCount'] == 0 &&
+        saved['detailsOperationCount'] == 1 &&
+        saved['detailsReceiptCountVerified'] == 1 &&
+        saved['detailsAckCount'] == 0 &&
+        [
+          'receiptVerification',
+          'nameReceiptVerification',
+          'detailsReceiptVerification',
+        ].every((key) => saved[key] == 'typed-public-verifier') &&
+        saved['ackVerification'] == 'confirmedPeerCounts' &&
+        saved['detailsTerminals'] is List &&
+        (saved['detailsTerminals'] as List).isEmpty,
+  );
+  if (coldAdmission) {
+    final db = raw.sqlite3.open(
+      p.join(root.path, 'support', kSqliteFileName),
+      mode: raw.OpenMode.readOnly,
+    );
+    try {
+      _require(
+        db.select('PRAGMA user_version').single.values.single == 10 &&
+            db.select('PRAGMA integrity_check').single.values.single == 'ok' &&
+            db.select('PRAGMA foreign_key_check').isEmpty,
+      );
+      final tables = db
+          .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .map((r) => r['name'] as String)
+          .toList();
+      _require(tables.length == 32);
+      for (final entry in {
+        'jobs': 2,
+        'company_jobs': 2,
+        'company_job_peer_acks': 2,
+        'company_job_names': 0,
+        'company_job_name_peer_acks': 0,
+        'company_job_details': 1,
+        'company_job_detail_peer_acks': 0,
+      }.entries) {
+        _require(
+          db.select('SELECT count(*) AS n FROM "${entry.key}"').single['n'] ==
+              entry.value,
+        );
+      }
+      _require(
+        _hash({
+              for (final table in tables)
+                table:
+                    db
+                        .select('SELECT * FROM "$table"')
+                        .map((r) => _canonical(Map<String, Object?>.from(r)))
+                        .toList()
+                      ..sort(),
+            }) ==
+            evidence['sqlSha256'],
+      );
+      final binding =
+          db.select('SELECT value FROM app_settings WHERE key = ?', [
+                kInstallationBindingKey,
+              ]).single['value']
+              as String;
+      _require(
+        sha256.convert(utf8.encode(binding)).toString() ==
+            evidence['bindingSha256'],
+      );
+    } finally {
+      db.dispose();
+    }
+  }
+  return {...value, 'savedEvidence': saved};
+}
+
 JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
   Directory root, {
   required String run,
@@ -1471,6 +2019,8 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
   String checkpointSha256 = '',
   String baselineRecoveryPath = '',
   String baselineRecoverySha256 = '',
+  String pendingRecoveryPath = '',
+  String pendingRecoverySha256 = '',
   String sourceManifestPath = '',
   Directory? temporaryDirectory,
 }) {
@@ -1490,16 +2040,23 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
       checkpointPath.isEmpty &&
           checkpointSha256.isEmpty &&
           baselineRecoveryPath.isEmpty &&
-          baselineRecoverySha256.isEmpty,
+          baselineRecoverySha256.isEmpty &&
+          pendingRecoveryPath.isEmpty &&
+          pendingRecoverySha256.isEmpty,
     );
     return const JoinNativeRootAdmission(JoinNativeRootStage.fresh);
   }
   Map<String, dynamic>? baselineRecovery;
-  if (baselineRecoveryPath.isNotEmpty || baselineRecoverySha256.isNotEmpty) {
-    baselineRecovery = _readDetailsBaselineRecovery(
+  Map<String, dynamic>? pendingRecovery;
+  if (pendingRecoveryPath.isNotEmpty || pendingRecoverySha256.isNotEmpty) {
+    _require(
+      baselineRecoveryPath.isNotEmpty &&
+          _sha256Pattern.hasMatch(baselineRecoverySha256),
+    );
+    pendingRecovery = _readDetailsPendingRecovery(
       root,
-      path: baselineRecoveryPath,
-      digest: baselineRecoverySha256,
+      path: pendingRecoveryPath,
+      digest: pendingRecoverySha256,
       role: role,
       revision: revision,
       tree: tree,
@@ -1507,13 +2064,53 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
       productRevision: productRevision,
       sourceManifestPath: sourceManifestPath,
       sourceManifestSha256: manifestSha256,
+      baselineRecoverySha256: baselineRecoverySha256,
       coldAdmission: checkpointPath.isEmpty,
     );
+  }
+  if (baselineRecoveryPath.isNotEmpty || baselineRecoverySha256.isNotEmpty) {
+    baselineRecovery = _readDetailsBaselineRecovery(
+      root,
+      path: baselineRecoveryPath,
+      digest: baselineRecoverySha256,
+      role: role,
+      revision: pendingRecovery == null
+          ? revision
+          : _detailsSavedOrigin['revision']!,
+      tree: pendingRecovery == null ? tree : _detailsSavedOrigin['tree']!,
+      adapter: pendingRecovery == null
+          ? adapter
+          : _detailsSavedOrigin['adapterSha256']!,
+      productRevision: pendingRecovery == null
+          ? productRevision
+          : _detailsSavedOrigin['productRevision']!,
+      sourceManifestPath: pendingRecovery == null
+          ? sourceManifestPath
+          : pendingRecovery['savedManifestPath'] as String,
+      sourceManifestSha256: pendingRecovery == null
+          ? manifestSha256
+          : _detailsSavedOrigin['manifestSha256']!,
+      coldAdmission: checkpointPath.isEmpty && pendingRecovery == null,
+    );
+    if (pendingRecovery != null) {
+      final shared = verifyDetailsBaselineInspection(root, baselineRecovery);
+      final saved = pendingRecovery['savedEvidence'] as Map;
+      _require(
+        _canonical((baselineRecovery['evidence'] as Map)['identity']) ==
+                _canonical((pendingRecovery['evidence'] as Map)['identity']) &&
+            saved['selectedJob'] == shared['selectedJob'] &&
+            saved['jobHistorySha256'] == shared['creationHistorySha256'] &&
+            saved['nameRecordsSha256'] == shared['nameRecordsSha256'],
+      );
+    }
     if (checkpointPath.isEmpty) {
       _require(checkpointSha256.isEmpty);
       return JoinNativeRootAdmission(
-        JoinNativeRootStage.interruptedDetailsBaseline,
+        pendingRecovery == null
+            ? JoinNativeRootStage.interruptedDetailsBaseline
+            : JoinNativeRootStage.interruptedDetailsPending,
         detailsBaselineRecovery: baselineRecovery,
+        detailsPendingRecovery: pendingRecovery,
       );
     }
   }
@@ -1541,6 +2138,11 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
     baselineRecovery == null
         ? checkpoint['detailsBaselineRecoverySha256'] == null
         : checkpoint['detailsBaselineRecoverySha256'] == baselineRecoverySha256,
+  );
+  _require(
+    pendingRecovery == null
+        ? checkpoint['detailsPendingRecoverySha256'] == null
+        : checkpoint['detailsPendingRecoverySha256'] == pendingRecoverySha256,
   );
   _require(
     checkpoint['format'] == 1 &&
@@ -1622,6 +2224,7 @@ JoinNativeRootAdmission validateJobDetailsNativeRootAdmission(
     JoinNativeRootStage.detailsCheckpoint,
     detailsCheckpoint: checkpoint,
     detailsBaselineRecovery: baselineRecovery,
+    detailsPendingRecovery: pendingRecovery,
   );
 }
 
@@ -2597,6 +3200,7 @@ final class _JoinNative with WidgetsBindingObserver {
     this.interruptedResume,
     this.detailsCheckpoint,
     this.detailsBaselineRecovery,
+    this.detailsPendingRecovery,
   );
   final WidgetTester tester;
   final ValidationWorkspace workspace;
@@ -2608,8 +3212,13 @@ final class _JoinNative with WidgetsBindingObserver {
   final bool interruptedResume;
   final Map<String, dynamic>? detailsCheckpoint;
   final Map<String, dynamic>? detailsBaselineRecovery;
+  final Map<String, dynamic>? detailsPendingRecovery;
   bool get baselineResume =>
-      detailsBaselineRecovery != null && detailsCheckpoint == null;
+      detailsBaselineRecovery != null &&
+      detailsCheckpoint == null &&
+      detailsPendingRecovery == null;
+  bool get pendingResume =>
+      detailsPendingRecovery != null && detailsCheckpoint == null;
   bool get conflictResume => conflictCheckpoint != null;
   final clock = Stopwatch()..start();
   late final enrollment = CompanyEnrollment(installation: security, db: db);
@@ -2751,6 +3360,8 @@ final class _JoinNative with WidgetsBindingObserver {
       'detailsManifestSha256': _detailsManifestSha256,
       if (detailsBaselineRecovery != null)
         'detailsBaselineRecoverySha256': _detailsBaselineRecoverySha256,
+      if (detailsPendingRecovery != null)
+        'detailsPendingRecoverySha256': _detailsPendingRecoverySha256,
     },
     'adapterSha256': _adapter,
     'platform': Platform.operatingSystem,
@@ -3896,7 +4507,9 @@ final class _JoinNative with WidgetsBindingObserver {
     );
     if (restart) {
       final prior = _detailsMode
-          ? (detailsCheckpoint ?? detailsBaselineRecovery!['evidence'] as Map)
+          ? (detailsCheckpoint ??
+                detailsPendingRecovery?['evidence'] as Map? ??
+                detailsBaselineRecovery!['evidence'] as Map)
           : interruptedResume
           ? recoveryManifest!['evidence'] as Map
           : conflictResume
@@ -3929,7 +4542,9 @@ final class _JoinNative with WidgetsBindingObserver {
       _require(find.byKey(const Key('company-enroll-open')).evaluate().isEmpty);
       initialIdentity = await identity();
       final prior = _detailsMode
-          ? (detailsCheckpoint ?? detailsBaselineRecovery!['evidence'] as Map)
+          ? (detailsCheckpoint ??
+                detailsPendingRecovery?['evidence'] as Map? ??
+                detailsBaselineRecovery!['evidence'] as Map)
           : interruptedResume
           ? recoveryManifest!['evidence'] as Map
           : conflictResume
@@ -3941,10 +4556,15 @@ final class _JoinNative with WidgetsBindingObserver {
       if (_detailsMode) {
         _require(
           await sqlHash() ==
-              (baselineResume ? prior['sqlSha256'] : prior['lockedSqlSha256']),
+              (baselineResume || pendingResume
+                  ? prior['sqlSha256']
+                  : prior['lockedSqlSha256']),
         );
       }
-      final priorJobHash = baselineResume
+      final priorJobHash = pendingResume
+          ? (detailsPendingRecovery!['savedEvidence']
+                as Map)['jobHistorySha256']
+          : baselineResume
           ? await jobHash()
           : _detailsMode
           ? (prior['detailsEvidence'] as Map)['jobHistorySha256']
@@ -3982,7 +4602,25 @@ final class _JoinNative with WidgetsBindingObserver {
       await assertCreatedJobsUi(2);
       if (_detailsMode) {
         final actual = await snapshot();
-        if (baselineResume) {
+        if (pendingResume) {
+          final saved =
+              detailsPendingRecovery!['savedEvidence'] as Map<String, dynamic>;
+          await verifyDetailsPendingRecoveryRecords(
+            enrollment: enrollment,
+            owner: adapterSession!,
+            sqlSha256:
+                (detailsPendingRecovery!['evidence'] as Map)['sqlSha256']
+                    as String,
+            localCreation: _detailsBaselineOriginRecord(
+              detailsBaselineRecovery!,
+              'localCreation',
+            ),
+            savedDetail: (await db.select(db.companyJobDetails).get()).single
+                .toJson(),
+            role: _roleName,
+          );
+          verifyJobDetailsNativeReadback({'detailsEvidence': saved}, actual);
+        } else if (baselineResume) {
           await verifyDetailsBaselineRecoveryRecords(
             enrollment: enrollment,
             owner: adapterSession!,
@@ -3998,12 +4636,15 @@ final class _JoinNative with WidgetsBindingObserver {
           verifyJobDetailsNativeReadback(detailsCheckpoint!, actual);
         }
         writeOnce('join-details-cold-readback-$pid.json', {
-          'detailsStage': baselineResume
+          'detailsStage': pendingResume
+              ? 'interrupted-pending-details'
+              : baselineResume
               ? 'interrupted-baseline'
               : detailsCheckpoint!['detailsStage'],
           'beforeNearbyControllerCreated': true,
-          'protectedBytesVerifiedBeforeSignIn': !baselineResume,
-          if (baselineResume) ...{
+          'protectedBytesVerifiedBeforeSignIn':
+              !baselineResume && !pendingResume,
+          if (baselineResume || pendingResume) ...{
             'preKernelIdentityPathAndCreationSealVerified': true,
             'protectedHashesAreIndependentAnchor': false,
             'priorCommandOutcome': 'not adjudicated by recovery; original command evidence retained',
@@ -4947,6 +5588,9 @@ final class _JoinNative with WidgetsBindingObserver {
         if (detailsBaselineRecovery != null) {
           _require(next.epoch != detailsBaselineRecovery!['retiredEpoch']);
         }
+        if (detailsPendingRecovery != null) {
+          _require(next.epoch != detailsPendingRecovery!['retiredEpoch']);
+        }
         session = next;
         cache = NativeTestCommandCache(
           session: next,
@@ -5047,7 +5691,9 @@ void main() {
             _detailsCheckpointPath.isEmpty &&
             _detailsCheckpointSha256.isEmpty &&
             _detailsBaselineRecoveryPath.isEmpty &&
-            _detailsBaselineRecoverySha256.isEmpty),
+            _detailsBaselineRecoverySha256.isEmpty &&
+            _detailsPendingRecoveryPath.isEmpty &&
+            _detailsPendingRecoverySha256.isEmpty),
   );
   validateJoinNativeDefines(
     enabled: _enabled,
@@ -5118,6 +5764,8 @@ void main() {
               checkpointSha256: _detailsCheckpointSha256,
               baselineRecoveryPath: _detailsBaselineRecoveryPath,
               baselineRecoverySha256: _detailsBaselineRecoverySha256,
+              pendingRecoveryPath: _detailsPendingRecoveryPath,
+              pendingRecoverySha256: _detailsPendingRecoverySha256,
               sourceManifestPath: _detailsManifestPath,
             )
           : validateJoinNativeRootAdmission(
@@ -5203,11 +5851,13 @@ void main() {
       if (admission.recoveryManifest != null || (_detailsMode && restart)) {
         await verifyJoinNativeRecoveryBinding(db);
       }
-      if (admission.stage == JoinNativeRootStage.interruptedDetailsBaseline) {
-        final recovery = admission.detailsBaselineRecovery!;
+      if (admission.stage == JoinNativeRootStage.interruptedDetailsBaseline ||
+          admission.stage == JoinNativeRootStage.interruptedDetailsPending) {
+        final pending = admission.detailsPendingRecovery;
+        final recovery = pending ?? admission.detailsBaselineRecovery!;
         final expected = (recovery['evidence'] as Map).cast<String, Object?>();
         final localCreation = _detailsBaselineOriginRecord(
-          recovery,
+          admission.detailsBaselineRecovery!,
           'localCreation',
         );
         final binding = (await db.settingsDao.getSetting(
@@ -5217,22 +5867,38 @@ void main() {
           sha256.convert(utf8.encode(binding)).toString() ==
               expected['bindingSha256'],
         );
-        final observation = await verifyDetailsBaselineNativeHeaders(
-          base: await _nativeStore.readState(namespace),
-          custody: await _nativeStore.readState(
-            companyCustodyNamespace(namespace),
-          ),
-          binding: binding,
-          databasePath: p.join(workspace.support.path, kSqliteFileName),
-          originalIdentity: (expected['identity'] as Map)
-              .cast<String, Object?>(),
-          originalReceipt:
-              (localCreation['record'] as Map)['receiptBytes'] as String,
-          incomingOperations: (await db.select(db.companyJobs).get())
-              .where((row) => !row.outgoing)
-              .map((row) => row.operationCommitment)
-              .toSet(),
-        );
+        final incoming = (await db.select(db.companyJobs).get())
+            .where((row) => !row.outgoing)
+            .map((row) => row.operationCommitment)
+            .toSet();
+        final observation = pending == null
+            ? await verifyDetailsBaselineNativeHeaders(
+                base: await _nativeStore.readState(namespace),
+                custody: await _nativeStore.readState(
+                  companyCustodyNamespace(namespace),
+                ),
+                binding: binding,
+                databasePath: p.join(workspace.support.path, kSqliteFileName),
+                originalIdentity: (expected['identity'] as Map)
+                    .cast<String, Object?>(),
+                originalReceipt:
+                    (localCreation['record'] as Map)['receiptBytes'] as String,
+                incomingOperations: incoming,
+              )
+            : await verifyDetailsPendingNativeHeaders(
+                db: db,
+                base: await _nativeStore.readState(namespace),
+                custody: await _nativeStore.readState(
+                  companyCustodyNamespace(namespace),
+                ),
+                binding: binding,
+                databasePath: p.join(workspace.support.path, kSqliteFileName),
+                originalIdentity: (expected['identity'] as Map)
+                    .cast<String, Object?>(),
+                originalReceipt:
+                    (localCreation['record'] as Map)['receiptBytes'] as String,
+                incomingOperations: incoming,
+              );
         final observationFile = File(
           p.join(root.path, 'join-details-baseline-pre-kernel-$pid.json'),
         );
@@ -5244,6 +5910,8 @@ void main() {
             'role': _roleName,
             'sourceRevision': _revision,
             'detailsBaselineRecoverySha256': _detailsBaselineRecoverySha256,
+            if (pending != null)
+              'detailsPendingRecoverySha256': _detailsPendingRecoverySha256,
             'beforeProductionReconcile': true,
             ...observation,
           }),
@@ -5264,6 +5932,7 @@ void main() {
         interruptedResume,
         admission.detailsCheckpoint,
         admission.detailsBaselineRecovery,
+        admission.detailsPendingRecovery,
       );
       resident.stage = 'awaiting-startup-resumed';
       final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();

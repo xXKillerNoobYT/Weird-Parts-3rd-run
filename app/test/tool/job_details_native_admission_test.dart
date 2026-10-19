@@ -159,6 +159,260 @@ final class _BaselineInspectionFixture {
 }
 
 void main() {
+  test(
+    'pending local details survive cold admission with original signed creation and ACKs',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      var member = await f.bEnrollment.signIn('1234');
+      final commands = CompanyJobCommands(enrollment: f.bEnrollment);
+      await commands.createJob(
+        CreateJob(
+          companyId: member.identity.companyId,
+          shopId: member.identity.shopId,
+          jobId: const Uuid().v4(),
+          requestId: const Uuid().v4(),
+          name: 'Synthetic member pending details',
+        ),
+        ownerSession: member,
+      );
+      final pair = await openSyncPair(f);
+      final synced = await pair.a.syncNow();
+      expect([synced.complete, synced.sent, synced.received], [true, 1, 1]);
+      await pair.a.closeAndDrain();
+      await pair.b.closeAndDrain();
+      await pair.a.controller.dispose();
+      await pair.b.controller.dispose();
+      final original = (await f.bDb.select(f.bDb.companyJobs).get())
+          .singleWhere((r) => r.outgoing);
+      final views = await commands.listJobViews(ownerSession: member);
+      final selected =
+          (views.toList()..sort((a, b) => a.baseJob.id.compareTo(b.baseJob.id)))
+              .first;
+      await commands.patchJobDetails(
+        PatchJobDetails(
+          companyId: member.identity.companyId,
+          shopId: member.identity.shopId,
+          jobId: selected.baseJob.id,
+          requestId: const Uuid().v4(),
+          creationDigest: selected.creationDigest,
+          patch: const JobDetailsPatch(notes: SetField('Gate 3')),
+          observedHeads: {JobDetailField.notes: []},
+        ),
+        ownerSession: member,
+      );
+      final saved = (await commands.detailsSyncHoldings(ownerSession: member))
+          .single;
+      final sql = await adapter.detailsNativeSqlHash(f.bDb);
+      final base = (await f.bStore.readState(f.b.namespace))!;
+      final custody = await f.bStore.readState(
+        companyCustodyNamespace(f.b.namespace),
+      );
+      final binding = (await f.bDb.settingsDao.getSetting(
+        kInstallationBindingKey,
+      ))!;
+      final identity = <String, Object?>{
+        'installation': f.b.identity!.id.value,
+        'generation': f.b.identity!.generation.value,
+        'storeGeneration': f.b.receivingStoreGeneration!.value,
+        'publicKeySha256': sha256.convert(f.b.identity!.publicKey).toString(),
+        'company': member.identity.companyId,
+        'shop': member.identity.shopId,
+        'user': member.identity.userId,
+        'device': member.identity.deviceId,
+      };
+      Future<void> headers(ProtectedInstallationState held) async {
+        await adapter.verifyDetailsPendingNativeHeaders(
+          db: f.bDb,
+          base: held,
+          custody: custody,
+          binding: binding,
+          databasePath: '${f.root.path}/b.sqlite',
+          originalIdentity: identity,
+          originalReceipt: original.receiptBytes,
+          incomingOperations: (await f.bDb.select(f.bDb.companyJobs).get())
+              .where((r) => !r.outgoing)
+              .map((r) => r.operationCommitment)
+              .toSet(),
+        );
+      }
+
+      await headers(base);
+      final native =
+          jsonDecode(utf8.decode(base.bytes)) as Map<String, dynamic>;
+      for (final pending in [
+        {'family': 'unknown'},
+        CompanyCommandIntent(
+          family: CompanyCommandFamily.jobDetails,
+          receiptKey: saved.receiptKey,
+          operationCommitment: saved.operationCommitment,
+          commandCommitment: saved.commandCommitment,
+          storeGeneration: f.b.receivingStoreGeneration!.value,
+          companyId: saved.companyId,
+          lineId: saved.jobId,
+          originGeneration: saved.originGeneration,
+          requestId: saved.requestId,
+        ).encode(),
+        CompanyCommandIntent(
+          family: CompanyCommandFamily.jobCreateIncoming,
+          receiptKey: original.receiptKey,
+          operationCommitment: original.operationCommitment,
+          commandCommitment: original.commandCommitment,
+          storeGeneration: f.b.receivingStoreGeneration!.value,
+          companyId: original.companyId,
+          lineId: original.jobId,
+          originGeneration: original.originGeneration,
+          requestId: original.requestId,
+        ).encode(),
+      ]) {
+        await expectLater(
+          headers(
+            ProtectedInstallationState(
+              base.revision,
+              Uint8List.fromList(
+                utf8.encode(jsonEncode({...native, 'pendingCommand': pending})),
+              ),
+            ),
+          ),
+          throwsA(anything),
+        );
+        expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+        expect(
+          (await f.bStore.readState(f.b.namespace))!.revision,
+          base.revision,
+        );
+      }
+      await f.reopenB();
+      member = await f.bEnrollment.signIn('1234');
+      await adapter.verifyDetailsPendingRecoveryRecords(
+        enrollment: f.bEnrollment,
+        owner: member,
+        sqlSha256: sql,
+        localCreation: {'record': original.toJson()},
+        savedDetail: saved.toJson(),
+        role: 'member',
+      );
+      final after = await CompanyJobCommands(enrollment: f.bEnrollment)
+          .detailsSyncHoldings(ownerSession: member);
+      expect(after.map((r) => r.toJson()), [saved.toJson()]);
+      expect(await f.bDb.select(f.bDb.companyJobDetailPeerAcks).get(), isEmpty);
+      expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+      for (final column in [
+        'receipt_bytes',
+        'operation_bytes',
+        'audit_bytes',
+      ]) {
+        final originalBytes = column == 'receipt_bytes'
+            ? saved.receiptBytes
+            : column == 'operation_bytes'
+            ? saved.operationBytes
+            : saved.auditBytes;
+        final corrupt = jsonDecode(originalBytes) as Map<String, dynamic>;
+        if (column == 'receipt_bytes') {
+          corrupt['seal'] = base64Encode(List<int>.filled(64, 0));
+        } else if (column == 'operation_bytes') {
+          (corrupt['body'] as Map)['user'] = const Uuid().v4();
+        } else {
+          corrupt['forged'] = true;
+        }
+        await f.bDb.customStatement(
+          'UPDATE company_job_details SET $column = ?',
+          [jsonEncode(corrupt)],
+        );
+        final before = await adapter.detailsNativeSqlHash(f.bDb);
+        final changed =
+            (await f.bDb.select(f.bDb.companyJobDetails).get()).single;
+        await expectLater(
+          adapter.verifyDetailsPendingRecoveryRecords(
+            enrollment: f.bEnrollment,
+            owner: member,
+            sqlSha256: before,
+            localCreation: {'record': original.toJson()},
+            savedDetail: changed.toJson(),
+            role: 'member',
+          ),
+          throwsA(anything),
+        );
+        expect(await adapter.detailsNativeSqlHash(f.bDb), before);
+        await f.bDb.customStatement(
+          'UPDATE company_job_details SET $column = ?',
+          [originalBytes],
+        );
+      }
+      expect(await adapter.detailsNativeSqlHash(f.bDb), sql);
+    }, _LoopbackHttpOverrides()),
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+  test('pending cold inventory rejects missing extra changed duplicate and traversal members without writes', () {
+    final root = Directory.systemTemp.createTempSync('pending-inventory-');
+    addTearDown(() => root.deleteSync(recursive: true));
+    for (final name in [
+      'documents',
+      'temporary',
+      'cache',
+      'library',
+      'downloads',
+      'receipts',
+    ]) {
+      Directory(p.join(root.path, name)).createSync();
+    }
+    final support = Directory(p.join(root.path, 'support'))..createSync();
+    final sql = File(p.join(support.path, 'wired_parts.sqlite'))
+      ..writeAsStringSync('synthetic cold bytes');
+    final files = [
+      {
+        'path': 'support/wired_parts.sqlite',
+        'bytes': sql.lengthSync(),
+        'sha256': digest(sql.readAsStringSync()),
+      },
+    ];
+    adapter.verifyDetailsPendingInventory(root, files);
+    Directory(p.join(root.path, 'cache')).deleteSync();
+    expect(
+      () => adapter.verifyDetailsPendingInventory(root, files),
+      throwsA(anything),
+    );
+    Directory(p.join(root.path, 'cache')).createSync();
+    final restore = File(p.join(support.path, 'restore_swap.marker'))
+      ..writeAsStringSync('in-progress');
+    expect(
+      () => adapter.verifyDetailsPendingInventory(root, files),
+      throwsA(anything),
+    );
+    restore.deleteSync();
+    for (final entries in [
+      <Map<String, Object?>>[],
+      [...files, files.single],
+      [
+        {...files.single, 'path': '../wired_parts.sqlite'},
+      ],
+      [
+        {...files.single, 'sha256': '0' * 64},
+      ],
+      [
+        {...files.single, 'bytes': 1},
+      ],
+    ]) {
+      expect(
+        () => adapter.verifyDetailsPendingInventory(root, entries),
+        throwsA(anything),
+      );
+      expect(sql.readAsStringSync(), 'synthetic cold bytes');
+    }
+    final extra = File(p.join(root.path, 'extra.json'))
+      ..writeAsStringSync('{}');
+    expect(
+      () => adapter.verifyDetailsPendingInventory(root, files),
+      throwsA(anything),
+    );
+    extra.deleteSync();
+    sql.deleteSync();
+    expect(
+      () => adapter.verifyDetailsPendingInventory(root, files),
+      throwsA(anything),
+    );
+    expect(sql.existsSync(), isFalse);
+  });
   test('pre-kernel native headers require original identity, path and sealed creation proof', () async {
     final f = await NameFixture.create();
     addTearDown(f.close);
