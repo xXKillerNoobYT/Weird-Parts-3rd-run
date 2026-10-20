@@ -190,7 +190,7 @@ class NearbyController {
   final _authenticated = Expando<_AuthenticatedRequest>();
   _Session? _session;
   Completer<bool>? _hostMatch;
-  Completer<bool>? _offerDecision;
+  _PendingOffer? _pendingOffer;
   _AcceptedOffer? _acceptedOffer;
   Timer? _pairTimer;
 
@@ -571,10 +571,20 @@ class NearbyController {
     } catch (_) {}
   }
 
-  Future<void> acceptOffer() async {
-    final c = _offerDecision;
-    if (c == null || c.isCompleted) return;
-    c.complete(true);
+  bool isCurrentOffer(NearbyOffer offer) {
+    final pending = _pendingOffer;
+    return !_disposed &&
+        pending != null &&
+        identical(pending.offer, offer) &&
+        identical(pending.session, _session) &&
+        !pending.decision.isCompleted &&
+        (now ?? DateTime.now)().toUtc().isBefore(pending.expiresAt);
+  }
+
+  Future<void> acceptOffer(NearbyOffer offer) async {
+    final pending = _pendingOffer;
+    if (!isCurrentOffer(offer)) return;
+    pending!.decision.complete(true);
     _emit(
       _state.copyWith(
         phase: NearbyPhase.transferring,
@@ -584,10 +594,10 @@ class NearbyController {
     );
   }
 
-  Future<void> declineOffer() async {
-    final c = _offerDecision;
-    if (c == null || c.isCompleted) return;
-    c.complete(false);
+  Future<void> declineOffer(NearbyOffer offer) async {
+    final pending = _pendingOffer;
+    if (!isCurrentOffer(offer)) return;
+    pending!.decision.complete(false);
     _emit(
       NearbyViewState(
         phase: NearbyPhase.looking,
@@ -938,7 +948,7 @@ class NearbyController {
       await _writeJson(request, {'error': 'Pair again, then send'});
       return;
     }
-    if (_offerDecision != null || _state.phase == NearbyPhase.transferring) {
+    if (_pendingOffer != null || _state.phase == NearbyPhase.transferring) {
       request.response.statusCode = HttpStatus.conflict;
       await _writeJson(request, {
         'error': 'Finish the current shop copy first',
@@ -969,8 +979,14 @@ class NearbyController {
       await _writeJson(request, {'error': 'Damaged shop offer'});
       return;
     }
-    final decision = Completer<bool>();
-    _offerDecision = decision;
+    final pending = _PendingOffer(
+      offer: offer,
+      session: session,
+      expiresAt: (now ?? DateTime.now)().toUtc().add(
+        const Duration(minutes: 2),
+      ),
+    );
+    _pendingOffer = pending;
     _emit(
       NearbyViewState(
         phase: NearbyPhase.offering,
@@ -983,12 +999,26 @@ class NearbyController {
             '${offer.sourceName} wants to send their shop (${offer.summary}). Accept replaces catalog, jobs, and photos on this device.',
       ),
     );
-    final accepted = await decision.future.timeout(
+    final accepted = await pending.decision.future.timeout(
       const Duration(minutes: 2),
       onTimeout: () => false,
     );
-    if (identical(_offerDecision, decision)) _offerDecision = null;
-    if (!accepted || !identical(_session, session)) {
+    final current = identical(_pendingOffer, pending);
+    if (current) _pendingOffer = null;
+    if (!accepted || !current || !identical(_session, session)) {
+      if (current &&
+          identical(_session, session) &&
+          !pending.decision.isCompleted) {
+        _emit(
+          NearbyViewState(
+            phase: NearbyPhase.looking,
+            deviceName: deviceName,
+            deviceId: deviceId,
+            peers: _state.peers,
+            status: 'Incoming shop offer expired. Pair again, then send.',
+          ),
+        );
+      }
       request.response.statusCode = HttpStatus.forbidden;
       await _writeJson(request, {
         'error': 'They declined, or accept timed out. Nothing was copied.',
@@ -1356,10 +1386,11 @@ class NearbyController {
       _hostMatch!.complete(false);
     }
     _hostMatch = null;
-    if (_offerDecision != null && !_offerDecision!.isCompleted) {
-      _offerDecision!.complete(false);
+    final pendingOffer = _pendingOffer;
+    if (pendingOffer != null && !pendingOffer.decision.isCompleted) {
+      pendingOffer.decision.complete(false);
     }
-    _offerDecision = null;
+    _pendingOffer = null;
   }
 
   void _fail(String message) {
@@ -1492,6 +1523,19 @@ extension on NearbyViewState {
       pairedPeer: pairedPeer ?? this.pairedPeer,
     );
   }
+}
+
+class _PendingOffer {
+  _PendingOffer({
+    required this.offer,
+    required this.session,
+    required this.expiresAt,
+  });
+
+  final NearbyOffer offer;
+  final _Session session;
+  final DateTime expiresAt;
+  final decision = Completer<bool>();
 }
 
 class _AcceptedOffer {

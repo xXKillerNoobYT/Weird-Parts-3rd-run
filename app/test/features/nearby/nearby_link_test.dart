@@ -141,7 +141,7 @@ void main() {
 
     final sending = guest.sendTo(hostPeer);
     await hostOffering.future.timeout(const Duration(seconds: 5));
-    await host.acceptOffer();
+    await host.acceptOffer(host.state.incoming!);
     await sending.timeout(const Duration(seconds: 10));
 
     expect(guest.state.phase, NearbyPhase.success);
@@ -332,7 +332,8 @@ void main() {
       var decision = sendOffer();
       await offered;
       expect((await transfer()).status, HttpStatus.forbidden);
-      await receiver.declineOffer();
+      final declinedOffer = receiver.state.incoming!;
+      await receiver.declineOffer(declinedOffer);
       expect((await decision).status, HttpStatus.forbidden);
       expect((await transfer()).status, HttpStatus.forbidden);
       expect(applied, 0);
@@ -347,7 +348,28 @@ void main() {
       );
       decision = sendOffer();
       await offered;
-      await receiver.acceptOffer();
+      final currentOffer = receiver.state.incoming!;
+      final reconstructedOffer = NearbyOffer(
+        sourceDeviceId: currentOffer.sourceDeviceId,
+        sourceName: currentOffer.sourceName,
+        jobs: currentOffer.jobs,
+        parts: currentOffer.parts,
+        photos: currentOffer.photos,
+        bytes: currentOffer.bytes,
+      );
+      for (final stale in [declinedOffer, reconstructedOffer]) {
+        expect(receiver.isCurrentOffer(stale), isFalse);
+        await receiver.acceptOffer(stale);
+        await receiver.declineOffer(stale);
+      }
+      expect(receiver.state.phase, NearbyPhase.offering);
+      expect(receiver.state.incoming, same(currentOffer));
+      expect((await transfer()).status, HttpStatus.forbidden);
+      expect(applied, 0);
+      expect(receiver.isCurrentOffer(currentOffer), isTrue);
+      await receiver.acceptOffer(currentOffer);
+      await receiver.acceptOffer(currentOffer);
+      await receiver.declineOffer(currentOffer);
       expect((await decision).status, HttpStatus.ok);
       delayedOffer.add(delayedBody.sublist(1));
       final delayedResponse = await delayedOffer.close().timeout(
@@ -366,7 +388,10 @@ void main() {
       );
       decision = sendOffer();
       await offered;
-      await receiver.acceptOffer();
+      await receiver.acceptOffer(currentOffer);
+      await receiver.declineOffer(currentOffer);
+      expect(receiver.state.phase, NearbyPhase.offering);
+      await receiver.acceptOffer(receiver.state.incoming!);
       expect((await decision).status, HttpStatus.ok);
       if (revokePath == 'tampered-transfer') {
         final changed = Uint8List.fromList(bytes);

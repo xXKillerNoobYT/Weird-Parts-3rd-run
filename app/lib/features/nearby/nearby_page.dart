@@ -174,28 +174,39 @@ class _NearbyPageState extends State<NearbyPage> {
     }
   }
 
-  Future<void> _accept() async {
+  Future<void> _accept(NearbyController controller, NearbyOffer offer) async {
+    if (!controller.isCurrentOffer(offer)) return;
     if (!await ensurePinUnlocked(context, AppScope.of(context).pin)) return;
-    if (!mounted) return;
-    final offer = _state.incoming;
+    if (!mounted ||
+        !identical(_active, controller) ||
+        !controller.isCurrentOffer(offer)) {
+      return;
+    }
     final ok = await confirmAction(
       context,
       title: 'Accept this shop?',
       body:
           'Replaces catalog, jobs, and photos on this device with the shop from '
-          '${offer?.sourceName ?? 'the other device'} (${offer?.summary ?? ''}). '
+          '${offer.sourceName} (${offer.summary}). '
           'Cannot undo. This device keeps its own id.',
       confirmLabel: 'Accept shop',
     );
-    if (!ok || !mounted) {
-      await _active?.declineOffer();
+    if (!mounted ||
+        !identical(_active, controller) ||
+        !controller.isCurrentOffer(offer)) {
       return;
     }
-    await _active?.acceptOffer();
+    if (!ok) {
+      await controller.declineOffer(offer);
+      return;
+    }
+    await controller.acceptOffer(offer);
   }
 
   @override
   Widget build(BuildContext context) {
+    final controller = _active;
+    final offer = _state.incoming;
     return Scaffold(
       appBar: AppBar(title: const Text('Nearby')),
       body: NearbyView(
@@ -204,8 +215,16 @@ class _NearbyPageState extends State<NearbyPage> {
         onPair: (peer) => _active?.pair(peer),
         onConfirmCode: () => _active?.confirmCode(),
         onRejectCode: () => _active?.rejectCode(),
-        onAcceptOffer: _accept,
-        onDeclineOffer: () => _active?.declineOffer(),
+        onAcceptOffer: () {
+          if (controller != null && offer != null) {
+            _accept(controller, offer);
+          }
+        },
+        onDeclineOffer: () {
+          if (controller != null && offer != null) {
+            controller.declineOffer(offer);
+          }
+        },
         onSend: _send,
         onRetry: () async {
           await _active?.stop();
