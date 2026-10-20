@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
@@ -12,9 +14,12 @@ import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
+import 'package:wired_parts/features/jobs/jobs_repository.dart';
+import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 
 import 'features/backup/backup_test_support.dart';
+import 'features/company/company_job_test_support.dart';
 
 class _ObservedDatabase extends AppDatabase {
   _ObservedDatabase([File? file])
@@ -30,6 +35,7 @@ class _ObservedDatabase extends AppDatabase {
       );
 
   Completer<void>? closeGate;
+  Future<void> Function()? beforeClose;
   var closeCalls = 0;
   var failNextClose = false;
   var closed = false;
@@ -38,6 +44,7 @@ class _ObservedDatabase extends AppDatabase {
   Future<void> close() async {
     closeCalls++;
     await closeGate?.future;
+    await beforeClose?.call();
     if (failNextClose) {
       failNextClose = false;
       throw StateError('Synthetic close failure');
@@ -78,6 +85,7 @@ Future<String> _mount(
   LocalDataReset reset = const LocalDataReset(),
   AppDatabase Function()? reopenDatabase,
   Future<void> Function()? beforeRestore,
+  InstallationSecurity? installation,
 }) async {
   final deviceId = (await tester.runAsync(db.settingsDao.ensureDeviceId))!;
   await tester.pumpWidget(
@@ -88,6 +96,7 @@ Future<String> _mount(
       reset: reset,
       reopenDatabase: reopenDatabase,
       beforeRestore: beforeRestore,
+      installation: installation,
     ),
   );
   await tester.pumpAndSettle();
@@ -186,6 +195,189 @@ void main() {
     expect(original.closeCalls, 1);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  for (final retainedBinding in [true, false]) {
+    testWidgets(
+      retainedBinding
+          ? 'restore close failure aborts its intent, retains current floors and permits retry'
+          : 'restore close failure retains pending intent when original binding cannot be proved',
+      (tester) async {
+        final root = Directory.systemTemp.createTempSync('wp-restore-close-');
+        final support = Directory(p.join(root.path, 'support'))..createSync();
+        final documents = Directory(p.join(root.path, 'documents'))
+          ..createSync();
+        final photos = Directory(p.join(root.path, 'photos'));
+        final file = File(p.join(support.path, kSqliteFileName));
+        final original = _ObservedDatabase(file);
+        _ObservedDatabase? replacement;
+        addTearDown(() async {
+          await original.cleanUp();
+          await replacement?.cleanUp();
+          root.deleteSync(recursive: true);
+        });
+        final store = JobTestStore();
+        final installation = InstallationSecurity(
+          store: store,
+          namespace: 'synthetic.restore-close',
+        );
+        late JobsRepository jobs;
+        late String jobId;
+        late Job businessBefore;
+        await tester.runAsync(() async {
+          await installation.start(original);
+          await original.settingsDao.setSetting('marker', 'local-shop');
+          jobs = JobsRepository(
+            original,
+            await original.settingsDao.ensureDeviceId(),
+          );
+          jobId = await jobs.createJob('Existing offline job');
+          businessBefore = (await jobs.getJob(jobId))!;
+        });
+        final identity = installation.identity!;
+        final binding = await tester.runAsync(
+          () => original.settingsDao.getSetting(kInstallationBindingKey),
+        );
+        final protectedBefore = jsonDecode(
+          utf8.decode(store.states[installation.namespace]!.bytes),
+        ) as Map<String, dynamic>;
+        await _mount(
+          tester,
+          original,
+          installation: installation,
+          reset: LocalDataReset(
+            supportDir: support,
+            documentsDir: documents,
+            photosDir: photos,
+          ),
+          reopenDatabase: () => replacement = _ObservedDatabase(file),
+        );
+        final scope = tester.widget<AppScope>(find.byType(AppScope));
+        final payload = BackupPayload(
+          sourceDeviceId: 'synthetic-source',
+          createdAt: DateTime.utc(2026, 10, 20),
+          sqliteBytes: (await tester.runAsync(
+            () => sqliteBytesWithSetting(key: 'marker', value: 'restored-shop'),
+          ))!,
+          photos: const {},
+        );
+        final closeFailure = StateError('Synthetic restore close failure');
+        ProtectedInstallationState? pending;
+        original.beforeClose = () async {
+          original.beforeClose = null;
+          final current = store.states[installation.namespace]!;
+          final record =
+              jsonDecode(utf8.decode(current.bytes)) as Map<String, dynamic>;
+          expect(record['activation'], 'pending');
+          expect(record['previousStore'], protectedBefore['store']);
+          record['floors'] = {
+            'authority.test-company': 8,
+            'revocation.test-device': 12,
+          };
+          await store.compareAndSwapState(
+            installation.namespace,
+            expectedRevision: current.revision,
+            nextRevision: 'synthetic-floors-after-restore-intent',
+            bytes: Uint8List.fromList(utf8.encode(jsonEncode(record))),
+          );
+          pending = store.states[installation.namespace]!;
+          if (!retainedBinding) {
+            await original.settingsDao.setSetting(
+              kInstallationBindingKey,
+              'synthetic-unproven-binding',
+            );
+          }
+          throw closeFailure;
+        };
+        await tester.runAsync(
+          () => expectLater(
+            scope.restoreFromPayload!(payload),
+            throwsA(same(closeFailure)),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(original.closeCalls, 1);
+        expect(original.closed, isFalse);
+        expect(replacement, isNull);
+        expect(
+          tester.widget<AppScope>(find.byType(AppScope)).db,
+          same(original),
+        );
+        expect(
+          await tester.runAsync(
+            () => original.settingsDao.getSetting('marker'),
+          ),
+          'local-shop',
+        );
+        expect(
+          await tester.runAsync(original.settingsDao.ensureDeviceId),
+          scope.deviceId,
+        );
+        final retainedJob = await tester.runAsync(() => jobs.getJob(jobId));
+        expect(retainedJob, businessBefore);
+        expect(retainedJob!.name, 'Existing offline job');
+        final protectedAfter = jsonDecode(
+          utf8.decode(store.states[installation.namespace]!.bytes),
+        ) as Map<String, dynamic>;
+        for (final key in ['id', 'generation', 'key', 'public']) {
+          expect(protectedAfter[key], protectedBefore[key], reason: key);
+        }
+        expect(
+          protectedAfter['seed'] == protectedBefore['seed'],
+          isTrue,
+          reason: 'Protected signing material is retained',
+        );
+        expect(protectedAfter['floors'], {
+          'authority.test-company': 8,
+          'revocation.test-device': 12,
+        });
+        expect(installation.identity!.id, identity.id);
+        expect(installation.identity!.publicKey, identity.publicKey);
+        expect(BackupIo.isBusy, isFalse);
+        if (retainedBinding) {
+          expect(protectedAfter['activation'], 'active');
+          expect(protectedAfter['previousStore'], isNull);
+          expect(protectedAfter['store'], protectedBefore['store']);
+          expect(installation.readiness, InstallationReadiness.ready);
+          expect(installation.knownSecurityFloors, protectedAfter['floors']);
+          expect(
+            await tester.runAsync(
+              () => original.settingsDao.getSetting(kInstallationBindingKey),
+            ),
+            binding,
+          );
+          await tester.runAsync(() => scope.restoreFromPayload!(payload));
+          await tester.pumpAndSettle();
+          final live = tester.widget<AppScope>(find.byType(AppScope)).db;
+          expect(live, same(replacement));
+          expect(original.closed, isTrue);
+          expect(original.closeCalls, 2);
+          expect(
+            await tester.runAsync(() => live.settingsDao.getSetting('marker')),
+            'restored-shop',
+          );
+          expect(installation.readiness, InstallationReadiness.ready);
+          expect(installation.identity!.id, identity.id);
+          expect(installation.identity!.publicKey, identity.publicKey);
+          expect(installation.knownSecurityFloors, protectedAfter['floors']);
+        } else {
+          expect(store.states[installation.namespace], same(pending));
+          expect(protectedAfter['activation'], 'pending');
+          expect(protectedAfter['previousStore'], protectedBefore['store']);
+          expect(installation.readiness, InstallationReadiness.needsRecovery);
+          expect(installation.canUseCompanyOperations, isFalse);
+          await tester.runAsync(
+            () => expectLater(
+              scope.restoreFromPayload!(payload),
+              throwsA(isA<StateError>()),
+            ),
+          );
+          expect(original.closeCalls, 1);
+          expect(store.states[installation.namespace], same(pending));
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 
   testWidgets('exit during restore is cancelled without closing storage', (
     tester,
