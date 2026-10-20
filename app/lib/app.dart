@@ -265,6 +265,11 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       if (!mounted) return;
       setState(() => _bindLive(next!, keepDeviceId));
     } catch (e) {
+      if (!closed && intent != null) {
+        try {
+          await widget.installation!.abortBusinessRestore(_db, intent);
+        } catch (_) {}
+      }
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
         if (!replacementReturned && intent != null) {
