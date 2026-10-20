@@ -159,15 +159,60 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     try {
       await requireLegacyBusinessStore(_db);
       await widget.reset.preflight();
-      await widget.installation?.prepareReset(_db);
-      await _db.close();
+      final intent = await widget.installation?.prepareReset(_db);
       try {
-        await widget.reset.wipeFiles();
-      } catch (_) {
-        await _reopen();
-        rethrow;
+        await _db.close();
+      } catch (error, stack) {
+        var recovered = false;
+        try {
+          await _abortReset(_db, intent);
+          recovered = true;
+        } catch (_) {}
+        if (!recovered && mounted) setState(() => _exiting = true);
+        Error.throwWithStackTrace(error, stack);
       }
-      await _reopen(resetIdentity: true);
+      try {
+        if (intent != null) await widget.installation!.validateReset(intent);
+        await widget.reset.wipeFiles();
+      } catch (error, stack) {
+        var recovered = false;
+        if (error is LocalDataResetNoEffectFailure) {
+          AppDatabase? next;
+          try {
+            final store = BackupStore(supportDir: widget.reset.supportDir);
+            if (await store.hasInterruptedRestore() ||
+                !await (await store.sqliteFile()).exists()) {
+              throw StateError(
+                'Storage cannot safely reopen for reset recovery',
+              );
+            }
+            next = widget.reopenDatabase?.call() ?? AppDatabase();
+            await _abortReset(next, intent);
+            if (mounted) {
+              setState(() => _bindLive(next!, _deviceId));
+              recovered = true;
+            }
+          } catch (_) {
+          } finally {
+            if (!recovered) {
+              try {
+                await next?.close();
+              } catch (_) {}
+            }
+          }
+        }
+        if (!recovered && mounted) setState(() => _exiting = true);
+        if (error is LocalDataResetNoEffectFailure) {
+          Error.throwWithStackTrace(error.cause, error.stackTrace);
+        }
+        Error.throwWithStackTrace(error, stack);
+      }
+      try {
+        await _reopen(resetIntent: intent);
+      } catch (error, stack) {
+        if (mounted) setState(() => _exiting = true);
+        Error.throwWithStackTrace(error, stack);
+      }
     } finally {
       _wiping = false;
       BackupIo.end();
@@ -304,22 +349,38 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     _generation++;
   }
 
-  Future<void> _reopen({bool resetIdentity = false}) async {
+  Future<void> _abortReset(
+    AppDatabase db,
+    InstallationResetIntent? intent,
+  ) async {
+    if (intent != null) {
+      await widget.installation!.abortReset(db, intent);
+    } else {
+      await requireLegacyBusinessStore(db);
+    }
+  }
+
+  Future<void> _reopen({InstallationResetIntent? resetIntent}) async {
     final next = widget.reopenDatabase?.call() ?? AppDatabase();
     var bound = false;
     try {
-      if (resetIdentity) {
-        await widget.installation?.completeReset(next);
+      if (resetIntent != null) {
+        await widget.installation!.completeReset(next, resetIntent);
       } else {
         await widget.installation?.start(next);
       }
       final deviceId = await next.settingsDao.ensureDeviceId();
-      if (!mounted) return;
-      setState(() => _bindLive(next, deviceId));
-      bound = true;
-    } finally {
-      if (!bound) await next.close();
+      if (mounted) {
+        setState(() => _bindLive(next, deviceId));
+        bound = true;
+      }
+    } catch (error, stack) {
+      try {
+        await next.close();
+      } catch (_) {}
+      Error.throwWithStackTrace(error, stack);
     }
+    if (!bound) await next.close();
   }
 
   @override

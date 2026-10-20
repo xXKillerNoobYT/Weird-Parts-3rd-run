@@ -131,7 +131,13 @@ void main() {
         ..writeAsStringSync('synthetic photo');
       await expectLater(
         LocalDataReset(supportDir: dir, documentsDir: dir).wipeFiles(),
-        throwsA(isA<raw_sqlite.SqliteException>()),
+        throwsA(
+          isA<LocalDataResetNoEffectFailure>().having(
+            (e) => e.cause,
+            'cause',
+            isA<raw_sqlite.SqliteException>(),
+          ),
+        ),
       );
       expect(sqlite.readAsStringSync(), 'damaged unknown shop');
       expect(photo.readAsStringSync(), 'synthetic photo');

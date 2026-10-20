@@ -22,6 +22,7 @@ class FakeSecureStore implements InstallationSecureStore {
   bool failNextWrite = false;
   bool failReads = false;
   int writeCalls = 0;
+  Future<void> Function(String namespace, Uint8List bytes)? beforeCas;
   @override
   Future<ProtectedInstallationState?> readState(String namespace) async {
     if (failReads) throw PlatformException(code: 'installation_unavailable');
@@ -40,6 +41,7 @@ class FakeSecureStore implements InstallationSecureStore {
       failNextWrite = false;
       throw PlatformException(code: 'installation_unavailable');
     }
+    await beforeCas?.call(namespace, bytes);
     final existing = states[namespace];
     if (existing?.revision == nextRevision) {
       if (base64Encode(existing!.bytes) != base64Encode(bytes)) {
@@ -689,7 +691,7 @@ void main() {
     await service.start(db);
     final oldIdentity = service.identity!.id;
     await addSecurityFloor(store, service, db);
-    await service.prepareReset(db);
+    final intent = (await service.prepareReset(db))!;
     await db.close();
     await LocalDataReset(
       supportDir: directory,
@@ -700,7 +702,7 @@ void main() {
     final interrupted = security(store);
     await interrupted.start(next);
     expect(interrupted.readiness, InstallationReadiness.needsRecovery);
-    await service.completeReset(next);
+    await service.completeReset(next, intent);
     expect(service.readiness, InstallationReadiness.ready);
     expect(service.identity!.id, isNot(oldIdentity));
     expect(
@@ -710,6 +712,255 @@ void main() {
       7,
     );
   });
+
+  test('reset abort and completion retain current floors without restoring a snapshot', () async {
+    final store = FakeSecureStore();
+    final directory = temporary();
+    final db = open(directory);
+    final service = security(store);
+    await service.start(db);
+    final old = _protectedRecord(store, service);
+    _changeProtectedRecord(
+      store,
+      service,
+      (record) => record['floors'] = {'test-floor': 13},
+    );
+    final first = (await service.prepareReset(db))!;
+    expect(_protectedRecord(store, service)['floors'], {'test-floor': 13});
+    _changeProtectedRecord(
+      store,
+      service,
+      (record) => record['floors'] = {'test-floor': 21},
+    );
+    await service.abortReset(db, first);
+    expect(service.knownSecurityFloors, {'test-floor': 21});
+    expect(service.readiness, InstallationReadiness.ready);
+    final retained = _protectedRecord(store, service);
+    for (final key in ['id', 'generation', 'key', 'public', 'seed', 'store']) {
+      expect(retained[key], old[key], reason: key);
+    }
+    final second = (await service.prepareReset(db))!;
+    final fence = store.states[service.namespace]!;
+    final oldBinding = await db.settingsDao.getSetting(kInstallationBindingKey);
+    await expectLater(service.validateReset(first), throwsStateError);
+    await expectLater(service.abortReset(db, first), throwsStateError);
+    await expectLater(service.completeReset(db, first), throwsStateError);
+    await expectLater(service.prepareReset(db), throwsStateError);
+    expect(store.states[service.namespace]!.bytes, fence.bytes);
+    expect(
+      await db.settingsDao.getSetting(kInstallationBindingKey),
+      oldBinding,
+    );
+    _changeProtectedRecord(
+      store,
+      service,
+      (record) => record['floors'] = {'test-floor': 34},
+    );
+    await service.validateReset(second);
+    await db.close();
+    await LocalDataReset(
+      supportDir: directory,
+      documentsDir: directory,
+    ).wipeFiles();
+    final next = open(directory);
+    addTearDown(next.close);
+    await service.completeReset(next, second);
+    expect(service.knownSecurityFloors, {'test-floor': 34});
+    expect(service.readiness, InstallationReadiness.ready);
+    expect(service.identity!.id.value, isNot(old['id']));
+    expect(base64Encode(service.identity!.publicKey), isNot(old['public']));
+    final completed = store.states[service.namespace]!;
+    final newBinding = await next.settingsDao.getSetting(
+      kInstallationBindingKey,
+    );
+    await expectLater(service.completeReset(next, second), throwsStateError);
+    await expectLater(service.abortReset(next, second), throwsStateError);
+    expect(store.states[service.namespace]!.bytes, completed.bytes);
+    expect(
+      await next.settingsDao.getSetting(kInstallationBindingKey),
+      newBinding,
+    );
+  });
+
+  for (final phase in ['prepare', 'abort', 'complete']) {
+    test(
+      'reset $phase stale CAS preserves competing floors and never writes a binding',
+      () async {
+        final store = FakeSecureStore();
+        final directory = temporary();
+        final db = open(directory);
+        final service = security(store);
+        await service.start(db);
+        final before = _protectedRecord(store, service);
+        InstallationResetIntent? intent;
+        AppDatabase target = db;
+        if (phase != 'prepare') intent = (await service.prepareReset(db))!;
+        if (phase == 'complete') {
+          await db.close();
+          await LocalDataReset(
+            supportDir: directory,
+            documentsDir: directory,
+          ).wipeFiles();
+          target = open(directory);
+        }
+        addTearDown(target.close);
+        final bindingBefore = await target.settingsDao.getSetting(
+          kInstallationBindingKey,
+        );
+        final recordBefore = _protectedRecord(store, service);
+        store.beforeCas = (namespace, bytes) async {
+          if (namespace != service.namespace) return;
+          store.beforeCas = null;
+          _changeProtectedRecord(
+            store,
+            service,
+            (record) => record['floors'] = {'concurrent-floor': 55},
+          );
+        };
+        await expectLater(
+          switch (phase) {
+            'prepare' => service.prepareReset(target),
+            'abort' => service.abortReset(target, intent!),
+            _ => service.completeReset(target, intent!),
+          },
+          throwsA(
+            isA<PlatformException>().having(
+              (e) => e.code,
+              'code',
+              'installation_conflict',
+            ),
+          ),
+        );
+        final after = _protectedRecord(store, service);
+        expect(after['floors'], {'concurrent-floor': 55});
+        for (final key in [
+          'id',
+          'generation',
+          'key',
+          'public',
+          'seed',
+          'store',
+          'activation',
+          'previousStore',
+        ]) {
+          expect(after[key], recordBefore[key], reason: key);
+        }
+        expect(after['id'], before['id']);
+        expect(
+          await target.settingsDao.getSetting(kInstallationBindingKey),
+          bindingBefore,
+        );
+        expect(service.readiness, InstallationReadiness.needsRecovery);
+      },
+    );
+  }
+
+  for (final changed in ['custody', 'trust', 'pending', 'previous-store']) {
+    test(
+      'reset $changed change refuses validation abort and completion before effects',
+      () async {
+        final store = FakeSecureStore();
+        final directory = temporary();
+        final db = open(directory);
+        addTearDown(db.close);
+        final service = security(store);
+        await service.start(db);
+        final intent = (await service.prepareReset(db))!;
+        final binding = await db.settingsDao.getSetting(
+          kInstallationBindingKey,
+        );
+        if (changed == 'custody') {
+          store.states[companyCustodyNamespace(
+            service.namespace,
+          )] = ProtectedInstallationState(
+            const Uuid().v4(),
+            Uint8List.fromList([1]),
+          );
+        } else {
+          _changeProtectedRecord(store, service, (record) {
+            if (changed == 'previous-store') {
+              record['previousStore'] = const Uuid().v4();
+              return;
+            }
+            record['v'] = 2;
+            record['storePath'] = 'a' * 64;
+            record['companyTrust'] = CompanyTrustAnchor(
+              companyId: CompanyId(const Uuid().v4()),
+              rootKey: Uint8List(32),
+              authorityVersion: 1,
+              factsCommitment: 'b' * 64,
+              policy: 'localContinuity',
+            ).encode();
+            record['pendingCommand'] = changed == 'pending'
+                ? CompanyCommandIntent(
+                    receiptKey: 'c' * 64,
+                    operationCommitment: 'd' * 64,
+                    commandCommitment: 'e' * 64,
+                    storeGeneration: record['store'] as String,
+                    companyId: const Uuid().v4(),
+                    lineId: const Uuid().v4(),
+                    originGeneration: const Uuid().v4(),
+                    requestId: const Uuid().v4(),
+                  ).encode()
+                : null;
+          });
+        }
+        final guarded = store.states[service.namespace]!;
+        await expectLater(service.validateReset(intent), throwsStateError);
+        await expectLater(service.abortReset(db, intent), throwsStateError);
+        await expectLater(service.completeReset(db, intent), throwsStateError);
+        expect(store.states[service.namespace]!.bytes, guarded.bytes);
+        expect(
+          await db.settingsDao.getSetting(kInstallationBindingKey),
+          binding,
+        );
+      },
+    );
+  }
+
+  test(
+    'reset refuses mismatched old binding and nonempty completion target',
+    () async {
+      final store = FakeSecureStore();
+      final directory = temporary();
+      final db = open(directory);
+      addTearDown(db.close);
+      final service = security(store);
+      await service.start(db);
+      final binding = (await db.settingsDao.getSetting(
+        kInstallationBindingKey,
+      ))!;
+      await db.settingsDao.setSetting(
+        kInstallationBindingKey,
+        'different binding',
+      );
+      final active = store.states[service.namespace]!;
+      await expectLater(service.prepareReset(db), throwsStateError);
+      expect(store.states[service.namespace]!.bytes, active.bytes);
+      await db.settingsDao.setSetting(kInstallationBindingKey, binding);
+      final intent = (await service.prepareReset(db))!;
+      await db.settingsDao.setSetting(
+        kInstallationBindingKey,
+        'different binding',
+      );
+      final fenced = store.states[service.namespace]!;
+      await expectLater(service.abortReset(db, intent), throwsStateError);
+      expect(store.states[service.namespace]!.bytes, fenced.bytes);
+      final other = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(other.close);
+      await other.settingsDao.setSetting('marker', 'unrelated business data');
+      await expectLater(service.completeReset(other, intent), throwsStateError);
+      expect(store.states[service.namespace]!.bytes, fenced.bytes);
+      expect(
+        await other.settingsDao.getSetting(kInstallationBindingKey),
+        isNull,
+      );
+      expect(
+        await other.settingsDao.getSetting('marker'),
+        'unrelated business data',
+      );
+    },
+  );
 
   test('invalid namespaces cannot fall back to production', () {
     for (final namespace in [
@@ -722,4 +973,24 @@ void main() {
       expect(() => security(FakeSecureStore(), namespace), throwsArgumentError);
     }
   });
+}
+
+Map<String, dynamic> _protectedRecord(
+  FakeSecureStore store,
+  InstallationSecurity service,
+) =>
+    jsonDecode(utf8.decode(store.states[service.namespace]!.bytes))
+        as Map<String, dynamic>;
+
+void _changeProtectedRecord(
+  FakeSecureStore store,
+  InstallationSecurity service,
+  void Function(Map<String, dynamic>) change,
+) {
+  final record = _protectedRecord(store, service);
+  change(record);
+  store.states[service.namespace] = ProtectedInstallationState(
+    const Uuid().v4(),
+    Uint8List.fromList(utf8.encode(jsonEncode(record))),
+  );
 }

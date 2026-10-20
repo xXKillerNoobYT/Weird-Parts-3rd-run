@@ -852,6 +852,17 @@ class InstallationRestoreIntent {
   final String binding;
 }
 
+final class InstallationResetIntent {
+  const InstallationResetIntent._(
+    this._namespace,
+    this._binding,
+    this._previousStoreGeneration,
+  );
+  final String _namespace;
+  final String _binding;
+  final ReceivingStoreGeneration _previousStoreGeneration;
+}
+
 class _InstallationRecord {
   const _InstallationRecord(
     this.identity,
@@ -1489,37 +1500,116 @@ class InstallationSecurity {
         return InstallationRestoreIntent._(next.binding);
       });
 
-  Future<void> prepareReset(AppDatabase db) => legacyBusinessWrite(
-    db,
-    () async {
-      if (readiness == InstallationReadiness.unsupported) return;
-      if (readiness == InstallationReadiness.unavailable) {
-        throw StateError('Installation security is unavailable');
-      }
-      final persisted = await store.readState(namespace);
-      if (persisted == null) throw StateError('Protected identity is missing');
-      _persisted = persisted;
-      final previous = _InstallationRecord.decode(persisted.bytes);
-      if (previous.companyTrust != null ||
-          await store.readState(companyCustodyNamespace(namespace)) != null) {
-        throw StateError('Company authority prevents local reset');
-      }
-      if (previous.pendingCommand != null) {
-        throw StateError('Finish pending company command before resetting');
-      }
-      await _write(
-        await _newRecord(previous.floors),
-        expectedRevision: persisted.revision,
-      );
-      readiness = InstallationReadiness.needsRecovery;
-    },
-  );
+  Future<InstallationResetIntent?> prepareReset(AppDatabase db) =>
+      legacyBusinessWrite(db, () async {
+        if (readiness == InstallationReadiness.unsupported) return null;
+        if (readiness == InstallationReadiness.unavailable) {
+          throw StateError('Installation security is unavailable');
+        }
+        final persisted = await store.readState(namespace);
+        if (persisted == null) {
+          throw StateError('Protected identity is missing');
+        }
+        final previous = _InstallationRecord.decode(persisted.bytes);
+        if (previous.companyTrust != null ||
+            await store.readState(companyCustodyNamespace(namespace)) != null) {
+          throw StateError('Company authority prevents local reset');
+        }
+        if (previous.pendingCommand != null) {
+          throw StateError('Finish pending company command before resetting');
+        }
+        if (readiness != InstallationReadiness.ready ||
+            previous.activation != InstallationActivation.active ||
+            previous.previousStoreGeneration != null ||
+            await db.settingsDao.getSetting(kInstallationBindingKey) !=
+                previous.binding) {
+          throw StateError('Recover installation identity before resetting');
+        }
+        final fence = _InstallationRecord(
+          previous.identity,
+          previous.seed,
+          InstallationActivation.needsRecovery,
+          ReceivingStoreGeneration(const Uuid().v4()),
+          previous.floors,
+          previousStoreGeneration: previous.storeGeneration,
+          storePathFingerprint: previous.storePathFingerprint,
+        );
+        readiness = InstallationReadiness.needsRecovery;
+        await _write(fence, expectedRevision: persisted.revision);
+        return InstallationResetIntent._(
+          namespace,
+          fence.binding,
+          previous.storeGeneration,
+        );
+      });
 
-  Future<void> completeReset(AppDatabase db) async {
-    if (readiness == InstallationReadiness.unsupported) return;
-    await db.settingsDao.setSetting(kInstallationBindingKey, _record!.binding);
-    await reconcile(db);
+  Future<(ProtectedInstallationState, _InstallationRecord)> _resetFence(
+    InstallationResetIntent intent,
+  ) async {
+    final persisted = await store.readState(namespace);
+    if (persisted == null) throw StateError('Protected identity is missing');
+    final fence = _InstallationRecord.decode(persisted.bytes);
+    if (intent._namespace != namespace ||
+        fence.binding != intent._binding ||
+        fence.activation != InstallationActivation.needsRecovery ||
+        fence.previousStoreGeneration != intent._previousStoreGeneration ||
+        fence.companyTrust != null ||
+        fence.pendingCommand != null ||
+        await store.readState(companyCustodyNamespace(namespace)) != null) {
+      throw StateError('Reset intent no longer owns the installation fence');
+    }
+    return (persisted, fence);
   }
+
+  Future<void> validateReset(InstallationResetIntent intent) async {
+    await _resetFence(intent);
+  }
+
+  Future<void> abortReset(AppDatabase db, InstallationResetIntent intent) =>
+      legacyBusinessWrite(db, () async {
+        readiness = InstallationReadiness.needsRecovery;
+        final (persisted, fence) = await _resetFence(intent);
+        final previous = _InstallationRecord(
+          fence.identity,
+          fence.seed,
+          InstallationActivation.active,
+          intent._previousStoreGeneration,
+          fence.floors,
+          storePathFingerprint: fence.storePathFingerprint,
+        );
+        if (await db.settingsDao.getSetting(kInstallationBindingKey) !=
+            previous.binding) {
+          throw StateError('Previous store binding was not retained');
+        }
+        await _write(previous, expectedRevision: persisted.revision);
+        await reconcile(db);
+        if (readiness != InstallationReadiness.ready) {
+          throw StateError('Previous installation needs recovery');
+        }
+      });
+
+  Future<void> completeReset(AppDatabase db, InstallationResetIntent intent) =>
+      legacyBusinessWrite(db, () async {
+        readiness = InstallationReadiness.needsRecovery;
+        final (persisted, fence) = await _resetFence(intent);
+        for (final table in db.allTables) {
+          if ((await db
+                  .customSelect(
+                    'SELECT 1 FROM "${table.actualTableName}" LIMIT 1',
+                  )
+                  .get())
+              .isNotEmpty) {
+            throw StateError('Reset requires a fresh empty business store');
+          }
+        }
+        final next = await _newRecord(fence.floors);
+        await _write(next, expectedRevision: persisted.revision);
+        await db.settingsDao.setSetting(kInstallationBindingKey, next.binding);
+        await reconcile(db);
+        if (readiness != InstallationReadiness.ready) {
+          throw StateError('Reset installation binding needs recovery');
+        }
+      });
 
   Future<void> abortBusinessRestore(
     AppDatabase db,

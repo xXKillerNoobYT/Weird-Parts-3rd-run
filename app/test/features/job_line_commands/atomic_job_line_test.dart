@@ -2065,7 +2065,13 @@ void main() {
           supportDir: fixture.directory,
           documentsDir: legacy,
         ).wipeFiles(),
-        throwsA(isA<BackupFormatException>()),
+        throwsA(
+          isA<LocalDataResetNoEffectFailure>().having(
+            (e) => e.cause,
+            'cause',
+            isA<BackupFormatException>(),
+          ),
+        ),
       );
       expect(await liveName.readAsBytes(), bytes);
       await fixture.reopen(0);
