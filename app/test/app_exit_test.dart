@@ -438,6 +438,7 @@ void main() {
         namespace: 'synthetic.reset-close',
       );
       late Job businessBefore;
+      late DeviceProfile profileBefore;
       late String jobId;
       late JobsRepository jobs;
       await tester.runAsync(() async {
@@ -449,6 +450,9 @@ void main() {
         );
         jobId = await jobs.createJob('Existing offline job');
         businessBefore = (await jobs.getJob(jobId))!;
+        profileBefore = await original
+            .select(original.deviceProfiles)
+            .getSingle();
       });
       final protectedBefore = jsonDecode(
         utf8.decode(store.states[installation.namespace]!.bytes),
@@ -508,6 +512,12 @@ void main() {
         ),
         bindingBefore,
       );
+      expect(
+        await tester.runAsync(
+          () => original.select(original.deviceProfiles).getSingle(),
+        ),
+        profileBefore,
+      );
       expect(installation.readiness, InstallationReadiness.ready);
       final protectedAfter = jsonDecode(
         utf8.decode(store.states[installation.namespace]!.bytes),
@@ -536,6 +546,251 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  for (final mode in [
+    'after-close',
+    'preflight',
+    'partial',
+    'preflight-cleanup',
+    'preflight-marker',
+    'preflight-missing-live',
+    'preflight-gate-error',
+  ]) {
+    testWidgets(
+      'reset $mode failure preserves the primary error and correct fence',
+      (tester) async {
+        final root = Directory.systemTemp.createTempSync('wp-reset-phase-');
+        final support = Directory(p.join(root.path, 'support'))..createSync();
+        final documents = Directory(p.join(root.path, 'documents'))
+          ..createSync();
+        final file = File(p.join(support.path, kSqliteFileName));
+        final photo = File(p.join(support.path, 'part_photos', 'kept.jpg'));
+        photo.parent.createSync();
+        photo.writeAsStringSync('existing photo');
+        final staging = Directory(p.join(support.path, kRestoreStagingName))
+          ..createSync();
+        final staged = File(p.join(staging.path, 'kept.txt'))
+          ..writeAsStringSync('staged data');
+        final hasMarker = [
+          'after-close',
+          'partial',
+          'preflight-marker',
+        ].contains(mode);
+        final marker = File(p.join(support.path, kRestoreSwapMarkerName));
+        if (hasMarker) marker.writeAsStringSync('restore marker');
+        final backup = File(p.join(support.path, kSqliteRestoreBakName))
+          ..writeAsStringSync('backup data');
+        final original = _ObservedDatabase(file);
+        final handles = <_ObservedDatabase>[original];
+        addTearDown(() async {
+          for (final db in handles) {
+            await db.cleanUp();
+          }
+          root.deleteSync(recursive: true);
+        });
+        final store = JobTestStore();
+        final installation = InstallationSecurity(
+          store: store,
+          namespace: 'synthetic.reset-phase',
+        );
+        late Job oldJob;
+        late String oldBinding;
+        late String device;
+        await tester.runAsync(() async {
+          await installation.start(original);
+          device = await original.settingsDao.ensureDeviceId();
+          final jobs = JobsRepository(original, device);
+          final id = await jobs.createJob('Retained phase job');
+          oldJob = (await jobs.getJob(id))!;
+          oldBinding = (await original.settingsDao.getSetting(
+            kInstallationBindingKey,
+          ))!;
+          final docs = _ObservedDatabase(
+            File(p.join(documents.path, kSqliteFileName)),
+          );
+          await docs.settingsDao.setSetting('marker', 'Documents old shop');
+          await docs.close();
+        });
+        final documentsFile = File(p.join(documents.path, kSqliteFileName));
+        final documentsBefore = documentsFile.readAsBytesSync();
+        Uint8List? sqliteBefore;
+        final before = jsonDecode(
+          utf8.decode(store.states[installation.namespace]!.bytes),
+        ) as Map;
+        final io = _ResetFailureIo(
+          file.path,
+          preflight: mode.startsWith('preflight'),
+          failReopenCheck: mode == 'preflight-gate-error',
+        );
+        final closeError = StateError('SQLite closed before reporting failure');
+        original.afterClose = () async {
+          sqliteBefore = file.readAsBytesSync();
+          if (mode == 'preflight-missing-live') file.deleteSync();
+          io.armed = true;
+          if (mode == 'after-close') throw closeError;
+        };
+        var reopens = 0;
+        _ObservedDatabase? replacement;
+        await _mount(
+          tester,
+          original,
+          installation: installation,
+          reset: LocalDataReset(supportDir: support, documentsDir: documents),
+          reopenDatabase: () {
+            reopens++;
+            final db = mode == 'preflight-cleanup'
+                ? _ObservedDatabase.failOnOpen()
+                : _ObservedDatabase(
+                    resolveSqliteFile(
+                      supportDir: support,
+                      documentsDir: documents,
+                    ),
+                  );
+            if (mode == 'preflight-cleanup') {
+              db.beforeClose = () async =>
+                  throw StateError('cleanup also failed');
+            }
+            handles.add(db);
+            return replacement = db;
+          },
+        );
+        final scope = tester.widget<AppScope>(find.byType(AppScope));
+        await tester.runAsync(
+          () => IOOverrides.runWithIOOverrides(
+            () => expectLater(
+              scope.wipeLocalData(),
+              throwsA(same(mode == 'after-close' ? closeError : io.error)),
+            ),
+            io,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(original.closed, isTrue);
+        expect(original.closeCalls, 1);
+        expect(BackupIo.isBusy, isFalse);
+        expect(photo.readAsStringSync(), 'existing photo');
+        final knownNoEffect = mode == 'preflight';
+        expect(
+          reopens,
+          ['preflight', 'preflight-cleanup'].contains(mode) ? 1 : 0,
+        );
+        expect(staged.existsSync(), mode != 'partial');
+        expect(marker.existsSync(), hasMarker && mode != 'partial');
+        if (marker.existsSync()) {
+          expect(marker.readAsStringSync(), 'restore marker');
+        }
+        if (staged.existsSync()) {
+          expect(staged.readAsStringSync(), 'staged data');
+        }
+        if (backup.existsSync()) {
+          expect(backup.readAsStringSync(), 'backup data');
+        }
+        expect(documentsFile.readAsBytesSync(), documentsBefore);
+        if (mode == 'preflight-missing-live') {
+          expect(file.existsSync(), isFalse);
+        } else {
+          expect(file.readAsBytesSync(), sqliteBefore);
+        }
+        expect(backup.existsSync(), mode != 'partial');
+        expect(
+          File(p.join(documents.path, kSqliteFileName)).existsSync(),
+          isTrue,
+        );
+        final after = jsonDecode(
+          utf8.decode(store.states[installation.namespace]!.bytes),
+        ) as Map;
+        for (final key in [
+          'id',
+          'generation',
+          'key',
+          'public',
+          'seed',
+          'floors',
+        ]) {
+          expect(after[key], before[key], reason: key);
+        }
+        if (knownNoEffect) {
+          expect(installation.readiness, InstallationReadiness.ready);
+          expect(after['store'], before['store']);
+          expect(after['previousStore'], isNull);
+          final live = tester.widget<AppScope>(find.byType(AppScope));
+          expect(live.db, same(replacement));
+          await tester.runAsync(() async {
+            expect(
+              await live.db.settingsDao.getSetting(kInstallationBindingKey),
+              oldBinding,
+            );
+            expect(
+              await JobsRepository(live.db, device).getJob(oldJob.id),
+              oldJob,
+            );
+            expect(await live.db.settingsDao.ensureDeviceId(), device);
+            await live.wipeLocalData();
+          });
+          await tester.pumpAndSettle();
+          expect(installation.readiness, InstallationReadiness.ready);
+          expect(installation.identity!.id.value, isNot(before['id']));
+          expect(
+            base64Encode(installation.identity!.publicKey),
+            isNot(before['public']),
+          );
+          expect(photo.existsSync(), isFalse);
+          expect(staged.existsSync(), isFalse);
+          expect(
+            File(p.join(documents.path, kSqliteFileName)).existsSync(),
+            isFalse,
+          );
+          expect(reopens, 2);
+        } else {
+          expect(after['activation'], 'needsRecovery');
+          expect(after['previousStore'], before['store']);
+          expect(after['store'], isNot(before['store']));
+          expect(installation.readiness, InstallationReadiness.needsRecovery);
+          expect(
+            tester.widget<AppScope>(find.byType(AppScope)).db,
+            same(original),
+          );
+          expect(
+            tester
+                .widget<AbsorbPointer>(find.byType(AbsorbPointer).first)
+                .absorbing,
+            isTrue,
+          );
+          await expectLater(
+            scope.wipeLocalData(),
+            throwsA(isA<RestoreBusyException>()),
+          );
+          final inspected = mode == 'preflight-missing-live'
+              ? _ObservedDatabase()
+              : _ObservedDatabase(file);
+          handles.add(inspected);
+          await tester.runAsync(() async {
+            if (mode != 'preflight-missing-live') {
+              expect(
+                await inspected.settingsDao.getSetting(kInstallationBindingKey),
+                oldBinding,
+              );
+              expect(
+                await JobsRepository(inspected, device).getJob(oldJob.id),
+                oldJob,
+              );
+            }
+            final restarted = InstallationSecurity(
+              store: store,
+              namespace: installation.namespace,
+            );
+            await restarted.start(inspected);
+            expect(restarted.readiness, InstallationReadiness.needsRecovery);
+            await expectLater(
+              restarted.prepareReset(inspected),
+              throwsStateError,
+            );
+          });
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 
   testWidgets('exit during restore is cancelled without closing storage', (
     tester,
@@ -723,7 +978,7 @@ void main() {
   });
 
   testWidgets(
-    'failed file wipe reopens once and preserves the original error',
+    'unknown file wipe failure blocks editing and retry without reopening',
     (tester) async {
       final original = _ObservedDatabase();
       final next = _ObservedDatabase();
@@ -745,11 +1000,21 @@ void main() {
         () => expectLater(scope.wipeLocalData(), throwsA(same(failure))),
       );
       await tester.pumpAndSettle();
-      expect(reopenCalls, 1);
+      expect(reopenCalls, 0);
       expect(original.closed, isTrue);
       expect(original.closeCalls, 1);
       expect(next.closeCalls, 0);
-      expect(tester.widget<AppScope>(find.byType(AppScope)).db, same(next));
+      expect(tester.widget<AppScope>(find.byType(AppScope)).db, same(original));
+      expect(
+        tester
+            .widget<AbsorbPointer>(find.byType(AbsorbPointer).first)
+            .absorbing,
+        isTrue,
+      );
+      await expectLater(
+        scope.wipeLocalData(),
+        throwsA(isA<RestoreBusyException>()),
+      );
       expect(BackupIo.isBusy, isFalse);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -780,4 +1045,66 @@ void main() {
     expect(next.closeCalls, 1);
     expect(BackupIo.isBusy, isFalse);
   });
+}
+
+final class _ResetFailureIo extends IOOverrides {
+  _ResetFailureIo(
+    this.sqlitePath, {
+    required this.preflight,
+    this.failReopenCheck = false,
+  });
+  final String sqlitePath;
+  final bool preflight;
+  final bool failReopenCheck;
+  final error = const FileSystemException('Synthetic base reset IO failure');
+  bool armed = false;
+
+  @override
+  File createFile(String path) {
+    final file = super.createFile(path);
+    return path == sqlitePath ||
+            (failReopenCheck && p.basename(path) == kRestoreSwapMarkerName)
+        ? _ResetFailureFile(file, this)
+        : file;
+  }
+}
+
+final class _ResetFailureFile implements File {
+  _ResetFailureFile(this.file, this.io);
+  final File file;
+  final _ResetFailureIo io;
+
+  @override
+  String get path => file.path;
+
+  @override
+  Directory get parent => file.parent;
+
+  @override
+  bool existsSync() {
+    if (io.armed && io.preflight) {
+      io.armed = false;
+      throw io.error;
+    }
+    return file.existsSync();
+  }
+
+  @override
+  Future<bool> exists() async {
+    if (io.failReopenCheck && p.basename(path) == kRestoreSwapMarkerName) {
+      throw const FileSystemException(
+        'Synthetic reopen eligibility read failure',
+      );
+    }
+    return file.exists();
+  }
+
+  @override
+  Future<FileSystemEntity> delete({bool recursive = false}) async {
+    if (io.armed && !io.preflight) throw io.error;
+    return file.delete(recursive: recursive);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
