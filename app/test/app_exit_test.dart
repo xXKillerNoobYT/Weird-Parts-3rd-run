@@ -36,6 +36,7 @@ class _ObservedDatabase extends AppDatabase {
 
   Completer<void>? closeGate;
   Future<void> Function()? beforeClose;
+  Future<void> Function()? afterClose;
   var closeCalls = 0;
   var failNextClose = false;
   var closed = false;
@@ -51,6 +52,7 @@ class _ObservedDatabase extends AppDatabase {
     }
     await super.close();
     closed = true;
+    await afterClose?.call();
   }
 
   Future<void> cleanUp() async {
@@ -196,11 +198,19 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  for (final retainedBinding in [true, false]) {
+  for (final failureMode in [
+    'before-close',
+    'binding-mismatch',
+    'after-close',
+  ]) {
+    final retainedBinding = failureMode != 'binding-mismatch';
+    final closedBeforeFailure = failureMode == 'after-close';
     testWidgets(
-      retainedBinding
-          ? 'restore close failure aborts its intent, retains current floors and permits retry'
-          : 'restore close failure retains pending intent when original binding cannot be proved',
+      switch (failureMode) {
+        'before-close' => 'restore close failure aborts its intent, retains current floors and permits retry',
+        'binding-mismatch' => 'restore close failure retains pending intent when original binding cannot be proved',
+        _ => 'restore close failure after SQLite closes retains pending intent and original error',
+      },
       (tester) async {
         final root = Directory.systemTemp.createTempSync('wp-restore-close-');
         final support = Directory(p.join(root.path, 'support'))..createSync();
@@ -286,8 +296,11 @@ void main() {
               'synthetic-unproven-binding',
             );
           }
-          throw closeFailure;
+          if (!closedBeforeFailure) throw closeFailure;
         };
+        if (closedBeforeFailure) {
+          original.afterClose = () async => throw closeFailure;
+        }
         await tester.runAsync(
           () => expectLater(
             scope.restoreFromPayload!(payload),
@@ -296,6 +309,28 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(original.closeCalls, 1);
+        if (closedBeforeFailure) {
+          expect(original.closed, isTrue);
+          expect(replacement, isNull);
+          expect(
+            tester.widget<AppScope>(find.byType(AppScope)).db,
+            same(original),
+          );
+          expect(store.states[installation.namespace], same(pending));
+          final retained =
+              jsonDecode(utf8.decode(pending!.bytes)) as Map<String, dynamic>;
+          expect(retained['activation'], 'pending');
+          expect(retained['previousStore'], protectedBefore['store']);
+          expect(retained['floors'], {
+            'authority.test-company': 8,
+            'revocation.test-device': 12,
+          });
+          expect(installation.readiness, InstallationReadiness.needsRecovery);
+          expect(installation.canUseCompanyOperations, isFalse);
+          expect(BackupIo.isBusy, isFalse);
+          await tester.pumpWidget(const SizedBox.shrink());
+          return;
+        }
         expect(original.closed, isFalse);
         expect(replacement, isNull);
         expect(
