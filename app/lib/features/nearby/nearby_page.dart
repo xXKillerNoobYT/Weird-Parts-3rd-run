@@ -155,7 +155,8 @@ class _NearbyPageState extends State<NearbyPage> {
       context,
       title: 'Send this shop to ${peer.label}?',
       body:
-          'Copies jobs, catalog, and photos onto ${peer.label}. That replaces '
+          'Copies jobs, catalog, warehouse locations, inventory and its history, '
+          'and photos onto ${peer.label}. That replaces '
           'the shop over there. Not two-way sync.',
       confirmLabel: 'Send this shop',
       destructive: true,
@@ -186,7 +187,8 @@ class _NearbyPageState extends State<NearbyPage> {
       context,
       title: 'Accept this shop?',
       body:
-          'Replaces catalog, jobs, and photos on this device with the shop from '
+          'Replaces catalog, jobs, warehouse locations, inventory and its '
+          'history, and photos on this device with the shop from '
           '${offer.sourceName} (${offer.summary}). '
           'Cannot undo. This device keeps its own id.',
       confirmLabel: 'Accept shop',

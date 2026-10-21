@@ -16,6 +16,7 @@ import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
 import '../../../tool/backup_recovery_scenario.dart';
+import 'backup_test_support.dart';
 
 Widget _page({
   required AppDatabase db,
@@ -247,6 +248,75 @@ void main() {
     );
     gate.complete();
     await wipe;
+  });
+
+  testWidgets('restore confirmation discloses warehouse counts and history', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('wp-bak-copy-scope-');
+    final codec = BackupCodec(iterations: 1000);
+    final bytes = await codec.encrypt(
+      BackupPayload(
+        createdAt: DateTime.utc(2026, 10, 20),
+        sourceDeviceId: 'synthetic-source',
+        sqliteBytes: await sqliteBytesWithSetting(
+          key: 'marker',
+          value: 'synthetic',
+        ),
+        photos: const {},
+      ),
+      'synthetic-password',
+    );
+    final backup = File(p.join(directory.path, 'synthetic.wpbackup'))
+      ..writeAsBytesSync(bytes);
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(() async {
+        await db.close();
+        await directory.delete(recursive: true);
+      });
+    });
+    final id = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await tester.pumpWidget(
+      AppScope(
+        db: db,
+        pin: pin,
+        deviceId: id,
+        wipeLocalData: () async {},
+        restoreFromBackup: (_, _) async {},
+        child: MaterialApp(
+          home: BackupPage(
+            codec: codec,
+            pickOpenPath: () async => backup.path,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(BackupIo.isBusy, isFalse);
+    await tester.tap(find.text('Restore encrypted backup'));
+    final dialogWait = Stopwatch()..start();
+    while (find.text('Restore this backup?').evaluate().isEmpty &&
+        dialogWait.elapsed < const Duration(seconds: 3)) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+    }
+    if (find.text('Restore this backup?').evaluate().isEmpty) {
+      debugDumpApp();
+    }
+
+    expect(find.text('Restore this backup?'), findsOneWidget);
+    expect(
+      find.textContaining('warehouse locations, inventory and its history'),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
   });
 
   for (final invalidProfile in ['missing', 'mismatched', 'multiple']) {

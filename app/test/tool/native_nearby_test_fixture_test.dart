@@ -84,7 +84,7 @@ void main() {
               .data
               .values
               .single,
-          11,
+          kAppSchemaVersion,
         );
         expect(
           await db
@@ -92,7 +92,81 @@ void main() {
                 "SELECT name FROM sqlite_master WHERE type = 'table'",
               )
               .get(),
-          hasLength(34),
+          hasLength(36),
+        );
+      },
+    );
+  }
+
+  for (final history in ['warehouse_locations', 'warehouse_counts']) {
+    test(
+      'schema10 projection refuses nonempty $history without changing schema or rows',
+      () async {
+        workspace = ValidationWorkspace.open(
+          run: 'unit',
+          role: ValidationRole.sender,
+          temporaryDirectory: temp,
+        );
+        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        addTearDown(db.close);
+        await seedValidationShop(db, workspace!);
+        final now = DateTime.utc(2026, 10, 20, 12);
+        await db
+            .into(db.warehouseLocations)
+            .insert(
+              WarehouseLocationsCompanion.insert(
+                id: 'synthetic-location',
+                originDeviceId: workspace!.deviceId,
+                createdAt: now,
+                modifiedAt: now,
+                name: 'Synthetic location',
+                nameKey: 'synthetic location',
+              ),
+            );
+        if (history == 'warehouse_counts') {
+          await db
+              .into(db.warehouseCounts)
+              .insert(
+                WarehouseCountsCompanion.insert(
+                  id: 'synthetic-count',
+                  locationId: 'synthetic-location',
+                  partId: 'unit-sender-part',
+                  ordinal: 1,
+                  quantity: 3.0,
+                  uom: 'ea',
+                  observedAt: now,
+                  recordedAt: now,
+                  originDeviceId: workspace!.deviceId,
+                ),
+              );
+        }
+        final beforeRows = await db
+            .customSelect('SELECT * FROM "$history" ORDER BY id')
+            .get();
+
+        await expectLater(
+          projectSeededSchema10NativeFixture(db),
+          throwsA(isA<TestFailure>()),
+        );
+
+        expect(
+          (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
+            'user_version',
+          ),
+          kAppSchemaVersion,
+        );
+        expect(
+          (await db.customSelect('SELECT * FROM "$history" ORDER BY id').get())
+              .map((row) => row.data),
+          beforeRows.map((row) => row.data),
+        );
+        expect(
+          await db
+              .customSelect(
+                "SELECT name FROM sqlite_master WHERE type = 'table'",
+              )
+              .get(),
+          hasLength(36),
         );
       },
     );

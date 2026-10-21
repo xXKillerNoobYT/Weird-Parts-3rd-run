@@ -17696,6 +17696,1193 @@ class CompanyJoinEventsCompanion extends UpdateCompanion<CompanyJoinEvent> {
   }
 }
 
+class $WarehouseLocationsTable extends WarehouseLocations
+    with TableInfo<$WarehouseLocationsTable, WarehouseLocation> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WarehouseLocationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originDeviceIdMeta = const VerificationMeta(
+    'originDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> originDeviceId = GeneratedColumn<String>(
+    'origin_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _modifiedAtMeta = const VerificationMeta(
+    'modifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> modifiedAt = GeneratedColumn<DateTime>(
+    'modified_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameKeyMeta = const VerificationMeta(
+    'nameKey',
+  );
+  @override
+  late final GeneratedColumn<String> nameKey = GeneratedColumn<String>(
+    'name_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    name,
+    nameKey,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'warehouse_locations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<WarehouseLocation> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('origin_device_id')) {
+      context.handle(
+        _originDeviceIdMeta,
+        originDeviceId.isAcceptableOrUnknown(
+          data['origin_device_id']!,
+          _originDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originDeviceIdMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('modified_at')) {
+      context.handle(
+        _modifiedAtMeta,
+        modifiedAt.isAcceptableOrUnknown(data['modified_at']!, _modifiedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_modifiedAtMeta);
+    }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('name_key')) {
+      context.handle(
+        _nameKeyMeta,
+        nameKey.isAcceptableOrUnknown(data['name_key']!, _nameKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameKeyMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  WarehouseLocation map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WarehouseLocation(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      originDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_device_id'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      modifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}modified_at'],
+      )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      nameKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name_key'],
+      )!,
+    );
+  }
+
+  @override
+  $WarehouseLocationsTable createAlias(String alias) {
+    return $WarehouseLocationsTable(attachedDatabase, alias);
+  }
+}
+
+class WarehouseLocation extends DataClass
+    implements Insertable<WarehouseLocation> {
+  final String id;
+  final String originDeviceId;
+  final DateTime createdAt;
+  final DateTime modifiedAt;
+  final int revision;
+  final DateTime? deletedAt;
+  final String name;
+  final String nameKey;
+  const WarehouseLocation({
+    required this.id,
+    required this.originDeviceId,
+    required this.createdAt,
+    required this.modifiedAt,
+    required this.revision,
+    this.deletedAt,
+    required this.name,
+    required this.nameKey,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['origin_device_id'] = Variable<String>(originDeviceId);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['modified_at'] = Variable<DateTime>(modifiedAt);
+    map['revision'] = Variable<int>(revision);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['name'] = Variable<String>(name);
+    map['name_key'] = Variable<String>(nameKey);
+    return map;
+  }
+
+  WarehouseLocationsCompanion toCompanion(bool nullToAbsent) {
+    return WarehouseLocationsCompanion(
+      id: Value(id),
+      originDeviceId: Value(originDeviceId),
+      createdAt: Value(createdAt),
+      modifiedAt: Value(modifiedAt),
+      revision: Value(revision),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      name: Value(name),
+      nameKey: Value(nameKey),
+    );
+  }
+
+  factory WarehouseLocation.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WarehouseLocation(
+      id: serializer.fromJson<String>(json['id']),
+      originDeviceId: serializer.fromJson<String>(json['originDeviceId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      modifiedAt: serializer.fromJson<DateTime>(json['modifiedAt']),
+      revision: serializer.fromJson<int>(json['revision']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      name: serializer.fromJson<String>(json['name']),
+      nameKey: serializer.fromJson<String>(json['nameKey']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'originDeviceId': serializer.toJson<String>(originDeviceId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'modifiedAt': serializer.toJson<DateTime>(modifiedAt),
+      'revision': serializer.toJson<int>(revision),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'name': serializer.toJson<String>(name),
+      'nameKey': serializer.toJson<String>(nameKey),
+    };
+  }
+
+  WarehouseLocation copyWith({
+    String? id,
+    String? originDeviceId,
+    DateTime? createdAt,
+    DateTime? modifiedAt,
+    int? revision,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    String? name,
+    String? nameKey,
+  }) => WarehouseLocation(
+    id: id ?? this.id,
+    originDeviceId: originDeviceId ?? this.originDeviceId,
+    createdAt: createdAt ?? this.createdAt,
+    modifiedAt: modifiedAt ?? this.modifiedAt,
+    revision: revision ?? this.revision,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    name: name ?? this.name,
+    nameKey: nameKey ?? this.nameKey,
+  );
+  WarehouseLocation copyWithCompanion(WarehouseLocationsCompanion data) {
+    return WarehouseLocation(
+      id: data.id.present ? data.id.value : this.id,
+      originDeviceId: data.originDeviceId.present
+          ? data.originDeviceId.value
+          : this.originDeviceId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      modifiedAt: data.modifiedAt.present
+          ? data.modifiedAt.value
+          : this.modifiedAt,
+      revision: data.revision.present ? data.revision.value : this.revision,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      name: data.name.present ? data.name.value : this.name,
+      nameKey: data.nameKey.present ? data.nameKey.value : this.nameKey,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WarehouseLocation(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('name: $name, ')
+          ..write('nameKey: $nameKey')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    originDeviceId,
+    createdAt,
+    modifiedAt,
+    revision,
+    deletedAt,
+    name,
+    nameKey,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WarehouseLocation &&
+          other.id == this.id &&
+          other.originDeviceId == this.originDeviceId &&
+          other.createdAt == this.createdAt &&
+          other.modifiedAt == this.modifiedAt &&
+          other.revision == this.revision &&
+          other.deletedAt == this.deletedAt &&
+          other.name == this.name &&
+          other.nameKey == this.nameKey);
+}
+
+class WarehouseLocationsCompanion extends UpdateCompanion<WarehouseLocation> {
+  final Value<String> id;
+  final Value<String> originDeviceId;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> modifiedAt;
+  final Value<int> revision;
+  final Value<DateTime?> deletedAt;
+  final Value<String> name;
+  final Value<String> nameKey;
+  final Value<int> rowid;
+  const WarehouseLocationsCompanion({
+    this.id = const Value.absent(),
+    this.originDeviceId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.modifiedAt = const Value.absent(),
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.name = const Value.absent(),
+    this.nameKey = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WarehouseLocationsCompanion.insert({
+    required String id,
+    required String originDeviceId,
+    required DateTime createdAt,
+    required DateTime modifiedAt,
+    this.revision = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    required String name,
+    required String nameKey,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       originDeviceId = Value(originDeviceId),
+       createdAt = Value(createdAt),
+       modifiedAt = Value(modifiedAt),
+       name = Value(name),
+       nameKey = Value(nameKey);
+  static Insertable<WarehouseLocation> custom({
+    Expression<String>? id,
+    Expression<String>? originDeviceId,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? modifiedAt,
+    Expression<int>? revision,
+    Expression<DateTime>? deletedAt,
+    Expression<String>? name,
+    Expression<String>? nameKey,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (originDeviceId != null) 'origin_device_id': originDeviceId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (modifiedAt != null) 'modified_at': modifiedAt,
+      if (revision != null) 'revision': revision,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (name != null) 'name': name,
+      if (nameKey != null) 'name_key': nameKey,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WarehouseLocationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? originDeviceId,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? modifiedAt,
+    Value<int>? revision,
+    Value<DateTime?>? deletedAt,
+    Value<String>? name,
+    Value<String>? nameKey,
+    Value<int>? rowid,
+  }) {
+    return WarehouseLocationsCompanion(
+      id: id ?? this.id,
+      originDeviceId: originDeviceId ?? this.originDeviceId,
+      createdAt: createdAt ?? this.createdAt,
+      modifiedAt: modifiedAt ?? this.modifiedAt,
+      revision: revision ?? this.revision,
+      deletedAt: deletedAt ?? this.deletedAt,
+      name: name ?? this.name,
+      nameKey: nameKey ?? this.nameKey,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (originDeviceId.present) {
+      map['origin_device_id'] = Variable<String>(originDeviceId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (modifiedAt.present) {
+      map['modified_at'] = Variable<DateTime>(modifiedAt.value);
+    }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (nameKey.present) {
+      map['name_key'] = Variable<String>(nameKey.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WarehouseLocationsCompanion(')
+          ..write('id: $id, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('modifiedAt: $modifiedAt, ')
+          ..write('revision: $revision, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('name: $name, ')
+          ..write('nameKey: $nameKey, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $WarehouseCountsTable extends WarehouseCounts
+    with TableInfo<$WarehouseCountsTable, WarehouseCount> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WarehouseCountsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _locationIdMeta = const VerificationMeta(
+    'locationId',
+  );
+  @override
+  late final GeneratedColumn<String> locationId = GeneratedColumn<String>(
+    'location_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _partIdMeta = const VerificationMeta('partId');
+  @override
+  late final GeneratedColumn<String> partId = GeneratedColumn<String>(
+    'part_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _priorCountIdMeta = const VerificationMeta(
+    'priorCountId',
+  );
+  @override
+  late final GeneratedColumn<String> priorCountId = GeneratedColumn<String>(
+    'prior_count_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _ordinalMeta = const VerificationMeta(
+    'ordinal',
+  );
+  @override
+  late final GeneratedColumn<int> ordinal = GeneratedColumn<int>(
+    'ordinal',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _quantityMeta = const VerificationMeta(
+    'quantity',
+  );
+  @override
+  late final GeneratedColumn<double> quantity = GeneratedColumn<double>(
+    'quantity',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _uomMeta = const VerificationMeta('uom');
+  @override
+  late final GeneratedColumn<String> uom = GeneratedColumn<String>(
+    'uom',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _observedAtMeta = const VerificationMeta(
+    'observedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> observedAt = GeneratedColumn<DateTime>(
+    'observed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _recordedAtMeta = const VerificationMeta(
+    'recordedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> recordedAt = GeneratedColumn<DateTime>(
+    'recorded_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originDeviceIdMeta = const VerificationMeta(
+    'originDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> originDeviceId = GeneratedColumn<String>(
+    'origin_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _noteMeta = const VerificationMeta('note');
+  @override
+  late final GeneratedColumn<String> note = GeneratedColumn<String>(
+    'note',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    locationId,
+    partId,
+    priorCountId,
+    ordinal,
+    quantity,
+    uom,
+    observedAt,
+    recordedAt,
+    originDeviceId,
+    note,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'warehouse_counts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<WarehouseCount> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('location_id')) {
+      context.handle(
+        _locationIdMeta,
+        locationId.isAcceptableOrUnknown(data['location_id']!, _locationIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_locationIdMeta);
+    }
+    if (data.containsKey('part_id')) {
+      context.handle(
+        _partIdMeta,
+        partId.isAcceptableOrUnknown(data['part_id']!, _partIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_partIdMeta);
+    }
+    if (data.containsKey('prior_count_id')) {
+      context.handle(
+        _priorCountIdMeta,
+        priorCountId.isAcceptableOrUnknown(
+          data['prior_count_id']!,
+          _priorCountIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('ordinal')) {
+      context.handle(
+        _ordinalMeta,
+        ordinal.isAcceptableOrUnknown(data['ordinal']!, _ordinalMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ordinalMeta);
+    }
+    if (data.containsKey('quantity')) {
+      context.handle(
+        _quantityMeta,
+        quantity.isAcceptableOrUnknown(data['quantity']!, _quantityMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_quantityMeta);
+    }
+    if (data.containsKey('uom')) {
+      context.handle(
+        _uomMeta,
+        uom.isAcceptableOrUnknown(data['uom']!, _uomMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_uomMeta);
+    }
+    if (data.containsKey('observed_at')) {
+      context.handle(
+        _observedAtMeta,
+        observedAt.isAcceptableOrUnknown(data['observed_at']!, _observedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_observedAtMeta);
+    }
+    if (data.containsKey('recorded_at')) {
+      context.handle(
+        _recordedAtMeta,
+        recordedAt.isAcceptableOrUnknown(data['recorded_at']!, _recordedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_recordedAtMeta);
+    }
+    if (data.containsKey('origin_device_id')) {
+      context.handle(
+        _originDeviceIdMeta,
+        originDeviceId.isAcceptableOrUnknown(
+          data['origin_device_id']!,
+          _originDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originDeviceIdMeta);
+    }
+    if (data.containsKey('note')) {
+      context.handle(
+        _noteMeta,
+        note.isAcceptableOrUnknown(data['note']!, _noteMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {locationId, partId, ordinal},
+  ];
+  @override
+  WarehouseCount map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WarehouseCount(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      locationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}location_id'],
+      )!,
+      partId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}part_id'],
+      )!,
+      priorCountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}prior_count_id'],
+      ),
+      ordinal: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}ordinal'],
+      )!,
+      quantity: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}quantity'],
+      )!,
+      uom: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}uom'],
+      )!,
+      observedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}observed_at'],
+      )!,
+      recordedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}recorded_at'],
+      )!,
+      originDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_device_id'],
+      )!,
+      note: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}note'],
+      )!,
+    );
+  }
+
+  @override
+  $WarehouseCountsTable createAlias(String alias) {
+    return $WarehouseCountsTable(attachedDatabase, alias);
+  }
+}
+
+class WarehouseCount extends DataClass implements Insertable<WarehouseCount> {
+  final String id;
+  final String locationId;
+  final String partId;
+  final String? priorCountId;
+  final int ordinal;
+  final double quantity;
+  final String uom;
+  final DateTime observedAt;
+  final DateTime recordedAt;
+  final String originDeviceId;
+  final String note;
+  const WarehouseCount({
+    required this.id,
+    required this.locationId,
+    required this.partId,
+    this.priorCountId,
+    required this.ordinal,
+    required this.quantity,
+    required this.uom,
+    required this.observedAt,
+    required this.recordedAt,
+    required this.originDeviceId,
+    required this.note,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['location_id'] = Variable<String>(locationId);
+    map['part_id'] = Variable<String>(partId);
+    if (!nullToAbsent || priorCountId != null) {
+      map['prior_count_id'] = Variable<String>(priorCountId);
+    }
+    map['ordinal'] = Variable<int>(ordinal);
+    map['quantity'] = Variable<double>(quantity);
+    map['uom'] = Variable<String>(uom);
+    map['observed_at'] = Variable<DateTime>(observedAt);
+    map['recorded_at'] = Variable<DateTime>(recordedAt);
+    map['origin_device_id'] = Variable<String>(originDeviceId);
+    map['note'] = Variable<String>(note);
+    return map;
+  }
+
+  WarehouseCountsCompanion toCompanion(bool nullToAbsent) {
+    return WarehouseCountsCompanion(
+      id: Value(id),
+      locationId: Value(locationId),
+      partId: Value(partId),
+      priorCountId: priorCountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(priorCountId),
+      ordinal: Value(ordinal),
+      quantity: Value(quantity),
+      uom: Value(uom),
+      observedAt: Value(observedAt),
+      recordedAt: Value(recordedAt),
+      originDeviceId: Value(originDeviceId),
+      note: Value(note),
+    );
+  }
+
+  factory WarehouseCount.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WarehouseCount(
+      id: serializer.fromJson<String>(json['id']),
+      locationId: serializer.fromJson<String>(json['locationId']),
+      partId: serializer.fromJson<String>(json['partId']),
+      priorCountId: serializer.fromJson<String?>(json['priorCountId']),
+      ordinal: serializer.fromJson<int>(json['ordinal']),
+      quantity: serializer.fromJson<double>(json['quantity']),
+      uom: serializer.fromJson<String>(json['uom']),
+      observedAt: serializer.fromJson<DateTime>(json['observedAt']),
+      recordedAt: serializer.fromJson<DateTime>(json['recordedAt']),
+      originDeviceId: serializer.fromJson<String>(json['originDeviceId']),
+      note: serializer.fromJson<String>(json['note']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'locationId': serializer.toJson<String>(locationId),
+      'partId': serializer.toJson<String>(partId),
+      'priorCountId': serializer.toJson<String?>(priorCountId),
+      'ordinal': serializer.toJson<int>(ordinal),
+      'quantity': serializer.toJson<double>(quantity),
+      'uom': serializer.toJson<String>(uom),
+      'observedAt': serializer.toJson<DateTime>(observedAt),
+      'recordedAt': serializer.toJson<DateTime>(recordedAt),
+      'originDeviceId': serializer.toJson<String>(originDeviceId),
+      'note': serializer.toJson<String>(note),
+    };
+  }
+
+  WarehouseCount copyWith({
+    String? id,
+    String? locationId,
+    String? partId,
+    Value<String?> priorCountId = const Value.absent(),
+    int? ordinal,
+    double? quantity,
+    String? uom,
+    DateTime? observedAt,
+    DateTime? recordedAt,
+    String? originDeviceId,
+    String? note,
+  }) => WarehouseCount(
+    id: id ?? this.id,
+    locationId: locationId ?? this.locationId,
+    partId: partId ?? this.partId,
+    priorCountId: priorCountId.present ? priorCountId.value : this.priorCountId,
+    ordinal: ordinal ?? this.ordinal,
+    quantity: quantity ?? this.quantity,
+    uom: uom ?? this.uom,
+    observedAt: observedAt ?? this.observedAt,
+    recordedAt: recordedAt ?? this.recordedAt,
+    originDeviceId: originDeviceId ?? this.originDeviceId,
+    note: note ?? this.note,
+  );
+  WarehouseCount copyWithCompanion(WarehouseCountsCompanion data) {
+    return WarehouseCount(
+      id: data.id.present ? data.id.value : this.id,
+      locationId: data.locationId.present
+          ? data.locationId.value
+          : this.locationId,
+      partId: data.partId.present ? data.partId.value : this.partId,
+      priorCountId: data.priorCountId.present
+          ? data.priorCountId.value
+          : this.priorCountId,
+      ordinal: data.ordinal.present ? data.ordinal.value : this.ordinal,
+      quantity: data.quantity.present ? data.quantity.value : this.quantity,
+      uom: data.uom.present ? data.uom.value : this.uom,
+      observedAt: data.observedAt.present
+          ? data.observedAt.value
+          : this.observedAt,
+      recordedAt: data.recordedAt.present
+          ? data.recordedAt.value
+          : this.recordedAt,
+      originDeviceId: data.originDeviceId.present
+          ? data.originDeviceId.value
+          : this.originDeviceId,
+      note: data.note.present ? data.note.value : this.note,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WarehouseCount(')
+          ..write('id: $id, ')
+          ..write('locationId: $locationId, ')
+          ..write('partId: $partId, ')
+          ..write('priorCountId: $priorCountId, ')
+          ..write('ordinal: $ordinal, ')
+          ..write('quantity: $quantity, ')
+          ..write('uom: $uom, ')
+          ..write('observedAt: $observedAt, ')
+          ..write('recordedAt: $recordedAt, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('note: $note')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    locationId,
+    partId,
+    priorCountId,
+    ordinal,
+    quantity,
+    uom,
+    observedAt,
+    recordedAt,
+    originDeviceId,
+    note,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WarehouseCount &&
+          other.id == this.id &&
+          other.locationId == this.locationId &&
+          other.partId == this.partId &&
+          other.priorCountId == this.priorCountId &&
+          other.ordinal == this.ordinal &&
+          other.quantity == this.quantity &&
+          other.uom == this.uom &&
+          other.observedAt == this.observedAt &&
+          other.recordedAt == this.recordedAt &&
+          other.originDeviceId == this.originDeviceId &&
+          other.note == this.note);
+}
+
+class WarehouseCountsCompanion extends UpdateCompanion<WarehouseCount> {
+  final Value<String> id;
+  final Value<String> locationId;
+  final Value<String> partId;
+  final Value<String?> priorCountId;
+  final Value<int> ordinal;
+  final Value<double> quantity;
+  final Value<String> uom;
+  final Value<DateTime> observedAt;
+  final Value<DateTime> recordedAt;
+  final Value<String> originDeviceId;
+  final Value<String> note;
+  final Value<int> rowid;
+  const WarehouseCountsCompanion({
+    this.id = const Value.absent(),
+    this.locationId = const Value.absent(),
+    this.partId = const Value.absent(),
+    this.priorCountId = const Value.absent(),
+    this.ordinal = const Value.absent(),
+    this.quantity = const Value.absent(),
+    this.uom = const Value.absent(),
+    this.observedAt = const Value.absent(),
+    this.recordedAt = const Value.absent(),
+    this.originDeviceId = const Value.absent(),
+    this.note = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WarehouseCountsCompanion.insert({
+    required String id,
+    required String locationId,
+    required String partId,
+    this.priorCountId = const Value.absent(),
+    required int ordinal,
+    required double quantity,
+    required String uom,
+    required DateTime observedAt,
+    required DateTime recordedAt,
+    required String originDeviceId,
+    this.note = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       locationId = Value(locationId),
+       partId = Value(partId),
+       ordinal = Value(ordinal),
+       quantity = Value(quantity),
+       uom = Value(uom),
+       observedAt = Value(observedAt),
+       recordedAt = Value(recordedAt),
+       originDeviceId = Value(originDeviceId);
+  static Insertable<WarehouseCount> custom({
+    Expression<String>? id,
+    Expression<String>? locationId,
+    Expression<String>? partId,
+    Expression<String>? priorCountId,
+    Expression<int>? ordinal,
+    Expression<double>? quantity,
+    Expression<String>? uom,
+    Expression<DateTime>? observedAt,
+    Expression<DateTime>? recordedAt,
+    Expression<String>? originDeviceId,
+    Expression<String>? note,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (locationId != null) 'location_id': locationId,
+      if (partId != null) 'part_id': partId,
+      if (priorCountId != null) 'prior_count_id': priorCountId,
+      if (ordinal != null) 'ordinal': ordinal,
+      if (quantity != null) 'quantity': quantity,
+      if (uom != null) 'uom': uom,
+      if (observedAt != null) 'observed_at': observedAt,
+      if (recordedAt != null) 'recorded_at': recordedAt,
+      if (originDeviceId != null) 'origin_device_id': originDeviceId,
+      if (note != null) 'note': note,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WarehouseCountsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? locationId,
+    Value<String>? partId,
+    Value<String?>? priorCountId,
+    Value<int>? ordinal,
+    Value<double>? quantity,
+    Value<String>? uom,
+    Value<DateTime>? observedAt,
+    Value<DateTime>? recordedAt,
+    Value<String>? originDeviceId,
+    Value<String>? note,
+    Value<int>? rowid,
+  }) {
+    return WarehouseCountsCompanion(
+      id: id ?? this.id,
+      locationId: locationId ?? this.locationId,
+      partId: partId ?? this.partId,
+      priorCountId: priorCountId ?? this.priorCountId,
+      ordinal: ordinal ?? this.ordinal,
+      quantity: quantity ?? this.quantity,
+      uom: uom ?? this.uom,
+      observedAt: observedAt ?? this.observedAt,
+      recordedAt: recordedAt ?? this.recordedAt,
+      originDeviceId: originDeviceId ?? this.originDeviceId,
+      note: note ?? this.note,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (locationId.present) {
+      map['location_id'] = Variable<String>(locationId.value);
+    }
+    if (partId.present) {
+      map['part_id'] = Variable<String>(partId.value);
+    }
+    if (priorCountId.present) {
+      map['prior_count_id'] = Variable<String>(priorCountId.value);
+    }
+    if (ordinal.present) {
+      map['ordinal'] = Variable<int>(ordinal.value);
+    }
+    if (quantity.present) {
+      map['quantity'] = Variable<double>(quantity.value);
+    }
+    if (uom.present) {
+      map['uom'] = Variable<String>(uom.value);
+    }
+    if (observedAt.present) {
+      map['observed_at'] = Variable<DateTime>(observedAt.value);
+    }
+    if (recordedAt.present) {
+      map['recorded_at'] = Variable<DateTime>(recordedAt.value);
+    }
+    if (originDeviceId.present) {
+      map['origin_device_id'] = Variable<String>(originDeviceId.value);
+    }
+    if (note.present) {
+      map['note'] = Variable<String>(note.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WarehouseCountsCompanion(')
+          ..write('id: $id, ')
+          ..write('locationId: $locationId, ')
+          ..write('partId: $partId, ')
+          ..write('priorCountId: $priorCountId, ')
+          ..write('ordinal: $ordinal, ')
+          ..write('quantity: $quantity, ')
+          ..write('uom: $uom, ')
+          ..write('observedAt: $observedAt, ')
+          ..write('recordedAt: $recordedAt, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('note: $note, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -17757,6 +18944,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $CompanyJoinRequestsTable(this);
   late final $CompanyJoinEventsTable companyJoinEvents =
       $CompanyJoinEventsTable(this);
+  late final $WarehouseLocationsTable warehouseLocations =
+      $WarehouseLocationsTable(this);
+  late final $WarehouseCountsTable warehouseCounts = $WarehouseCountsTable(
+    this,
+  );
   late final SettingsDao settingsDao = SettingsDao(this as AppDatabase);
   late final TaxonomyDao taxonomyDao = TaxonomyDao(this as AppDatabase);
   late final PartsDao partsDao = PartsDao(this as AppDatabase);
@@ -17800,6 +18992,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     companyMembershipCertificates,
     companyJoinRequests,
     companyJoinEvents,
+    warehouseLocations,
+    warehouseCounts,
   ];
 }
 
@@ -26835,6 +28029,610 @@ typedef $$CompanyJoinEventsTableProcessedTableManager =
       CompanyJoinEvent,
       PrefetchHooks Function()
     >;
+typedef $$WarehouseLocationsTableCreateCompanionBuilder =
+    WarehouseLocationsCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      required String nameKey,
+      Value<int> rowid,
+    });
+typedef $$WarehouseLocationsTableUpdateCompanionBuilder =
+    WarehouseLocationsCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<String> nameKey,
+      Value<int> rowid,
+    });
+
+class $$WarehouseLocationsTableFilterComposer
+    extends Composer<_$AppDatabase, $WarehouseLocationsTable> {
+  $$WarehouseLocationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nameKey => $composableBuilder(
+    column: $table.nameKey,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$WarehouseLocationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $WarehouseLocationsTable> {
+  $$WarehouseLocationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nameKey => $composableBuilder(
+    column: $table.nameKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$WarehouseLocationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WarehouseLocationsTable> {
+  $$WarehouseLocationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get modifiedAt => $composableBuilder(
+    column: $table.modifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get nameKey =>
+      $composableBuilder(column: $table.nameKey, builder: (column) => column);
+}
+
+class $$WarehouseLocationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $WarehouseLocationsTable,
+          WarehouseLocation,
+          $$WarehouseLocationsTableFilterComposer,
+          $$WarehouseLocationsTableOrderingComposer,
+          $$WarehouseLocationsTableAnnotationComposer,
+          $$WarehouseLocationsTableCreateCompanionBuilder,
+          $$WarehouseLocationsTableUpdateCompanionBuilder,
+          (
+            WarehouseLocation,
+            BaseReferences<
+              _$AppDatabase,
+              $WarehouseLocationsTable,
+              WarehouseLocation
+            >,
+          ),
+          WarehouseLocation,
+          PrefetchHooks Function()
+        > {
+  $$WarehouseLocationsTableTableManager(
+    _$AppDatabase db,
+    $WarehouseLocationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WarehouseLocationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WarehouseLocationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WarehouseLocationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> originDeviceId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> modifiedAt = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> nameKey = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => WarehouseLocationsCompanion(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                name: name,
+                nameKey: nameKey,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String originDeviceId,
+                required DateTime createdAt,
+                required DateTime modifiedAt,
+                Value<int> revision = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                required String name,
+                required String nameKey,
+                Value<int> rowid = const Value.absent(),
+              }) => WarehouseLocationsCompanion.insert(
+                id: id,
+                originDeviceId: originDeviceId,
+                createdAt: createdAt,
+                modifiedAt: modifiedAt,
+                revision: revision,
+                deletedAt: deletedAt,
+                name: name,
+                nameKey: nameKey,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$WarehouseLocationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $WarehouseLocationsTable,
+      WarehouseLocation,
+      $$WarehouseLocationsTableFilterComposer,
+      $$WarehouseLocationsTableOrderingComposer,
+      $$WarehouseLocationsTableAnnotationComposer,
+      $$WarehouseLocationsTableCreateCompanionBuilder,
+      $$WarehouseLocationsTableUpdateCompanionBuilder,
+      (
+        WarehouseLocation,
+        BaseReferences<
+          _$AppDatabase,
+          $WarehouseLocationsTable,
+          WarehouseLocation
+        >,
+      ),
+      WarehouseLocation,
+      PrefetchHooks Function()
+    >;
+typedef $$WarehouseCountsTableCreateCompanionBuilder =
+    WarehouseCountsCompanion Function({
+      required String id,
+      required String locationId,
+      required String partId,
+      Value<String?> priorCountId,
+      required int ordinal,
+      required double quantity,
+      required String uom,
+      required DateTime observedAt,
+      required DateTime recordedAt,
+      required String originDeviceId,
+      Value<String> note,
+      Value<int> rowid,
+    });
+typedef $$WarehouseCountsTableUpdateCompanionBuilder =
+    WarehouseCountsCompanion Function({
+      Value<String> id,
+      Value<String> locationId,
+      Value<String> partId,
+      Value<String?> priorCountId,
+      Value<int> ordinal,
+      Value<double> quantity,
+      Value<String> uom,
+      Value<DateTime> observedAt,
+      Value<DateTime> recordedAt,
+      Value<String> originDeviceId,
+      Value<String> note,
+      Value<int> rowid,
+    });
+
+class $$WarehouseCountsTableFilterComposer
+    extends Composer<_$AppDatabase, $WarehouseCountsTable> {
+  $$WarehouseCountsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get locationId => $composableBuilder(
+    column: $table.locationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get partId => $composableBuilder(
+    column: $table.partId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get priorCountId => $composableBuilder(
+    column: $table.priorCountId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get ordinal => $composableBuilder(
+    column: $table.ordinal,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get uom => $composableBuilder(
+    column: $table.uom,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get observedAt => $composableBuilder(
+    column: $table.observedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get recordedAt => $composableBuilder(
+    column: $table.recordedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$WarehouseCountsTableOrderingComposer
+    extends Composer<_$AppDatabase, $WarehouseCountsTable> {
+  $$WarehouseCountsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get locationId => $composableBuilder(
+    column: $table.locationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get partId => $composableBuilder(
+    column: $table.partId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get priorCountId => $composableBuilder(
+    column: $table.priorCountId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get ordinal => $composableBuilder(
+    column: $table.ordinal,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get uom => $composableBuilder(
+    column: $table.uom,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get observedAt => $composableBuilder(
+    column: $table.observedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get recordedAt => $composableBuilder(
+    column: $table.recordedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$WarehouseCountsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WarehouseCountsTable> {
+  $$WarehouseCountsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get locationId => $composableBuilder(
+    column: $table.locationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get partId =>
+      $composableBuilder(column: $table.partId, builder: (column) => column);
+
+  GeneratedColumn<String> get priorCountId => $composableBuilder(
+    column: $table.priorCountId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get ordinal =>
+      $composableBuilder(column: $table.ordinal, builder: (column) => column);
+
+  GeneratedColumn<double> get quantity =>
+      $composableBuilder(column: $table.quantity, builder: (column) => column);
+
+  GeneratedColumn<String> get uom =>
+      $composableBuilder(column: $table.uom, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get observedAt => $composableBuilder(
+    column: $table.observedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get recordedAt => $composableBuilder(
+    column: $table.recordedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get note =>
+      $composableBuilder(column: $table.note, builder: (column) => column);
+}
+
+class $$WarehouseCountsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $WarehouseCountsTable,
+          WarehouseCount,
+          $$WarehouseCountsTableFilterComposer,
+          $$WarehouseCountsTableOrderingComposer,
+          $$WarehouseCountsTableAnnotationComposer,
+          $$WarehouseCountsTableCreateCompanionBuilder,
+          $$WarehouseCountsTableUpdateCompanionBuilder,
+          (
+            WarehouseCount,
+            BaseReferences<
+              _$AppDatabase,
+              $WarehouseCountsTable,
+              WarehouseCount
+            >,
+          ),
+          WarehouseCount,
+          PrefetchHooks Function()
+        > {
+  $$WarehouseCountsTableTableManager(
+    _$AppDatabase db,
+    $WarehouseCountsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WarehouseCountsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WarehouseCountsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WarehouseCountsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> locationId = const Value.absent(),
+                Value<String> partId = const Value.absent(),
+                Value<String?> priorCountId = const Value.absent(),
+                Value<int> ordinal = const Value.absent(),
+                Value<double> quantity = const Value.absent(),
+                Value<String> uom = const Value.absent(),
+                Value<DateTime> observedAt = const Value.absent(),
+                Value<DateTime> recordedAt = const Value.absent(),
+                Value<String> originDeviceId = const Value.absent(),
+                Value<String> note = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => WarehouseCountsCompanion(
+                id: id,
+                locationId: locationId,
+                partId: partId,
+                priorCountId: priorCountId,
+                ordinal: ordinal,
+                quantity: quantity,
+                uom: uom,
+                observedAt: observedAt,
+                recordedAt: recordedAt,
+                originDeviceId: originDeviceId,
+                note: note,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String locationId,
+                required String partId,
+                Value<String?> priorCountId = const Value.absent(),
+                required int ordinal,
+                required double quantity,
+                required String uom,
+                required DateTime observedAt,
+                required DateTime recordedAt,
+                required String originDeviceId,
+                Value<String> note = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => WarehouseCountsCompanion.insert(
+                id: id,
+                locationId: locationId,
+                partId: partId,
+                priorCountId: priorCountId,
+                ordinal: ordinal,
+                quantity: quantity,
+                uom: uom,
+                observedAt: observedAt,
+                recordedAt: recordedAt,
+                originDeviceId: originDeviceId,
+                note: note,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$WarehouseCountsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $WarehouseCountsTable,
+      WarehouseCount,
+      $$WarehouseCountsTableFilterComposer,
+      $$WarehouseCountsTableOrderingComposer,
+      $$WarehouseCountsTableAnnotationComposer,
+      $$WarehouseCountsTableCreateCompanionBuilder,
+      $$WarehouseCountsTableUpdateCompanionBuilder,
+      (
+        WarehouseCount,
+        BaseReferences<_$AppDatabase, $WarehouseCountsTable, WarehouseCount>,
+      ),
+      WarehouseCount,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -26923,4 +28721,8 @@ class $AppDatabaseManager {
       $$CompanyJoinRequestsTableTableManager(_db, _db.companyJoinRequests);
   $$CompanyJoinEventsTableTableManager get companyJoinEvents =>
       $$CompanyJoinEventsTableTableManager(_db, _db.companyJoinEvents);
+  $$WarehouseLocationsTableTableManager get warehouseLocations =>
+      $$WarehouseLocationsTableTableManager(_db, _db.warehouseLocations);
+  $$WarehouseCountsTableTableManager get warehouseCounts =>
+      $$WarehouseCountsTableTableManager(_db, _db.warehouseCounts);
 }

@@ -57,6 +57,13 @@ void main() {
           await tester.tap(find.widgetWithText(FilledButton, 'Accept shop'));
           await tester.pumpAndSettle();
           expect(find.text('Accept this shop?'), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byType(AlertDialog),
+              matching: find.textContaining('inventory and its history'),
+            ),
+            findsOneWidget,
+          );
           expect(find.textContaining('from Sender A'), findsWidgets);
           if (replacement == 'expiry') {
             await tester.runAsync(

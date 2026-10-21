@@ -914,6 +914,8 @@ void main() {
     ]) {
       raw.execute('DROP TABLE $table');
     }
+    raw.execute('DROP TABLE warehouse_counts');
+    raw.execute('DROP TABLE warehouse_locations');
     raw.execute('PRAGMA user_version = 3');
     raw.dispose();
     final before = snapshot(fixture.files[0]);
@@ -943,6 +945,8 @@ void main() {
       ]) {
         raw.execute('DROP TABLE $table');
       }
+      raw.execute('DROP TABLE warehouse_counts');
+      raw.execute('DROP TABLE warehouse_locations');
       raw.execute('PRAGMA user_version = 3');
       raw.dispose();
       final before = snapshot(fixture.files[0]);

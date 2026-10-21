@@ -18,10 +18,11 @@ import 'tables/company_membership.dart';
 import 'tables/job_line_history.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
+import 'tables/warehouse.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 11;
+const kAppSchemaVersion = 12;
 
 @DriftDatabase(
   tables: [
@@ -59,6 +60,8 @@ const kAppSchemaVersion = 11;
     CompanyMembershipCertificates,
     CompanyJoinRequests,
     CompanyJoinEvents,
+    WarehouseLocations,
+    WarehouseCounts,
   ],
   daos: [SettingsDao, TaxonomyDao, PartsDao, JobsDao],
 )
@@ -133,6 +136,10 @@ class AppDatabase extends _$AppDatabase {
         }
       }
       await transaction(() async {
+        if (from < 12) {
+          await m.createTable(warehouseLocations);
+          await m.createTable(warehouseCounts);
+        }
         if (from < 11) {
           await m.createTable(companyJobLifecycles);
           await m.createTable(companyJobLifecyclePeerAcks);

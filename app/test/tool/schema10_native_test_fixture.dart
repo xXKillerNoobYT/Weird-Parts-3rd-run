@@ -20,18 +20,19 @@ Future<void> projectSeededSchema10NativeFixture(AppDatabase db) async {
           .data
           .values
           .single,
-      11,
+      12,
     );
     expect(
       await db
           .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
           .get(),
-      hasLength(34),
+      hasLength(36),
     );
     for (final table in db.allTables.where(
       (table) =>
           table.actualTableName.startsWith('company_') ||
-          table.actualTableName.startsWith('job_line_'),
+          table.actualTableName.startsWith('job_line_') ||
+          table.actualTableName.startsWith('warehouse_'),
     )) {
       expect(
         await db
@@ -42,6 +43,8 @@ Future<void> projectSeededSchema10NativeFixture(AppDatabase db) async {
     }
     await db.customStatement('DROP TABLE company_job_lifecycle_peer_acks');
     await db.customStatement('DROP TABLE company_job_lifecycles');
+    await db.customStatement('DROP TABLE warehouse_counts');
+    await db.customStatement('DROP TABLE warehouse_locations');
     await db.customStatement('PRAGMA user_version = 10');
     expect(
       (await db.customSelect('PRAGMA user_version').getSingle())

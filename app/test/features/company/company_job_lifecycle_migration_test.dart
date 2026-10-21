@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
+import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 
 import 'company_job_name_test.dart' show NameFixture;
@@ -20,6 +21,8 @@ void main() {
       final raw = sqlite.sqlite3.open('${f.root.path}/shop.sqlite');
       raw.execute('DROP TABLE company_job_lifecycles');
       raw.execute('DROP TABLE company_job_lifecycle_peer_acks');
+      raw.execute('DROP TABLE warehouse_counts');
+      raw.execute('DROP TABLE warehouse_locations');
       raw.execute('PRAGMA user_version = 10');
       raw.dispose();
       await f.reopen();
@@ -27,7 +30,7 @@ void main() {
         (await f.db.customSelect('PRAGMA user_version').getSingle()).read<int>(
           'user_version',
         ),
-        11,
+        kAppSchemaVersion,
       );
       expect(await f.db.select(f.db.companyJobs).get(), creation);
       expect(await f.db.select(f.db.companyJobNames).get(), names);

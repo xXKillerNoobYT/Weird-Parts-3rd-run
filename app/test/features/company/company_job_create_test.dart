@@ -645,6 +645,8 @@ void main() {
     ]) {
       raw.execute('DROP TABLE $table');
     }
+    raw.execute('DROP TABLE warehouse_counts');
+    raw.execute('DROP TABLE warehouse_locations');
     raw.execute('PRAGMA user_version = 5');
     raw.dispose();
     legacy = AppDatabase.forTesting(NativeDatabase(file));
@@ -678,6 +680,8 @@ void main() {
     await db.customStatement('DROP TABLE company_job_name_peer_acks');
     await db.customStatement('DROP TABLE company_job_details');
     await db.customStatement('DROP TABLE company_job_detail_peer_acks');
+    await db.customStatement('DROP TABLE warehouse_counts');
+    await db.customStatement('DROP TABLE warehouse_locations');
     await db.customStatement('PRAGMA user_version = 7');
     final action = command(name: 'Created while schema7 is active');
     await expectLater(

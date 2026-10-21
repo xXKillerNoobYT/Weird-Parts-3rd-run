@@ -11,6 +11,7 @@ import '../maintenance/maintenance_page.dart';
 import '../nearby/nearby_page.dart';
 import '../nearby/nearby_protocol.dart';
 import '../pin/pin_gate.dart';
+import '../warehouse/warehouse_page.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -188,7 +189,7 @@ class _MoreTabState extends State<_MoreTab> {
       context,
       title: 'Wipe all local data?',
       body:
-          'This deletes the catalog, jobs, photos, and PIN on this device and '
+          'This deletes the catalog, jobs, warehouse inventory and count history, photos, and PIN on this device and '
           'leaves an empty shop. Cannot undo.',
       confirmLabel: 'Wipe everything',
     );
@@ -228,6 +229,14 @@ class _MoreTabState extends State<_MoreTab> {
       body: ListView(
         children: [
           ListTile(
+            leading: const Icon(Icons.warehouse_outlined),
+            title: const Text('Inventory / Warehouses'),
+            subtitle: const Text('Locations, physical counts, and history'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const WarehousePage()),
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.build_outlined),
             title: const Text('Maintenance'),
             subtitle: const Text('Types tree, brands, suppliers'),
@@ -260,7 +269,7 @@ class _MoreTabState extends State<_MoreTab> {
           ListTile(
             leading: const Icon(Icons.delete_forever_outlined),
             title: const Text('Reset / wipe all data'),
-            subtitle: const Text('Empty shop — catalog, jobs, photos, PIN'),
+            subtitle: const Text('Empty shop — catalog, jobs, inventory/history, photos, PIN'),
             onTap: _wipeAllData,
           ),
         ],

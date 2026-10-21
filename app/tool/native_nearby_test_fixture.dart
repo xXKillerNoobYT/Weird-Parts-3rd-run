@@ -434,7 +434,9 @@ final class NativeFixtureSnapshot {
       for (final table in tables) {
         final name = table.actualTableName;
         if (name == 'company_job_lifecycles' ||
-            name == 'company_job_lifecycle_peer_acks') {
+            name == 'company_job_lifecycle_peer_acks' ||
+            name == 'warehouse_locations' ||
+            name == 'warehouse_counts') {
           continue;
         }
         if (version == 2 && !_schema2Columns.containsKey(name)) continue;

@@ -252,4 +252,67 @@ void main() {
       expect(await db.select(db.jobs).get(), isEmpty);
     },
   );
+
+  for (final record in ['warehouse_locations', 'warehouse_counts']) {
+    test('warehouse-only $record prevents fresh company adoption', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      final now = DateTime.utc(2026, 10, 20);
+      if (record == 'warehouse_counts') {
+        await db.partsDao.insertGeneralPart(
+          id: 'warehouse-part',
+          name: 'Synthetic part',
+          deviceId: 'warehouse-device',
+        );
+      }
+      await db.customStatement(
+        'INSERT INTO warehouse_locations '
+        '(id, origin_device_id, created_at, modified_at, revision, deleted_at, name, name_key) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          'warehouse-location',
+          'warehouse-device',
+          now.millisecondsSinceEpoch,
+          now.millisecondsSinceEpoch,
+          1,
+          null,
+          'Main warehouse',
+          'main warehouse',
+        ],
+      );
+      if (record == 'warehouse_counts') {
+        await db.customStatement(
+          'INSERT INTO warehouse_counts '
+          '(id, location_id, part_id, prior_count_id, ordinal, quantity, uom, observed_at, recorded_at, origin_device_id, note) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            'warehouse-count',
+            'warehouse-location',
+            'warehouse-part',
+            null,
+            1,
+            4.0,
+            'ea',
+            now.millisecondsSinceEpoch,
+            now.millisecondsSinceEpoch,
+            'warehouse-device',
+            'synthetic count',
+          ],
+        );
+      }
+
+      final before = await db
+          .customSelect('SELECT * FROM "$record" ORDER BY id')
+          .get();
+      await expectLater(
+        CompanyBootstrap.preflightFreshShop(db),
+        throwsA(isA<CompanyBootstrapRefusal>()),
+      );
+      expect(
+        (await db.customSelect('SELECT * FROM "$record" ORDER BY id').get())
+            .map((row) => row.data),
+        before.map((row) => row.data),
+      );
+    });
+  }
 }

@@ -350,6 +350,60 @@ void main() {
     },
   );
 
+  test('schema 11 receipt omits only schema 12 warehouse tables', () async {
+    workspace = ValidationWorkspace.open(
+      run: 'legacy-receipt',
+      role: ValidationRole.receiver,
+      temporaryDirectory: temp,
+    );
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.customStatement('DROP TABLE warehouse_counts');
+    await db.customStatement('DROP TABLE warehouse_locations');
+    await db.customStatement('PRAGMA user_version = 11');
+
+    expect(
+      (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
+        'user_version',
+      ),
+      11,
+    );
+    final receipt = await validationReceipt(db, workspace!);
+    final content = receipt['content']! as Map<String, Object?>;
+    expect(content.containsKey('parts'), isTrue);
+    expect(content.containsKey('warehouse_locations'), isFalse);
+    expect(content.containsKey('warehouse_counts'), isFalse);
+  });
+
+  for (final missingTable in ['warehouse_locations', 'warehouse_counts']) {
+    test('schema 12 receipt refuses missing $missingTable', () async {
+      workspace = ValidationWorkspace.open(
+        run: 'missing-${missingTable.replaceAll('_', '-')}',
+        role: ValidationRole.receiver,
+        temporaryDirectory: temp,
+      );
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      expect(db.schemaVersion, kAppSchemaVersion);
+      expect(
+        (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
+          'user_version',
+        ),
+        kAppSchemaVersion,
+      );
+      await db.customStatement('DROP TABLE "$missingTable"');
+
+      await expectLater(
+        validationReceipt(db, workspace!),
+        throwsA(
+          predicate<Object>(
+            (error) => '$error'.contains('no such table: $missingTable'),
+          ),
+        ),
+      );
+    });
+  }
+
   test(
     'fixture survives reopen and receipt records actual persisted content',
     () async {

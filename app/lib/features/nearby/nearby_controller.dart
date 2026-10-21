@@ -996,7 +996,7 @@ class NearbyController {
         incoming: offer,
         peerName: offer.sourceName,
         status:
-            '${offer.sourceName} wants to send their shop (${offer.summary}). Accept replaces catalog, jobs, and photos on this device.',
+            '${offer.sourceName} wants to send their shop (${offer.summary}). Accept replaces catalog, jobs, warehouse locations, inventory and its history, and photos on this device.',
       ),
     );
     final accepted = await pending.decision.future.timeout(

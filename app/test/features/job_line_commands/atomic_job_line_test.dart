@@ -2101,6 +2101,8 @@ void main() {
       ]) {
         raw.execute('DROP TABLE $table');
       }
+      raw.execute('DROP TABLE warehouse_counts');
+      raw.execute('DROP TABLE warehouse_locations');
       raw.execute('PRAGMA user_version = 2');
       raw.dispose();
       final before = businessRows(file);
@@ -2154,6 +2156,8 @@ void main() {
       for (final table in history) {
         raw.execute('DROP TABLE $table');
       }
+      raw.execute('DROP TABLE warehouse_counts');
+      raw.execute('DROP TABLE warehouse_locations');
       raw.execute('PRAGMA user_version = 2');
       // SQLite's shared table/index namespace makes the fourth additive CREATE
       // fail after the first three DDL statements, using the actual engine.

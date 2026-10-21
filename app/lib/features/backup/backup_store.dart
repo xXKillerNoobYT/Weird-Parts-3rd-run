@@ -13,6 +13,7 @@ import '../../data/sqlite_file.dart';
 import '../reset/local_data_reset.dart';
 import '../installation/installation_security.dart';
 import '../company/company_store_markers.dart';
+import '../warehouse/warehouse_integrity.dart';
 import 'backup_codec.dart';
 
 const kLastBackupAtKey = 'last_backup_at';
@@ -636,6 +637,8 @@ class BackupStore {
         'jobs',
         'job_lines',
         'order_splits',
+        'warehouse_locations',
+        'warehouse_counts',
       ];
       for (final name in requiredTables) {
         if (!names.contains(name)) {
@@ -644,6 +647,52 @@ class BackupStore {
           );
         }
       }
+      const warehouseColumns = <String, Set<String>>{
+        'warehouse_locations': {
+          'id',
+          'origin_device_id',
+          'created_at',
+          'modified_at',
+          'revision',
+          'deleted_at',
+          'name',
+          'name_key',
+        },
+        'warehouse_counts': {
+          'id',
+          'location_id',
+          'part_id',
+          'prior_count_id',
+          'ordinal',
+          'quantity',
+          'uom',
+          'observed_at',
+          'recorded_at',
+          'origin_device_id',
+          'note',
+        },
+      };
+      for (final entry in warehouseColumns.entries) {
+        final columns = await db
+            .customSelect('PRAGMA table_info("${entry.key}")')
+            .get();
+        final actual = columns.map((row) => '${row.data['name']}').toSet();
+        if (actual.length != entry.value.length ||
+            !actual.containsAll(entry.value)) {
+          throw const BackupFormatException(
+            'Backup database has an unsupported warehouse schema',
+          );
+        }
+      }
+      final foreignKeyErrors = await db
+          .customSelect('PRAGMA foreign_key_check')
+          .get();
+      if (foreignKeyErrors.isNotEmpty) {
+        throw const BackupFormatException(
+          'Backup database has invalid shop references',
+        );
+      }
+      await validateWarehouseStore(db);
       await db.customStatement('DELETE FROM app_settings WHERE key = ?', [
         kInstallationBindingKey,
       ]);

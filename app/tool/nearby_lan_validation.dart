@@ -251,6 +251,10 @@ Future<Map<String, Object?>> validationReceipt(
 ) async {
   return db.transaction(() async {
     await requireLegacyBusinessStore(db);
+    final schemaVersion =
+        (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
+          'user_version',
+        );
     final jobs = await db.jobsDao.listActiveJobs();
     final parts = await db.partsDao.listParts();
     final profiles = await db.select(db.deviceProfiles).get();
@@ -271,6 +275,10 @@ Future<Map<String, Object?>> validationReceipt(
     for (final table in db.allTables) {
       final name = table.actualTableName;
       if (name == 'app_settings' || name == 'device_profiles') continue;
+      if (schemaVersion < 12 &&
+          const {'warehouse_locations', 'warehouse_counts'}.contains(name)) {
+        continue;
+      }
       final ordering = table.$primaryKey
           .map((column) => '"${column.$name}"')
           .join(', ');
