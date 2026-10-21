@@ -2,14 +2,22 @@ import 'dart:io';
 import 'dart:convert';
 
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/app.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/catalog/part_photo_store.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
+import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/company/company_gate.dart';
+import 'package:wired_parts/features/company/company_store_markers.dart';
+import 'package:wired_parts/features/shell/home_shell.dart';
 
 import '../../tool/nearby_lan_validation.dart';
 import '../../tool/nearby_lan_workspace.dart';
@@ -28,6 +36,164 @@ void main() {
     PathProviderPlatform.instance = previous;
     temp.deleteSync(recursive: true);
   });
+
+  test(
+    'run and role derive bounded distinct installation and custody namespaces',
+    () {
+      final names = <String>{};
+      for (final run in ['x', 'a' * 48]) {
+        for (final role in ['sender', 'receiver']) {
+          final namespace = validationInstallationNamespace(
+            run: run,
+            roleName: role,
+          );
+          expect(names.add(namespace), isTrue);
+          expect(namespace, startsWith('synthetic.lan.$role.'));
+          expect(namespace.length, lessThanOrEqualTo(47));
+          expect(
+            companyCustodyNamespace(namespace).length,
+            lessThanOrEqualTo(63),
+          );
+          expect(
+            validationInstallationNamespace(run: run, roleName: role),
+            namespace,
+          );
+        }
+      }
+      expect(
+        validationInstallationNamespace(run: 'x', roleName: 'sender'),
+        'synthetic.lan.sender.2d711642b726b04401627ca9',
+      );
+      expect(temp.listSync(), isEmpty);
+    },
+  );
+
+  test(
+    'invalid run and role fail namespace preflight without creating files',
+    () {
+      for (final run in ['', '../real', 'UPPER', 'a' * 49, 'bad_name']) {
+        expect(
+          () => validationInstallationNamespace(run: run, roleName: 'sender'),
+          throwsArgumentError,
+        );
+      }
+      for (final role in ['', 'production', 'Sender', '../receiver']) {
+        expect(
+          () =>
+              validationInstallationNamespace(run: 'valid-run', roleName: role),
+          throwsArgumentError,
+        );
+      }
+      expect(temp.listSync(), isEmpty);
+    },
+  );
+
+  testWidgets(
+    'real startup uses only isolated protected state and preserves seeded local routing on reopen',
+    (tester) async {
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      const channel = MethodChannel('wired_parts/installation_security');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final states = <String, Map<String, Object?>>{};
+      final accessed = <String>[];
+      WiredPartsApp? app;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        final args = call.arguments as Map;
+        final namespace = args['namespace'] as String;
+        accessed.add(namespace);
+        if (call.method == 'readState') return states[namespace];
+        if (call.method == 'compareAndSwapState') {
+          if (states[namespace]?['revision'] != args['expectedRevision']) {
+            throw PlatformException(code: 'installation_conflict');
+          }
+          states[namespace] = {
+            'revision': args['nextRevision'],
+            'bytes': args['bytes'],
+          };
+          return {'revision': args['nextRevision']};
+        }
+        throw UnsupportedError(call.method);
+      });
+      try {
+        workspace = ValidationWorkspace.open(
+          run: 'startup',
+          role: ValidationRole.receiver,
+          temporaryDirectory: temp,
+        );
+        PathProviderPlatform.instance = workspace!;
+        final file = File(p.join(workspace!.support.path, kSqliteFileName));
+        await tester.runAsync(() async {
+          final seed = AppDatabase.forTesting(NativeDatabase(file));
+          await seedValidationShop(seed, workspace!);
+          workspace!.markInitialized();
+          await seed.close();
+        });
+        app = await tester.runAsync(() => validationApplication(workspace!));
+        final first = app!;
+        final namespace = validationInstallationNamespace(
+          run: 'startup',
+          roleName: 'receiver',
+        );
+        expect(first.installation!.namespace, namespace);
+        expect(first.installation!.store, isA<NativeInstallationSecureStore>());
+        expect(first.installation!.readiness, InstallationReadiness.ready);
+        expect(first.enableCompanyBootstrap, isTrue);
+        expect(first.deviceId, workspace!.deviceId);
+        await tester.pumpWidget(first);
+        await tester.runAsync(() async {
+          final timeout = Stopwatch()..start();
+          while (find.byType(HomeShell).evaluate().isEmpty &&
+              timeout.elapsed < const Duration(seconds: 5)) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            await tester.pump();
+          }
+        });
+        expect(find.byType(CompanyBootstrapGate), findsOneWidget);
+        expect(find.byType(HomeShell), findsOneWidget);
+        expect(find.text('Continue local shop'), findsNothing);
+        expect(
+          await tester.runAsync(() => hasCompanyStoreMarkers(first.db)),
+          isFalse,
+        );
+        final before = await tester.runAsync(
+          () => validationReceipt(first.db, workspace!),
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(first.db.close);
+        app = null;
+        final reopened = (await tester.runAsync(
+          () => validationApplication(workspace!),
+        ))!;
+        app = reopened;
+        expect(reopened.installation!.readiness, InstallationReadiness.ready);
+        expect(reopened.installation!.namespace, namespace);
+        expect(reopened.deviceId, first.deviceId);
+        final after = (await tester.runAsync(
+          () => validationReceipt(reopened.db, workspace!),
+        ))!;
+        expect(after['content'], before!['content']);
+        expect(after['deviceIds'], before['deviceIds']);
+        expect(accessed, isNotEmpty);
+        expect(
+          accessed.every(
+            (key) =>
+                key == namespace || key == companyCustodyNamespace(namespace),
+          ),
+          isTrue,
+        );
+        expect(states.keys, [namespace]);
+        expect(accessed.any((key) => key.startsWith('production')), isFalse);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        final current = app;
+        if (current != null) await tester.runAsync(current.db.close);
+        messenger.setMockMethodCallHandler(channel, null);
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
+    },
+  );
 
   test(
     'rejects path injection and foreign roots without changing their data',

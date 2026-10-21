@@ -6,9 +6,11 @@ import 'package:flutter/widgets.dart';
 import 'package:image/image.dart' as image;
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
-import 'package:wired_parts/main.dart' as production;
+import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/pin/pin_service.dart';
 
 import 'nearby_lan_workspace.dart';
 
@@ -16,6 +18,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   const run = String.fromEnvironment('LAN_VALIDATION_RUN');
   const roleName = String.fromEnvironment('LAN_VALIDATION_ROLE');
+  final namespace = validationInstallationNamespace(
+    run: run,
+    roleName: roleName,
+  );
   final role = ValidationRole.values.singleWhere((r) => r.name == roleName);
   final workspace = ValidationWorkspace.open(run: run, role: role);
   PathProviderPlatform.instance = workspace;
@@ -36,10 +42,59 @@ Future<void> main() async {
     );
     debugPrint('Synthetic Nearby validation receipt: $path');
     debugPrint('Synthetic Nearby validation root: ${workspace.root.path}');
+    debugPrint('Synthetic Nearby installation namespace: $namespace');
   } finally {
     await db.close();
   }
-  await production.main();
+  runApp(await validationApplication(workspace));
+}
+
+String validationInstallationNamespace({
+  required String run,
+  required String roleName,
+}) {
+  if (!RegExp(r'^[a-z0-9][a-z0-9-]{0,47}$').hasMatch(run)) {
+    throw ArgumentError(
+      'Run must contain 1-48 lowercase letters, digits or hyphens',
+    );
+  }
+  if (!ValidationRole.values.any((role) => role.name == roleName)) {
+    throw ArgumentError('Role must be sender or receiver');
+  }
+  final digest = sha256.convert(utf8.encode(run)).toString().substring(0, 24);
+  final namespace = 'synthetic.lan.$roleName.$digest';
+  validateInstallationNamespace(namespace);
+  companyCustodyNamespace(namespace);
+  return namespace;
+}
+
+Future<WiredPartsApp> validationApplication(
+  ValidationWorkspace workspace,
+) async {
+  final namespace = validationInstallationNamespace(
+    run: workspace.run,
+    roleName: workspace.role.name,
+  );
+  PathProviderPlatform.instance = workspace;
+  final db = AppDatabase();
+  try {
+    final installation = InstallationSecurity(
+      store: const NativeInstallationSecureStore(),
+      namespace: namespace,
+    );
+    await installation.start(db);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    return WiredPartsApp(
+      db: db,
+      pin: PinService(db.settingsDao),
+      deviceId: deviceId,
+      installation: installation,
+      enableCompanyBootstrap: true,
+    );
+  } catch (_) {
+    await db.close();
+    rethrow;
+  }
 }
 
 Future<void> seedValidationShop(
