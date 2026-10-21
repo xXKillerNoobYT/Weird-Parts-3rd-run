@@ -1222,8 +1222,12 @@ void main() {
   });
 
   test('pending cold inventory rejects missing extra changed duplicate and traversal members without writes', () {
-    final root = Directory.systemTemp.createTempSync('pending-inventory-');
-    addTearDown(() => root.deleteSync(recursive: true));
+    final allocatedRoot = Directory.systemTemp.createTempSync(
+      'pending-inventory-',
+    );
+    // Keep this valid fixture canonical; noncanonical roots remain negative cases.
+    final root = Directory(allocatedRoot.resolveSymbolicLinksSync());
+    addTearDown(() => allocatedRoot.deleteSync(recursive: true));
     for (final name in [
       'documents',
       'temporary',
@@ -1245,6 +1249,16 @@ void main() {
       },
     ];
     adapter.verifyDetailsPendingInventory(root, files);
+    final noncanonicalRoot = Directory(
+      '${root.path}${p.separator}support${p.separator}..',
+    );
+    expect(noncanonicalRoot.resolveSymbolicLinksSync(), root.path);
+    expect(noncanonicalRoot.path, isNot(root.path));
+    expect(
+      () => adapter.verifyDetailsPendingInventory(noncanonicalRoot, files),
+      throwsA(isA<NativeTestFailure>()),
+    );
+    expect(sql.readAsStringSync(), 'synthetic cold bytes');
     Directory(p.join(root.path, 'cache')).deleteSync();
     expect(
       () => adapter.verifyDetailsPendingInventory(root, files),
@@ -1479,11 +1493,14 @@ void main() {
       );
     },
   );
+  late Directory allocatedTemp;
   late Directory temp;
   setUp(() {
-    temp = Directory.systemTemp.createTempSync('details-admission-');
+    allocatedTemp = Directory.systemTemp.createTempSync('details-admission-');
+    // Shared baseline fixtures model the canonical system-temp root.
+    temp = Directory(allocatedTemp.resolveSymbolicLinksSync());
   });
-  tearDown(() => temp.deleteSync(recursive: true));
+  tearDown(() => allocatedTemp.deleteSync(recursive: true));
 
   test('v3 baseline admits only frozen non-saving inspect20 and matching shared baseline', () {
     for (final role in ['owner', 'member']) {

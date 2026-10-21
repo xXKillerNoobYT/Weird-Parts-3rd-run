@@ -705,8 +705,12 @@ void main() {
   });
 
   test('lifecycle source manifest binds the frozen product separately from adapter revision', () {
-    final root = Directory.systemTemp.createTempSync('lifecycle-source-');
-    addTearDown(() => root.deleteSync(recursive: true));
+    final allocatedRoot = Directory.systemTemp.createTempSync(
+      'lifecycle-source-',
+    );
+    // This fixture represents an ordinary canonical root, unlike refusal cases.
+    final root = Directory(allocatedRoot.resolveSymbolicLinksSync());
+    addTearDown(() => allocatedRoot.deleteSync(recursive: true));
     final paths = [
       'app/lib/data/app_database.dart',
       'app/lib/data/app_database.g.dart',
