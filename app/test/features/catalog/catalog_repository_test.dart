@@ -63,6 +63,38 @@ void main() {
     );
   }
 
+  Uint8List photoBytes(int red, int green, int blue) {
+    final image = img.Image(width: 8, height: 8);
+    img.fill(image, color: img.ColorRgb8(red, green, blue));
+    return Uint8List.fromList(img.encodePng(image));
+  }
+
+  Future<List<Map<String, Object?>>> partRows() async =>
+      (await db.customSelect('SELECT * FROM parts ORDER BY id').get())
+          .map((row) => Map<String, Object?>.of(row.data))
+          .toList();
+
+  Future<Map<String, Object>> photoSnapshot(Directory dir) async {
+    final exists = await dir.exists();
+    final directories = <String>[];
+    final files = <String, List<int>>{};
+    if (exists) {
+      final entries = await dir
+          .list(recursive: true, followLinks: false)
+          .toList();
+      entries.sort((a, b) => a.path.compareTo(b.path));
+      for (final entry in entries) {
+        final name = p.relative(entry.path, from: dir.path);
+        if (entry is Directory) {
+          directories.add(name);
+        } else if (entry is File) {
+          files[name] = await entry.readAsBytes();
+        }
+      }
+    }
+    return {'exists': exists, 'directories': directories, 'files': files};
+  }
+
   test('create part allowed when no PIN set', () async {
     final id = await createValidPart(name: 'Valve');
     final part = await catalog.getPart(id);
@@ -276,6 +308,374 @@ void main() {
         )).existsSync(),
         isTrue,
       );
+    },
+  );
+
+  test(
+    'attach photo to an unknown UUID refuses without creating files',
+    () async {
+      final parent = Directory.systemTemp.createTempSync('wp-photo-missing-');
+      addTearDown(() => parent.deleteSync(recursive: true));
+      final photos = Directory(p.join(parent.path, 'photos'));
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      expect(beforePhotos['exists'], isFalse);
+      Object? error;
+      try {
+        await catalog.attachPhoto(
+          partId: newId(),
+          bytes: photoBytes(210, 30, 40),
+          root: photos,
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(
+        {
+          'refused': error is StateError,
+          'parts': await partRows(),
+          'photos': await photoSnapshot(photos),
+        },
+        {'refused': true, 'parts': beforeRows, 'photos': beforePhotos},
+      );
+    },
+  );
+
+  test(
+    'attach photo to a tombstone preserves its row and existing image',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-deleted-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final id = await createValidPart(name: 'Deleted photo target');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      await db.partsDao.softDeletePart(id);
+      expect(
+        (await catalog.getPart(id, includeDeleted: true))!.deletedAt,
+        isNotNull,
+      );
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      expect(beforePhotos['files'], hasLength(1));
+      Object? error;
+      try {
+        await catalog.attachPhoto(
+          partId: id,
+          bytes: photoBytes(210, 30, 40),
+          root: photos,
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(
+        {
+          'refused': error is StateError,
+          'parts': await partRows(),
+          'photos': await photoSnapshot(photos),
+        },
+        {'refused': true, 'parts': beforeRows, 'photos': beforePhotos},
+      );
+    },
+  );
+
+  test(
+    'company refusal preserves the Part and entire photo directory',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-company-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final id = await createValidPart(name: 'Company protected photo');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      await db.customStatement(
+        'INSERT INTO company_join_events (request_id, ordinal, kind, evidence_bytes) VALUES (?, ?, ?, ?)',
+        ['synthetic-photo-blocker', 1, 'blocked', 'synthetic-refusal-marker'],
+      );
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      expect(beforePhotos['files'], hasLength(1));
+      Object? error;
+      try {
+        await catalog.attachPhoto(
+          partId: id,
+          bytes: photoBytes(210, 30, 40),
+          root: photos,
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(
+        {
+          'refused': error is StateError,
+          'parts': await partRows(),
+          'photos': await photoSnapshot(photos),
+        },
+        {'refused': true, 'parts': beforeRows, 'photos': beforePhotos},
+      );
+    },
+  );
+
+  test(
+    'photo path SQL failure preserves the previous row and file set',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-sql-fail-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final id = await createValidPart(name: 'Failed replacement target');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      await db.customStatement(
+        "CREATE TRIGGER refuse_photo_path BEFORE UPDATE OF photo_path ON parts "
+        "BEGIN SELECT RAISE(ABORT, 'synthetic photo update failure'); END",
+      );
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      expect(beforePhotos['files'], hasLength(1));
+      Object? error;
+      try {
+        await catalog.attachPhoto(
+          partId: id,
+          bytes: photoBytes(210, 30, 40),
+          root: photos,
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(
+        {
+          'failed update': '$error'.contains('synthetic photo update failure'),
+          'parts': await partRows(),
+          'photos': await photoSnapshot(photos),
+        },
+        {'failed update': true, 'parts': beforeRows, 'photos': beforePhotos},
+      );
+    },
+  );
+
+  test(
+    'photo attachment refuses caller-owned transactions without effects',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-outer-tx-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final id = await createValidPart(name: 'Caller transaction photo');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      Object? error;
+      await db.transaction(() async {
+        try {
+          await catalog.attachPhoto(
+            partId: id,
+            bytes: photoBytes(210, 30, 40),
+            root: photos,
+          );
+        } catch (e) {
+          error = e;
+        }
+      });
+      expect(
+        {
+          'refused': error is StateError,
+          'parts': await partRows(),
+          'photos': await photoSnapshot(photos),
+        },
+        {'refused': true, 'parts': beforeRows, 'photos': beforePhotos},
+      );
+    },
+  );
+
+  test(
+    'photo references, bytes and PIN gates survive file-backed reopen',
+    () async {
+      final parent = Directory.systemTemp.createTempSync('wp-photo-reopen-');
+      final databaseFile = File(p.join(parent.path, 'synthetic.sqlite'));
+      final photos = Directory(p.join(parent.path, 'photos'));
+      var diskDb = AppDatabase.forTesting(NativeDatabase(databaseFile));
+      try {
+        final origin = await diskDb.settingsDao.ensureDeviceId();
+        final category = await diskDb.taxonomyDao.insertCategory(
+          id: newId(),
+          name: 'Synthetic category',
+          deviceId: origin,
+        );
+        final style = await diskDb.taxonomyDao.insertStyle(
+          id: newId(),
+          categoryId: category,
+          name: 'Synthetic type',
+          deviceId: origin,
+        );
+        final variant = await diskDb.taxonomyDao.insertType(
+          id: newId(),
+          styleId: style,
+          name: 'Synthetic variant',
+          deviceId: origin,
+        );
+        var diskPin = PinService(diskDb.settingsDao);
+        await diskPin.setPin('2468');
+        expect(await diskPin.unlock('2468'), isTrue);
+        var diskCatalog = CatalogRepository(diskDb, diskPin, origin);
+        final id = await diskCatalog.createGeneralPart(
+          name: 'Persistent photo target',
+          categoryId: category,
+          styleId: style,
+          typeId: variant,
+        );
+        final first = await diskCatalog.attachPhoto(
+          partId: id,
+          bytes: photoBytes(20, 80, 140),
+          root: photos,
+        );
+        final firstRow =
+            (await diskDb.customSelect('SELECT * FROM parts').getSingle()).data;
+        final firstPhotos = await photoSnapshot(photos);
+        expect(firstRow['photo_path'], first);
+        expect(
+          await File(p.join(photos.path, first)).readAsBytes(),
+          PartPhotoStore.compress(photoBytes(20, 80, 140)),
+        );
+
+        Future<void> reopen() async {
+          await diskDb.close();
+          diskDb = AppDatabase.forTesting(NativeDatabase(databaseFile));
+          expect(await diskDb.settingsDao.ensureDeviceId(), origin);
+          diskPin = PinService(diskDb.settingsDao);
+          diskCatalog = CatalogRepository(diskDb, diskPin, origin);
+          expect(
+            await diskDb.customSelect('PRAGMA foreign_key_check').get(),
+            isEmpty,
+          );
+        }
+
+        await reopen();
+        expect(
+          (await diskDb.customSelect('SELECT * FROM parts').getSingle()).data,
+          firstRow,
+        );
+        expect(await photoSnapshot(photos), firstPhotos);
+        expect(diskPin.isUnlocked, isFalse);
+        await expectLater(
+          diskCatalog.attachPhoto(
+            partId: id,
+            bytes: photoBytes(210, 30, 40),
+            root: photos,
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(await photoSnapshot(photos), firstPhotos);
+        expect(await diskPin.unlock('2468'), isTrue);
+        final second = await diskCatalog.attachPhoto(
+          partId: id,
+          bytes: photoBytes(210, 30, 40),
+          root: photos,
+        );
+        expect(second, isNot(first));
+        expect(p.isAbsolute(second), isFalse);
+        final secondRow =
+            (await diskDb.customSelect('SELECT * FROM parts').getSingle()).data;
+        final secondPhotos = await photoSnapshot(photos);
+        expect(secondRow['photo_path'], second);
+        expect(
+          await File(p.join(photos.path, second)).readAsBytes(),
+          PartPhotoStore.compress(photoBytes(210, 30, 40)),
+        );
+        expect((secondPhotos['files'] as Map).keys, [second]);
+        expect(secondPhotos, isNot(firstPhotos));
+
+        await reopen();
+        expect(
+          (await diskDb.customSelect('SELECT * FROM parts').getSingle()).data,
+          secondRow,
+        );
+        expect(await photoSnapshot(photos), secondPhotos);
+        expect(await diskPin.unlock('2468'), isTrue);
+        await diskCatalog.clearPhoto(id, root: photos);
+        final clearedRow =
+            (await diskDb.customSelect('SELECT * FROM parts').getSingle()).data;
+
+        await reopen();
+        expect(
+          (await diskDb.customSelect('SELECT * FROM parts').getSingle()).data,
+          clearedRow,
+        );
+        final part = (await diskCatalog.getPart(id))!;
+        expect(part.photoPath, isNull);
+        expect(
+          [part.id, part.categoryId, part.styleId, part.typeId],
+          [id, category, style, variant],
+        );
+        expect((await photoSnapshot(photos))['files'], isEmpty);
+      } finally {
+        try {
+          await diskDb.close();
+        } finally {
+          await parent.delete(recursive: true);
+        }
+      }
+    },
+  );
+
+  test(
+    'photo clear refuses a caller transaction without changing files',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-clear-tx-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final id = await createValidPart(name: 'Caller transaction clear');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      Object? error;
+      await db.transaction(() async {
+        try {
+          await catalog.clearPhoto(id, root: photos);
+        } catch (e) {
+          error = e;
+        }
+      });
+      expect(
+        {
+          'refused': error is StateError,
+          'parts': await partRows(),
+          'photos': await photoSnapshot(photos),
+        },
+        {'refused': true, 'parts': beforeRows, 'photos': beforePhotos},
+      );
+    },
+  );
+
+  test(
+    'photo clear refuses a tombstone without changing its row or image',
+    () async {
+      final photos = Directory.systemTemp.createTempSync(
+        'wp-photo-clear-dead-',
+      );
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final id = await createValidPart(name: 'Deleted clear target');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      await db.partsDao.softDeletePart(id);
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      await expectLater(catalog.clearPhoto(id, root: photos), throwsStateError);
+      expect(await partRows(), beforeRows);
+      expect(await photoSnapshot(photos), beforePhotos);
     },
   );
 
