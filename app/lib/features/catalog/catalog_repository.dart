@@ -10,6 +10,7 @@ import '../company/company_store_markers.dart';
 import '../pin/pin_service.dart';
 import 'catalog_tree.dart';
 import 'part_photo_store.dart';
+import 'part_write_companion.dart';
 
 class CatalogRepository {
   CatalogRepository(this._db, this._pin, this._deviceId);
@@ -53,12 +54,14 @@ class CatalogRepository {
     required Uint8List bytes,
     PartPhotoStore store = const PartPhotoStore(),
     Directory? root,
+    PartWriteCompanion? companion,
   }) async {
     if (_db.hasCallerTransaction) {
       throw StateError('Photo changes require their own transaction');
     }
     await _pin.requireUnlocked();
     return BackupIo.waitAndRun(() async {
+      companion?.validatePhotoOperation();
       String? previous;
       String? staged;
       final String stored;
@@ -77,7 +80,9 @@ class CatalogRepository {
           );
           staged = path;
           await _pin.requireUnlocked();
+          await companion?.beforePhotoReferenceWrite(_db, partId);
           await _db.partsDao.setPhotoPath(partId, path);
+          await companion?.afterPhotoReferenceWrite(_db, partId);
           await _pin.requireUnlocked();
           return path;
         });
@@ -93,6 +98,7 @@ class CatalogRepository {
         }
         rethrow;
       }
+      companion?.photoReferenceCommitted();
       final oldPath = previous;
       if (oldPath != null && oldPath.isNotEmpty && oldPath != stored) {
         await _cleanupPhotoFile(
@@ -110,20 +116,25 @@ class CatalogRepository {
     String partId, {
     PartPhotoStore store = const PartPhotoStore(),
     Directory? root,
+    PartWriteCompanion? companion,
   }) async {
     if (_db.hasCallerTransaction) {
       throw StateError('Photo changes require their own transaction');
     }
     await _pin.requireUnlocked();
     await BackupIo.waitAndRun(() async {
+      companion?.validatePhotoOperation();
       final existing = await legacyBusinessWrite(_db, () async {
         await _pin.requireUnlocked();
         final part = await _db.partsDao.getPart(partId);
         if (part == null) throw StateError('Part is no longer in the catalog');
+        await companion?.beforePhotoReferenceWrite(_db, partId);
         await _db.partsDao.setPhotoPath(partId, null);
+        await companion?.afterPhotoReferenceWrite(_db, partId);
         await _pin.requireUnlocked();
         return part.photoPath;
       });
+      companion?.photoReferenceCommitted();
       if (existing != null && existing.isNotEmpty) {
         await _cleanupPhotoFile(
           existing,

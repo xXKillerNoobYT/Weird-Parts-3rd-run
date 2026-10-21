@@ -12,6 +12,7 @@ import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
 import 'features/installation/installation_security.dart';
 import 'features/company/company_gate.dart';
+import 'features/edit_drafts/edit_drafts.dart';
 
 class AppScope extends InheritedWidget {
   const AppScope({
@@ -22,6 +23,7 @@ class AppScope extends InheritedWidget {
     required this.restoreFromBackup,
     this.restoreFromPayload,
     this.installation,
+    this.edits,
     required super.child,
     super.key,
   });
@@ -34,13 +36,17 @@ class AppScope extends InheritedWidget {
   restoreFromBackup;
   final Future<void> Function(BackupPayload payload)? restoreFromPayload;
   final InstallationSecurity? installation;
+  final EditDrafts? edits;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;
 
   @override
   bool updateShouldNotify(AppScope old) =>
-      db != old.db || pin != old.pin || deviceId != old.deviceId;
+      db != old.db ||
+      pin != old.pin ||
+      deviceId != old.deviceId ||
+      edits != old.edits;
 }
 
 class RestoreBusyException implements Exception {
@@ -89,6 +95,8 @@ class _WiredPartsAppState extends State<WiredPartsApp>
   late AppDatabase _db;
   late PinService _pin;
   late String _deviceId;
+  late EditDrafts _edits;
+  bool _storageCloseStarted = false;
   var _generation = 0;
   var _wiping = false;
   var _exiting = false;
@@ -102,6 +110,12 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     _db = widget.db;
     _pin = widget.pin;
     _deviceId = widget.deviceId;
+    _edits = EditDrafts(
+      db: _db,
+      pin: _pin,
+      deviceId: _deviceId,
+      installation: widget.installation,
+    );
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -112,9 +126,16 @@ class _WiredPartsAppState extends State<WiredPartsApp>
   }
 
   Future<void> _closeStorage() {
-    return _storageShutdown ??= Future<void>.sync(_db.close)
-        .catchError((Object error, StackTrace stack) {
+    return _storageShutdown ??=
+        Future<void>.sync(() async {
+          await _edits.quiesce(StorageChange.exit);
+          _storageCloseStarted = true;
+          await _db.close();
+        }).catchError((Object error, StackTrace stack) {
           _storageShutdown = null;
+          if (!_storageCloseStarted && mounted && _exiting) {
+            setState(() => _exiting = false);
+          }
           Error.throwWithStackTrace(error, stack);
         });
   }
@@ -133,12 +154,15 @@ class _WiredPartsAppState extends State<WiredPartsApp>
           (_) => AppExitResponse.exit,
           onError: (Object error, StackTrace stack) {
             _exitRequest = null;
-            // Storage may already be closed. Keep editing blocked, and retry
-            // the same pending shutdown on the next ordinary exit request.
+            if (!_storageCloseStarted && _storageShutdown == null && mounted) {
+              setState(() => _exiting = false);
+            }
             _messenger.currentState?.showSnackBar(
-              const SnackBar(
+              SnackBar(
                 content: Text(
-                  'Could not close local storage. The app remains open; try closing again.',
+                  _storageCloseStarted
+                      ? 'Could not close local storage. The app remains open; try closing again.'
+                      : 'Could not save unfinished edits. The app remains open. Keep editing or try closing again.',
                 ),
               ),
             );
@@ -159,13 +183,21 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     try {
       await requireLegacyBusinessStore(_db);
       await widget.reset.preflight();
-      final intent = await widget.installation?.prepareReset(_db);
+      await _edits.quiesce(StorageChange.reset);
+      InstallationResetIntent? intent;
+      try {
+        intent = await widget.installation?.prepareReset(_db);
+      } catch (_) {
+        if (mounted) setState(() => _bindLive(_db, _deviceId));
+        rethrow;
+      }
       try {
         await _db.close();
       } catch (error, stack) {
         var recovered = false;
         try {
           await _abortReset(_db, intent);
+          if (mounted) setState(() => _bindLive(_db, _deviceId));
           recovered = true;
         } catch (_) {}
         if (!recovered && mounted) setState(() => _exiting = true);
@@ -263,6 +295,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     _wiping = true;
     final keepDeviceId = _deviceId;
     var closed = false;
+    var quiesced = false;
     AppDatabase? next;
     InstallationRestoreIntent? intent;
     var replacementReturned = false;
@@ -280,6 +313,8 @@ class _WiredPartsAppState extends State<WiredPartsApp>
           'Local device profile does not match this installation',
         );
       }
+      await _edits.quiesce(StorageChange.replacement);
+      quiesced = true;
       intent = await widget.installation?.prepareBusinessRestore(_db);
       await _db.close();
       closed = true;
@@ -310,10 +345,23 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       if (!mounted) return;
       setState(() => _bindLive(next!, keepDeviceId));
     } catch (e) {
-      if (!closed && intent != null) {
-        try {
-          await widget.installation!.abortBusinessRestore(_db, intent);
-        } catch (_) {}
+      if (!closed && quiesced) {
+        var retainedStorageReady = false;
+        final installation = widget.installation;
+        if (intent != null ||
+            installation == null ||
+            installation.readiness == InstallationReadiness.unsupported) {
+          try {
+            if (intent != null) {
+              await installation!.abortBusinessRestore(_db, intent);
+            }
+            await requireLegacyBusinessStore(_db);
+            retainedStorageReady = true;
+          } catch (_) {}
+        }
+        if (mounted && retainedStorageReady) {
+          setState(() => _bindLive(_db, keepDeviceId));
+        }
       }
       if (closed) {
         next ??= widget.reopenDatabase?.call() ?? AppDatabase();
@@ -346,6 +394,14 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     _db = next;
     _pin = PinService(next.settingsDao);
     _deviceId = deviceId;
+    _edits = EditDrafts(
+      db: next,
+      pin: _pin,
+      deviceId: deviceId,
+      installation: widget.installation,
+    );
+    _storageShutdown = null;
+    _storageCloseStarted = false;
     _generation++;
   }
 
@@ -393,6 +449,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       restoreFromBackup: _restoreFromBackup,
       restoreFromPayload: _restoreFromPayload,
       installation: widget.installation,
+      edits: _edits,
       child: MaterialApp(
         title: 'Wired Parts',
         scaffoldMessengerKey: _messenger,

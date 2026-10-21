@@ -10,17 +10,15 @@ import '../catalog/part_detail_page.dart';
 import '../catalog/part_details_dialog.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../maintenance/maintenance_repository.dart';
+import '../edit_drafts/edit_drafts.dart';
+import '../edit_drafts/edit_draft_widgets.dart';
 import '../pin/pin_gate.dart';
 import 'job_line_qty.dart';
 import 'jobs_repository.dart';
 import 'catalog_promotion.dart';
 
 class JobLineEditor extends StatefulWidget {
-  const JobLineEditor({
-    required this.jobId,
-    this.lineId,
-    super.key,
-  });
+  const JobLineEditor({required this.jobId, this.lineId, super.key});
 
   final String jobId;
   final String? lineId;
@@ -31,7 +29,7 @@ class JobLineEditor extends StatefulWidget {
 
 class _SplitDraft {
   _SplitDraft({this.supplierId, String qty = ''})
-      : qtyController = TextEditingController(text: qty);
+    : qtyController = TextEditingController(text: qty);
 
   String? supplierId;
   final TextEditingController qtyController;
@@ -72,7 +70,150 @@ class _JobLineEditorState extends State<JobLineEditor> {
   bool _initialized = false;
   String? _lineId;
 
+  EditDrafts? _edits;
+  JobLineEditSession? _session;
+  EditOpening<JobLineEditSession>? _opening;
+  bool _applyingInput = false;
+  bool _allowPop = false;
+
   bool get _isEditing => _lineId != null;
+
+  void _capture() {
+    if (_loading || _applyingInput) return;
+    _session?.replace(
+      JobLineInput(
+        useCustom: _useCustom,
+        partId: _partId,
+        brandVersionId: _brandVersionId,
+        customNameText: _customNameController.text,
+        neededText: _neededController.text,
+        pullText: _pullController.text,
+        customNotes: _customNotes,
+        uom: _uom,
+        notes: _notes,
+        splits: [
+          for (final split in _splits)
+            SplitInput(
+              supplierId: split.supplierId,
+              quantityText: split.qtyController.text,
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _change(VoidCallback change) {
+    setState(change);
+    _capture();
+  }
+
+  _SplitDraft _watchSplit(_SplitDraft split) {
+    split.qtyController.addListener(_capture);
+    return split;
+  }
+
+  Future<void> _useSession(JobLineEditSession session) async {
+    if (!mounted) {
+      await session.leave(LeaveIntent.back);
+      return;
+    }
+    _applyingInput = true;
+    final input = session.initial;
+    setState(() {
+      _session = session;
+      _opening = null;
+      _useCustom = input.useCustom;
+      _partId = input.partId;
+      _brandVersionId = input.brandVersionId;
+      _customNameController.text = input.customNameText;
+      _neededController.text = input.neededText;
+      _pullController.text = input.pullText;
+      _customNotes = input.customNotes;
+      _uom = input.uom;
+      _notes = input.notes;
+      for (final split in _splits) {
+        split.dispose();
+      }
+      _splits
+        ..clear()
+        ..addAll(
+          input.splits.map(
+            (split) => _watchSplit(
+              _SplitDraft(
+                supplierId: split.supplierId,
+                qty: split.quantityText,
+              ),
+            ),
+          ),
+        );
+    });
+    _applyingInput = false;
+    final partId = input.partId;
+    final storedPart = partId == null
+        ? null
+        : await _catalog.getPart(partId, includeDeleted: true);
+    final versions = partId == null
+        ? <BrandVersion>[]
+        : await _catalog.listBrandVersionsForPart(
+            partId,
+            includeDeleted: storedPart?.deletedAt != null,
+          );
+    if (!mounted) return;
+    setState(() {
+      _brandVersions = versions;
+      _catalogPartMissing =
+          partId != null &&
+          (storedPart == null || storedPart.deletedAt != null);
+      _refreshPickLabel();
+    });
+    await _refreshSupplierChoices(preserveExistingSplits: true);
+  }
+
+  Future<void> _openDraft() async {
+    final edits = _edits;
+    if (edits == null) return;
+    if (mounted) setState(() => _loading = true);
+    final opening = await edits.openJobLine(widget.jobId, lineId: _lineId);
+    if (!mounted) {
+      if (opening is FreshEdit<JobLineEditSession>) {
+        await opening.session.leave(LeaveIntent.back);
+      }
+      return;
+    }
+    if (opening is FreshEdit<JobLineEditSession>) {
+      await _useSession(opening.session);
+    } else {
+      setState(() => _opening = opening);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _discardRecovery() async {
+    switch (_opening) {
+      case RecoverableEdit<JobLineEditSession> opening:
+        await opening.discard();
+      case BlockedEdit<JobLineEditSession> opening:
+        await opening.discard();
+      default:
+        return;
+    }
+    await _openDraft();
+  }
+
+  Future<void> _leave(LeaveIntent intent) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _session?.leave(intent);
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (mounted) _toast('Could not leave. $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -80,6 +221,14 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (_initialized) return;
     _initialized = true;
     final scope = AppScope.of(context);
+    _edits = scope.edits;
+    for (final controller in [
+      _customNameController,
+      _neededController,
+      _pullController,
+    ]) {
+      controller.addListener(_capture);
+    }
     _db = scope.db;
     _jobs = JobsRepository(scope.db, scope.deviceId);
     _promotion = CatalogPromotion(scope.db, scope.pin, scope.deviceId);
@@ -196,11 +345,12 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _brandVersions = versions;
       _splits
         ..clear()
-        ..addAll(splitDrafts);
-      _loading = false;
+        ..addAll(splitDrafts.map(_watchSplit));
+      _loading = _edits != null;
     });
     _refreshPickLabel();
     await _refreshSupplierChoices(preserveExistingSplits: true);
+    await _openDraft();
   }
 
   void _refreshPickLabel() {
@@ -238,7 +388,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _applyPick(CatalogTreePick pick) async {
     final versions = await _catalog.listBrandVersionsForPart(pick.partId);
     if (!mounted) return;
-    setState(() {
+    _change(() {
       _useCustom = false;
       _partId = pick.partId;
       _brandVersionId = pick.brandVersionId;
@@ -263,7 +413,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _refreshSupplierChoices({
     bool preserveExistingSplits = false,
   }) async {
-    final keepSplits = preserveExistingSplits || _catalogPartMissing;
+    final keepSplits =
+        _edits != null || preserveExistingSplits || _catalogPartMissing;
     List<Supplier> choices;
     if (_catalogPartMissing) {
       // Tombstoned listings are gone from the live picker. Keep every live
@@ -306,7 +457,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   void _addSplit() {
-    setState(() => _splits.add(_SplitDraft()));
+    _change(() => _splits.add(_watchSplit(_SplitDraft())));
   }
 
   Future<void> _addSupplierForSplit(_SplitDraft split) async {
@@ -336,7 +487,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
         _toast('That supplier is not on this brand version yet');
         return;
       }
-      setState(() => split.supplierId = id);
+      _change(() => split.supplierId = id);
     } on StateError catch (e) {
       if (mounted) _toast(e.message);
     }
@@ -344,7 +495,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   void _removeSplit(int index) {
     if (_splits.length <= 1) return;
-    setState(() {
+    _change(() {
       _splits.removeAt(index).dispose();
     });
   }
@@ -371,8 +522,14 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (confirmed != true || !mounted) return;
     setState(() => _saving = true);
     try {
-      await _jobs.removeLine(_lineId!);
+      final session = _session;
+      if (session == null) {
+        await _jobs.removeLine(_lineId!);
+      } else {
+        await session.remove();
+      }
       if (!mounted) return;
+      setState(() => _allowPop = true);
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -443,7 +600,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
     setState(() => _saving = true);
     try {
-      if (_isEditing) {
+      final session = _session;
+      if (session != null) {
+        _lineId = await session.save();
+      } else if (_isEditing) {
         await _jobs.updateLine(
           lineId: _lineId!,
           partId: partId,
@@ -468,6 +628,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
         );
       }
       if (!mounted) return;
+      setState(() => _allowPop = true);
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -503,21 +664,35 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
     setState(() => _saving = true);
     try {
-      final promotion = await _promotion.promote(
-        jobId: widget.jobId,
-        lineId: _lineId,
-        name: result.name,
-        categoryId: result.categoryId,
-        styleId: result.styleId,
-        typeId: result.typeId,
-        neededQty: quantities.neededQty,
-        shopPullQty: quantities.shopPullQty,
-        splits: quantities.splits,
-      );
+      final String partId;
+      final String lineId;
+      final session = _session;
+      if (session != null) {
+        final promotion = await session.promote(result);
+        if (!mounted) return;
+        partId = promotion.partId;
+        lineId = promotion.lineId;
+        _lineId = lineId;
+        await _useSession(promotion.session);
+      } else {
+        final promotion = await _promotion.promote(
+          jobId: widget.jobId,
+          lineId: _lineId,
+          name: result.name,
+          categoryId: result.categoryId,
+          styleId: result.styleId,
+          typeId: result.typeId,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
+        );
+        partId = promotion.partId;
+        lineId = promotion.lineId;
+      }
       if (!mounted) return;
-      final partId = promotion.partId;
+      _applyingInput = true;
       setState(() {
-        _lineId = promotion.lineId;
+        _lineId = lineId;
         _useCustom = false;
         _partId = partId;
         _brandVersionId = null;
@@ -526,6 +701,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
         _catalogPartMissing = false;
         _customNameController.clear();
       });
+      _applyingInput = false;
       try {
         final versions = await _catalog.listBrandVersionsForPart(partId);
         final parts = await _catalog.listParts(
@@ -558,9 +734,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   String _brandVersionLabel(BrandVersion bv) {
@@ -577,245 +752,283 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit line' : 'Add line'),
-        actions: [
-          if (_isEditing)
-            TextButton(
-              onPressed: _saving || _loading ? null : _removeLine,
-              child: const Text('Remove'),
-            ),
-          TextButton(
-            onPressed: _saving || _loading ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Save'),
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: false, label: Text('Catalog part')),
-                    ButtonSegment(value: true, label: Text('Custom')),
-                  ],
-                  selected: {_useCustom},
-                  onSelectionChanged: _saving
-                      ? null
-                      : (sel) async {
-                    final custom = sel.first;
-                    setState(() {
-                      _useCustom = custom;
-                      if (custom) {
-                        _partId = null;
-                        _brandVersionId = null;
-                        _brandVersions = [];
-                        _catalogPartMissing = false;
-                      } else {
-                        _customNameController.clear();
-                      }
-                    });
-                    await _refreshSupplierChoices();
-                  },
-                ),
-                const SizedBox(height: 16),
-                if (_useCustom) ...[
-                  TextField(
-                    controller: _customNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Custom name',
-                      border: OutlineInputBorder(),
-                    ),
-                    textCapitalization: TextCapitalization.sentences,
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: _saving || _loading ? null : _promoteToCatalog,
-                      icon: const Icon(Icons.upgrade),
-                      label: const Text('Promote to catalog'),
-                    ),
-                  ),
-                  const Text(
-                    'PIN required. Puts this name on the catalog tree and on this job.',
-                  ),
-                ] else ...[
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Catalog part'),
-                    subtitle: Text(_pickLabel),
-                    trailing: const Icon(Icons.account_tree_outlined),
-                    onTap: _saving ? null : _pickFromTree,
-                  ),
-                  if (_partId != null && !_catalogPartMissing)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: _saving
-                            ? null
-                            : () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) =>
-                                        PartDetailPage(partId: _partId!),
-                                  ),
-                                );
-                              },
-                        child: const Text('Open catalog part'),
-                      ),
-                    ),
-                ],
-                const SizedBox(height: 16),
-                Row(
+    return PopScope<void>(
+      canPop: _edits == null || _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave(LeaveIntent.back);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_isEditing ? 'Edit line' : 'Add line'),
+          actions: [
+            if (_session != null)
+              TextButton(
+                onPressed: _saving ? null : () => _leave(LeaveIntent.discard),
+                child: const Text('Discard'),
+              ),
+            if (_isEditing && _opening == null)
+              TextButton(
+                onPressed: _saving || _loading ? null : _removeLine,
+                child: const Text('Remove'),
+              ),
+            if (_opening == null)
+              TextButton(
+                onPressed: _saving || _loading ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Save'),
+              ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _opening != null
+            ? EditOpeningPanel<JobLineEditSession>(
+                opening: _opening!,
+                onResume: _useSession,
+                onDiscard: _discardRecovery,
+              )
+            : AbsorbPointer(
+                absorbing: _saving,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _neededController,
+                    if (_session case final session?)
+                      EditStatusBanner(status: session.status),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          label: Text('Catalog part'),
+                        ),
+                        ButtonSegment(value: true, label: Text('Custom')),
+                      ],
+                      selected: {_useCustom},
+                      onSelectionChanged: _saving
+                          ? null
+                          : (sel) async {
+                              final custom = sel.first;
+                              _change(() {
+                                _useCustom = custom;
+                                if (custom) {
+                                  _partId = null;
+                                  _brandVersionId = null;
+                                  _brandVersions = [];
+                                  _catalogPartMissing = false;
+                                } else {
+                                  _customNameController.clear();
+                                }
+                              });
+                              await _refreshSupplierChoices();
+                            },
+                    ),
+                    const SizedBox(height: 16),
+                    if (_useCustom) ...[
+                      TextField(
+                        controller: _customNameController,
                         decoration: const InputDecoration(
-                          labelText: 'Requested',
+                          labelText: 'Custom name',
                           border: OutlineInputBorder(),
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9.]'),
-                          ),
-                        ],
-                        onChanged: (_) => setState(() {}),
+                        textCapitalization: TextCapitalization.sentences,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: _pullController,
-                        decoration: const InputDecoration(
-                          labelText: 'Shop',
-                          border: OutlineInputBorder(),
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9.]'),
-                          ),
-                        ],
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Left to Pull/Order ${formatQty(_previewQty.leftToPullOrder)}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Split: ${_previewQty.splitSummary}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 24),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      'Split — suppliers',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    TextButton.icon(
-                      onPressed: _addSplit,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add split'),
-                    ),
-                  ],
-                ),
-                const Text(
-                  'Shop is the shop slice. Each row is one supplier. Add a supplier on this row if it is not in the list. Empty is OK.',
-                ),
-                const SizedBox(height: 8),
-                ...List.generate(_splits.length, (index) {
-                  final split = _splits[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Column(
-                      children: [
-                        TaxonomyPickField(
-                          label: 'Supplier',
-                          value: split.supplierId,
-                          allowNone: true,
-                          addLabel: 'Add supplier',
-                          items: [
-                            for (final s in _supplierChoices)
-                              DropdownMenuItem(
-                                value: s.id,
-                                child: Text(s.name),
-                              ),
-                          ],
-                          onChanged: (v) {
-                            setState(() => split.supplierId = v);
-                          },
-                          onAdd: _saving
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _saving || _loading
                               ? null
-                              : () => _addSupplierForSplit(split),
+                              : _promoteToCatalog,
+                          icon: const Icon(Icons.upgrade),
+                          label: const Text('Promote to catalog'),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: split.qtyController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Qty',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'[0-9.]'),
-                                  ),
-                                ],
-                                onChanged: (_) => setState(() {}),
+                      ),
+                      const Text(
+                        'PIN required. Puts this name on the catalog tree and on this job.',
+                      ),
+                    ] else ...[
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Catalog part'),
+                        subtitle: Text(_pickLabel),
+                        trailing: const Icon(Icons.account_tree_outlined),
+                        onTap: _saving ? null : _pickFromTree,
+                      ),
+                      if (_partId != null && !_catalogPartMissing)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _saving
+                                ? null
+                                : () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            PartDetailPage(partId: _partId!),
+                                      ),
+                                    );
+                                  },
+                            child: const Text('Open catalog part'),
+                          ),
+                        ),
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _neededController,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9.]'),
                               ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Requested',
+                              border: OutlineInputBorder(),
                             ),
-                            IconButton(
-                              onPressed: _splits.length <= 1
-                                  ? null
-                                  : () => _removeSplit(index),
-                              icon: const Icon(Icons.remove_circle_outline),
-                              tooltip: 'Remove split',
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
                             ),
-                          ],
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _pullController,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9.]'),
+                              ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Shop',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
                         ),
                       ],
                     ),
-                  );
-                }),
-                const SizedBox(height: 16),
-                Text(
-                  'Delivered and Brought to the Job — later.',
-                  style: Theme.of(context).textTheme.bodySmall,
+                    const SizedBox(height: 12),
+                    Text(
+                      'Left to Pull/Order ${formatQty(_previewQty.leftToPullOrder)}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Split: ${_previewQty.splitSummary}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 24),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Split — suppliers',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        TextButton.icon(
+                          onPressed: _addSplit,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add split'),
+                        ),
+                      ],
+                    ),
+                    const Text(
+                      'Shop is the shop slice. Each row is one supplier. Add a supplier on this row if it is not in the list. Empty is OK.',
+                    ),
+                    const SizedBox(height: 8),
+                    ...List.generate(_splits.length, (index) {
+                      final split = _splits[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Column(
+                          children: [
+                            TaxonomyPickField(
+                              label: 'Supplier',
+                              value: split.supplierId,
+                              allowNone: true,
+                              addLabel: 'Add supplier',
+                              items: [
+                                if (split.supplierId != null &&
+                                    !_supplierChoices.any(
+                                      (s) => s.id == split.supplierId,
+                                    ))
+                                  DropdownMenuItem(
+                                    value: split.supplierId,
+                                    child: Text(
+                                      'Unavailable supplier (${split.supplierId})',
+                                    ),
+                                  ),
+                                for (final s in _supplierChoices)
+                                  DropdownMenuItem(
+                                    value: s.id,
+                                    child: Text(s.name),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                _change(() => split.supplierId = v);
+                              },
+                              onAdd: _saving
+                                  ? null
+                                  : () => _addSupplierForSplit(split),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: split.qtyController,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'[0-9.]'),
+                                      ),
+                                    ],
+                                    decoration: const InputDecoration(
+                                      labelText: 'Qty',
+                                      border: OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    onChanged: (_) => setState(() {}),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: _splits.length <= 1
+                                      ? null
+                                      : () => _removeSplit(index),
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                  tooltip: 'Remove split',
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Delivered and Brought to the Job — later.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+      ),
     );
   }
 
