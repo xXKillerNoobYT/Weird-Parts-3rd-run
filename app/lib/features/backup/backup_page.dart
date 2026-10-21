@@ -182,7 +182,7 @@ class _BackupPageState extends State<BackupPage> {
         title: 'Restore this backup?',
         body:
           'Replaces all catalog, jobs, warehouse locations, inventory and its '
-          'history, photos, and PIN on this device with the '
+          'history, photos, PIN, and unfinished edits on this device with the '
             'backup from ${header.sourceDeviceId} '
             '(${_formatStamp(header.createdAt.toIso8601String())}). Cannot undo.',
         confirmLabel: 'Restore',

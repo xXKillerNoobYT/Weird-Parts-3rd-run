@@ -17,6 +17,7 @@ class CatalogPromotion {
   Future<({String partId, String lineId})> promote({
     required String jobId,
     String? lineId,
+    String? reservedNewLineId,
     required String name,
     required String categoryId,
     required String styleId,
@@ -54,6 +55,7 @@ class CatalogPromotion {
       } else {
         savedLineId = await _jobs.addLine(
           jobId: jobId,
+          reservedLineId: reservedNewLineId,
           partId: partId,
           neededQty: neededQty,
           shopPullQty: shopPullQty,

@@ -6,17 +6,15 @@ import 'package:image_picker/image_picker.dart';
 import '../../app.dart';
 import '../../data/app_database.dart';
 import '../maintenance/maintenance_repository.dart';
+import '../edit_drafts/edit_drafts.dart';
+import '../edit_drafts/edit_draft_widgets.dart';
 import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
 import 'part_photo_store.dart';
 import 'tree_edit_prompts.dart';
 
 class PartDetailPage extends StatefulWidget {
-  const PartDetailPage({
-    required this.partId,
-    this.focusBrandId,
-    super.key,
-  });
+  const PartDetailPage({required this.partId, this.focusBrandId, super.key});
 
   final String partId;
   final String? focusBrandId;
@@ -24,7 +22,6 @@ class PartDetailPage extends StatefulWidget {
   @override
   State<PartDetailPage> createState() => _PartDetailPageState();
 }
-
 
 class _BrandGroup {
   _BrandGroup({required this.brandId, required this.brandName});
@@ -35,10 +32,7 @@ class _BrandGroup {
 }
 
 class _VarianceRow {
-  _VarianceRow({
-    required this.version,
-    required this.listings,
-  });
+  _VarianceRow({required this.version, required this.listings});
 
   final BrandVersion version;
   final List<_ListingRow> listings;
@@ -78,6 +72,102 @@ class _PartDetailPageState extends State<PartDetailPage> {
   bool _saving = false;
   bool _initialized = false;
   bool _openedFocus = false;
+  EditDrafts? _edits;
+  PartEditSession? _session;
+  EditOpening<PartEditSession>? _opening;
+  bool _applyingInput = false;
+  bool _allowPop = false;
+
+  void _capture() {
+    if (_loading || _applyingInput) return;
+    _session?.replace(
+      PartInput(
+        nameText: _nameController.text,
+        descriptionText: _descriptionController.text,
+        specsText: _specsController.text,
+        uomText: _uomController.text,
+        categoryId: _categoryId,
+        styleId: _styleId,
+        typeId: _typeId,
+        defaultSupplierId: _defaultSupplierId,
+        active: _active,
+      ),
+    );
+  }
+
+  void _change(VoidCallback change) {
+    setState(change);
+    _capture();
+  }
+
+  Future<void> _useSession(PartEditSession session) async {
+    if (!mounted) {
+      await session.leave(LeaveIntent.back);
+      return;
+    }
+    _applyingInput = true;
+    final input = session.initial;
+    setState(() {
+      _session = session;
+      _opening = null;
+      _nameController.text = input.nameText;
+      _descriptionController.text = input.descriptionText;
+      _specsController.text = input.specsText;
+      _uomController.text = input.uomText;
+      _categoryId = input.categoryId;
+      _styleId = input.styleId;
+      _typeId = input.typeId;
+      _defaultSupplierId = input.defaultSupplierId;
+      _active = input.active;
+    });
+    _applyingInput = false;
+  }
+
+  Future<void> _openDraft() async {
+    final edits = _edits;
+    if (edits == null) return;
+    if (mounted) setState(() => _loading = true);
+    final opening = await edits.openPart(widget.partId);
+    if (!mounted) {
+      if (opening is FreshEdit<PartEditSession>) {
+        await opening.session.leave(LeaveIntent.back);
+      }
+      return;
+    }
+    if (opening is FreshEdit<PartEditSession>) {
+      await _useSession(opening.session);
+    } else {
+      setState(() => _opening = opening);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _discardRecovery() async {
+    switch (_opening) {
+      case RecoverableEdit<PartEditSession> opening:
+        await opening.discard();
+      case BlockedEdit<PartEditSession> opening:
+        await opening.discard();
+      default:
+        return;
+    }
+    await _openDraft();
+  }
+
+  Future<void> _leave(LeaveIntent intent) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _session?.leave(intent);
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (mounted) _toast('Could not leave. $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -85,6 +175,15 @@ class _PartDetailPageState extends State<PartDetailPage> {
     if (_initialized) return;
     _initialized = true;
     final scope = AppScope.of(context);
+    _edits = scope.edits;
+    for (final controller in [
+      _nameController,
+      _descriptionController,
+      _specsController,
+      _uomController,
+    ]) {
+      controller.addListener(_capture);
+    }
     _db = scope.db;
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
     _maintenance = MaintenanceRepository(scope.db, scope.pin, scope.deviceId);
@@ -105,7 +204,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
     final part = await _catalog.getPart(widget.partId);
     if (part == null) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      if (_edits == null) setState(() => _loading = false);
+      await _openDraft();
       return;
     }
 
@@ -114,10 +214,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
     final categories = await _db.taxonomyDao.listCategories();
     final styles = await _db.taxonomyDao.listStyles();
     final variants = await _db.taxonomyDao.listTypes();
-    final groups = await _loadBrandGroups(
-      brands: brands,
-      suppliers: suppliers,
-    );
+    final groups = await _loadBrandGroups(brands: brands, suppliers: suppliers);
 
     final photoPath = await _resolvedPhotoPath(part.photoPath);
     if (!mounted) return;
@@ -138,10 +235,11 @@ class _PartDetailPageState extends State<PartDetailPage> {
       _styles = styles;
       _variants = variants;
       _brandGroups = groups;
-      _loading = false;
+      _loading = _edits != null;
     });
 
-    if (!_openedFocus && widget.focusBrandId != null) {
+    await _openDraft();
+    if (!_openedFocus && widget.focusBrandId != null && _opening == null) {
       _openedFocus = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _addVariance(brandId: widget.focusBrandId);
@@ -170,9 +268,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
   bool get _canUseCamera => Platform.isAndroid || Platform.isIOS;
 
   void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<String?> _resolvedPhotoPath(String? stored) async {
@@ -204,7 +301,12 @@ class _PartDetailPageState extends State<PartDetailPage> {
       );
       if (picked == null || !mounted) return;
       final bytes = await picked.readAsBytes();
-      await _catalog.attachPhoto(partId: widget.partId, bytes: bytes);
+      final session = _session;
+      if (session == null) {
+        await _catalog.attachPhoto(partId: widget.partId, bytes: bytes);
+      } else {
+        await session.attachPhoto(bytes: bytes);
+      }
       await _refreshPhotoPreview();
       if (!mounted) return;
       _toast('Photo saved on this device');
@@ -227,7 +329,12 @@ class _PartDetailPageState extends State<PartDetailPage> {
   Future<void> _removePhoto() async {
     if (!await _gate() || !mounted) return;
     try {
-      await _catalog.clearPhoto(widget.partId);
+      final session = _session;
+      if (session == null) {
+        await _catalog.clearPhoto(widget.partId);
+      } else {
+        await session.clearPhoto();
+      }
       await _refreshPhotoPreview();
       if (!mounted) return;
       _toast('Photo removed');
@@ -346,7 +453,9 @@ class _PartDetailPageState extends State<PartDetailPage> {
     setState(() => _saving = true);
     try {
       await _catalog.deletePart(widget.partId);
+      await _session?.leave(LeaveIntent.back);
       if (!mounted) return;
+      setState(() => _allowPop = true);
       Navigator.of(context).pop();
     } on StateError catch (e) {
       if (!mounted) return;
@@ -426,7 +535,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       final id = await _maintenance.createCategory(name);
       await _refreshTaxonomyLists();
       if (!mounted) return;
-      setState(() {
+      _change(() {
         _categoryId = id;
         _styleId = null;
         _typeId = null;
@@ -452,7 +561,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       );
       await _refreshTaxonomyLists();
       if (!mounted) return;
-      setState(() {
+      _change(() {
         _styleId = id;
         _typeId = null;
       });
@@ -474,7 +583,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       final id = await _maintenance.createType(styleId: _styleId!, name: name);
       await _refreshTaxonomyLists();
       if (!mounted) return;
-      setState(() => _typeId = id);
+      _change(() => _typeId = id);
     } on StateError catch (e) {
       if (!mounted) return;
       _toast(e.message);
@@ -522,9 +631,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Name is required')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Name is required')));
       return;
     }
     if (_categoryId == null || _styleId == null || _typeId == null) {
@@ -535,29 +643,36 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
     setState(() => _saving = true);
     try {
-      await _catalog.updatePart(
-        partId: widget.partId,
-        name: name,
-        description: _descriptionController.text.trim(),
-        uom: _uomController.text.trim().isEmpty
-            ? 'ea'
-            : _uomController.text.trim(),
-        defaultSupplierId: _defaultSupplierId,
-        active: _active,
-        categoryId: _categoryId,
-        styleId: _styleId,
-        typeId: _typeId,
-        specs: _specsController.text,
-      );
+      final session = _session;
+      if (session != null) {
+        final saved = await session.save();
+        if (!mounted) return;
+        await _useSession(saved.session);
+      } else {
+        await _catalog.updatePart(
+          partId: widget.partId,
+          name: name,
+          description: _descriptionController.text.trim(),
+          uom: _uomController.text.trim().isEmpty
+              ? 'ea'
+              : _uomController.text.trim(),
+          defaultSupplierId: _defaultSupplierId,
+          active: _active,
+          categoryId: _categoryId,
+          styleId: _styleId,
+          typeId: _typeId,
+          specs: _specsController.text,
+        );
+      }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Saved')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Saved')));
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (error) {
+      if (mounted) _toast('Save failed. $error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -601,9 +716,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
       await _refreshBrandGroups();
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -634,9 +748,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
       await _refreshBrandGroups();
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -654,7 +767,14 @@ class _PartDetailPageState extends State<PartDetailPage> {
       label: label,
       addLabel: addLabel,
       value: value,
-      items: items,
+      items: [
+        if (value != null && !items.any((item) => item.value == value))
+          DropdownMenuItem(
+            value: value,
+            child: Text('Unavailable $label ($value)'),
+          ),
+        ...items,
+      ],
       onChanged: onChanged,
       onAdd: onAdd,
       enabled: enabled,
@@ -664,240 +784,264 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Part'),
-        actions: [
-          if (!_loading)
-            IconButton(
-              tooltip: 'Remove part',
-              onPressed: _saving ? null : _deletePart,
-              icon: const Icon(Icons.delete_outline),
-            ),
-          if (!_loading)
-            TextButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Save'),
-            ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              // ignore: deprecated_member_use
-              cacheExtent: 4000, // keep Add Category/Type/Variant mounted
-              children: [
-                TextField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Name',
-                    border: OutlineInputBorder(),
-                  ),
-                  textCapitalization: TextCapitalization.sentences,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Tree location',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Required. Add missing folders here. Type stays under Category; Variant stays under Type.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                _treeField(
-                  label: 'Category',
-                  addLabel: 'Add Category',
-                  value: _categoryId,
-                  items: [
-                    for (final c in _categories)
-                      DropdownMenuItem(value: c.id, child: Text(c.name)),
-                  ],
-                  onChanged: (v) => setState(() {
-                    _categoryId = v;
-                    if (_stylesForCategory.every((s) => s.id != _styleId)) {
-                      _styleId = null;
-                      _typeId = null;
-                    }
-                  }),
-                  onAdd: _saving ? null : _addCategory,
-                ),
-                const SizedBox(height: 12),
-                _treeField(
-                  label: 'Type',
-                  addLabel: 'Add Type',
-                  value: _styleId,
-                  enabled: _categoryId != null,
-                  items: [
-                    for (final s in _stylesForCategory)
-                      DropdownMenuItem(value: s.id, child: Text(s.name)),
-                  ],
-                  onChanged: (v) => setState(() {
-                    _styleId = v;
-                    if (_variantsForType.every((t) => t.id != _typeId)) {
-                      _typeId = null;
-                    }
-                  }),
-                  onAdd: _saving ? null : _addType,
-                ),
-                const SizedBox(height: 12),
-                _treeField(
-                  label: 'Variant',
-                  addLabel: 'Add Variant',
-                  value: _typeId,
-                  enabled: _styleId != null,
-                  items: [
-                    for (final t in _variantsForType)
-                      DropdownMenuItem(value: t.id, child: Text(t.name)),
-                  ],
-                  onChanged: (v) => setState(() => _typeId = v),
-                  onAdd: _saving ? null : _addVariant,
-                ),
-                const SizedBox(height: 16),
-                _photoSection(),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _descriptionController,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _specsController,
-                  decoration: const InputDecoration(
-                    labelText: 'Specifications',
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 3,
-                  maxLines: 6,
-                  textAlignVertical: TextAlignVertical.top,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _uomController,
-                  decoration: const InputDecoration(
-                    labelText: 'Unit of measure',
-                    border: OutlineInputBorder(),
-                    hintText: 'ea',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _treeField(
-                  label: 'Default supplier',
-                  addLabel: 'Add supplier',
-                  value: _defaultSupplierId,
-                  allowNone: true,
-                  items: [
-                    for (final s in _suppliers)
-                      DropdownMenuItem(value: s.id, child: Text(s.name)),
-                  ],
-                  onChanged: (v) => setState(() => _defaultSupplierId = v),
-                  onAdd: _saving
-                      ? null
-                      : () async {
-                          final created = await _addSupplierInPlace();
-                          if (created != null && mounted) {
-                            setState(() => _defaultSupplierId = created.id);
-                          }
-                        },
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Active'),
-                  value: _active,
-                  onChanged: (v) => setState(() => _active = v),
-                ),
-                const SizedBox(height: 8),
-                Row(
+    return PopScope<void>(
+      canPop: _edits == null || _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave(LeaveIntent.back);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Part'),
+          actions: [
+            if (_session != null)
+              TextButton(
+                onPressed: _saving ? null : () => _leave(LeaveIntent.discard),
+                child: const Text('Discard'),
+              ),
+            if (!_loading && _opening == null)
+              IconButton(
+                tooltip: 'Remove part',
+                onPressed: _saving ? null : _deletePart,
+                icon: const Icon(Icons.delete_outline),
+              ),
+            if (!_loading && _opening == null)
+              TextButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Save'),
+              ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _opening != null
+            ? EditOpeningPanel<PartEditSession>(
+                opening: _opening!,
+                onResume: _useSession,
+                onDiscard: _discardRecovery,
+              )
+            : AbsorbPointer(
+                absorbing: _saving,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  // ignore: deprecated_member_use
+                  cacheExtent: 4000, // keep Add Category/Type/Variant mounted
                   children: [
+                    if (_session case final session?)
+                      EditStatusBanner(status: session.status),
+                    TextField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Name',
+                        border: OutlineInputBorder(),
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 16),
                     Text(
-                      'Brands',
+                      'Tree location',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: _addVariance,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add variance'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Required. Add missing folders here. Type stays under Category; Variant stays under Type.',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                  ],
-                ),
-                const Text(
-                  'Variance lives under a brand. Each color / option has its own part number.',
-                ),
-                const SizedBox(height: 8),
-                if (_brandGroups.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('No brand — this is a general part'),
-                  )
-                else
-                  for (final group in _brandGroups)
-                    Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ExpansionTile(
-                        initiallyExpanded: true,
-                        title: Text(group.brandName),
-                        subtitle: const Text('Variance'),
-                        children: [
-                          for (final row in group.variances) ...[
-                            ListTile(
-                              dense: true,
-                              title: Text(
-                                row.version.varianceName.trim().isEmpty
-                                    ? row.version.mpn
-                                    : '${row.version.varianceName} · ${row.version.mpn}',
-                              ),
-                              subtitle: Text(
-                                row.version.isMain ? 'Main' : 'Option',
-                              ),
-                            ),
-                            for (final listing in row.listings)
-                              ListTile(
-                                dense: true,
-                                contentPadding:
-                                    const EdgeInsets.only(left: 32, right: 16),
-                                title: Text(listing.supplierName),
-                                subtitle: Text(
-                                  listing.listing.sku.trim().isEmpty
-                                      ? 'No SKU'
-                                      : 'SKU ${listing.listing.sku}',
-                                ),
-                              ),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton.icon(
-                                onPressed: () => _addListing(row.version),
-                                icon: const Icon(Icons.add),
-                                label: const Text('Add listing'),
-                              ),
-                            ),
-                          ],
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              onPressed: () =>
-                                  _addVariance(brandId: group.brandId),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Add variance'),
-                            ),
-                          ),
-                        ],
+                    const SizedBox(height: 8),
+                    _treeField(
+                      label: 'Category',
+                      addLabel: 'Add Category',
+                      value: _categoryId,
+                      items: [
+                        for (final c in _categories)
+                          DropdownMenuItem(value: c.id, child: Text(c.name)),
+                      ],
+                      onChanged: (v) => _change(() {
+                        _categoryId = v;
+                        if (_stylesForCategory.every((s) => s.id != _styleId)) {
+                          _styleId = null;
+                          _typeId = null;
+                        }
+                      }),
+                      onAdd: _saving ? null : _addCategory,
+                    ),
+                    const SizedBox(height: 12),
+                    _treeField(
+                      label: 'Type',
+                      addLabel: 'Add Type',
+                      value: _styleId,
+                      enabled: _categoryId != null,
+                      items: [
+                        for (final s in _stylesForCategory)
+                          DropdownMenuItem(value: s.id, child: Text(s.name)),
+                      ],
+                      onChanged: (v) => _change(() {
+                        _styleId = v;
+                        if (_variantsForType.every((t) => t.id != _typeId)) {
+                          _typeId = null;
+                        }
+                      }),
+                      onAdd: _saving ? null : _addType,
+                    ),
+                    const SizedBox(height: 12),
+                    _treeField(
+                      label: 'Variant',
+                      addLabel: 'Add Variant',
+                      value: _typeId,
+                      enabled: _styleId != null,
+                      items: [
+                        for (final t in _variantsForType)
+                          DropdownMenuItem(value: t.id, child: Text(t.name)),
+                      ],
+                      onChanged: (v) => _change(() => _typeId = v),
+                      onAdd: _saving ? null : _addVariant,
+                    ),
+                    const SizedBox(height: 16),
+                    _photoSection(),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _descriptionController,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        border: OutlineInputBorder(),
+                      ),
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _specsController,
+                      decoration: const InputDecoration(
+                        labelText: 'Specifications',
+                        border: OutlineInputBorder(),
+                      ),
+                      minLines: 3,
+                      maxLines: 6,
+                      textAlignVertical: TextAlignVertical.top,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _uomController,
+                      decoration: const InputDecoration(
+                        labelText: 'Unit of measure',
+                        border: OutlineInputBorder(),
+                        hintText: 'ea',
                       ),
                     ),
-              ],
-            ),
+                    const SizedBox(height: 12),
+                    _treeField(
+                      label: 'Default supplier',
+                      addLabel: 'Add supplier',
+                      value: _defaultSupplierId,
+                      allowNone: true,
+                      items: [
+                        for (final s in _suppliers)
+                          DropdownMenuItem(value: s.id, child: Text(s.name)),
+                      ],
+                      onChanged: (v) => _change(() => _defaultSupplierId = v),
+                      onAdd: _saving
+                          ? null
+                          : () async {
+                              final created = await _addSupplierInPlace();
+                              if (created != null && mounted) {
+                                _change(() => _defaultSupplierId = created.id);
+                              }
+                            },
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Active'),
+                      value: _active,
+                      onChanged: (v) => _change(() => _active = v),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          'Brands',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: _addVariance,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add variance'),
+                        ),
+                      ],
+                    ),
+                    const Text(
+                      'Variance lives under a brand. Each color / option has its own part number.',
+                    ),
+                    const SizedBox(height: 8),
+                    if (_brandGroups.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Text('No brand — this is a general part'),
+                      )
+                    else
+                      for (final group in _brandGroups)
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ExpansionTile(
+                            initiallyExpanded: true,
+                            title: Text(group.brandName),
+                            subtitle: const Text('Variance'),
+                            children: [
+                              for (final row in group.variances) ...[
+                                ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    row.version.varianceName.trim().isEmpty
+                                        ? row.version.mpn
+                                        : '${row.version.varianceName} · ${row.version.mpn}',
+                                  ),
+                                  subtitle: Text(
+                                    row.version.isMain ? 'Main' : 'Option',
+                                  ),
+                                ),
+                                for (final listing in row.listings)
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.only(
+                                      left: 32,
+                                      right: 16,
+                                    ),
+                                    title: Text(listing.supplierName),
+                                    subtitle: Text(
+                                      listing.listing.sku.trim().isEmpty
+                                          ? 'No SKU'
+                                          : 'SKU ${listing.listing.sku}',
+                                    ),
+                                  ),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton.icon(
+                                    onPressed: () => _addListing(row.version),
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Add listing'),
+                                  ),
+                                ),
+                              ],
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton.icon(
+                                  onPressed: () =>
+                                      _addVariance(brandId: group.brandId),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Add variance'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+      ),
     );
   }
 }
@@ -944,8 +1088,8 @@ class _VarianceDialogState extends State<_VarianceDialog> {
   void initState() {
     super.initState();
     _brands = List<Brand>.of(widget.brands);
-    _brandId = widget.initialBrandId ??
-        (_brands.isEmpty ? null : _brands.first.id);
+    _brandId =
+        widget.initialBrandId ?? (_brands.isEmpty ? null : _brands.first.id);
     _isMain = _existingForBrand(_brandId).isEmpty;
   }
 
@@ -1052,10 +1196,7 @@ class _VarianceDialogState extends State<_VarianceDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Add'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Add')),
       ],
     );
   }
@@ -1092,7 +1233,8 @@ class _ListingDialogState extends State<_ListingDialog> {
   void initState() {
     super.initState();
     _suppliers = List<Supplier>.of(widget.suppliers);
-    _supplierId = widget.initialSupplierId ??
+    _supplierId =
+        widget.initialSupplierId ??
         (_suppliers.isEmpty ? null : _suppliers.first.id);
   }
 
@@ -1129,7 +1271,8 @@ class _ListingDialogState extends State<_ListingDialog> {
         children: [
           DropdownButtonFormField<String>(
             // ignore: deprecated_member_use
-            value: _supplierId != null &&
+            value:
+                _supplierId != null &&
                     _suppliers.any((s) => s.id == _supplierId)
                 ? _supplierId
                 : null,
@@ -1164,12 +1307,8 @@ class _ListingDialogState extends State<_ListingDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Add'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Add')),
       ],
     );
   }
 }
-

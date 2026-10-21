@@ -8,6 +8,7 @@ import '../company/company_store_markers.dart';
 import '../pin/pin_service.dart';
 import 'catalog_tree.dart';
 import 'part_photo_store.dart';
+import 'part_write_companion.dart';
 
 class CatalogRepository {
   CatalogRepository(this._db, this._pin, this._deviceId);
@@ -51,9 +52,11 @@ class CatalogRepository {
     required Uint8List bytes,
     PartPhotoStore store = const PartPhotoStore(),
     Directory? root,
+    PartWriteCompanion? companion,
   }) async {
     await _pin.requireUnlocked();
     return BackupIo.waitAndRun(() async {
+      companion?.validatePhotoOperation();
       final part = await _db.partsDao.getPart(partId);
       final previous = part?.photoPath;
       final stored = await store.saveForPart(
@@ -61,7 +64,13 @@ class CatalogRepository {
         bytes: bytes,
         root: root,
       );
-      await _db.partsDao.setPhotoPath(partId, stored);
+      await legacyBusinessWrite(_db, () async {
+        await _pin.requireUnlocked();
+        await companion?.beforePhotoReferenceWrite(_db, partId);
+        await _db.partsDao.setPhotoPath(partId, stored);
+        await companion?.afterPhotoReferenceWrite(_db, partId);
+      });
+      companion?.photoReferenceCommitted();
       if (previous != null && previous.isNotEmpty && previous != stored) {
         await store.deleteAt(previous, root: root);
       }
@@ -73,12 +82,20 @@ class CatalogRepository {
     String partId, {
     PartPhotoStore store = const PartPhotoStore(),
     Directory? root,
+    PartWriteCompanion? companion,
   }) async {
     await _pin.requireUnlocked();
     await BackupIo.waitAndRun(() async {
+      companion?.validatePhotoOperation();
       final part = await _db.partsDao.getPart(partId);
       final existing = part?.photoPath;
-      await _db.partsDao.setPhotoPath(partId, null);
+      await legacyBusinessWrite(_db, () async {
+        await _pin.requireUnlocked();
+        await companion?.beforePhotoReferenceWrite(_db, partId);
+        await _db.partsDao.setPhotoPath(partId, null);
+        await companion?.afterPhotoReferenceWrite(_db, partId);
+      });
+      companion?.photoReferenceCommitted();
       if (existing != null && existing.isNotEmpty) {
         await store.deleteAt(existing, root: root);
       }

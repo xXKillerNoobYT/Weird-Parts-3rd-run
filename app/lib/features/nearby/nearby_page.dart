@@ -157,7 +157,7 @@ class _NearbyPageState extends State<NearbyPage> {
       body:
           'Copies jobs, catalog, warehouse locations, inventory and its history, '
           'and photos onto ${peer.label}. That replaces '
-          'the shop over there. Not two-way sync.',
+          'the shop and unfinished edits over there. Not two-way sync.',
       confirmLabel: 'Send this shop',
       destructive: true,
     );
@@ -189,7 +189,7 @@ class _NearbyPageState extends State<NearbyPage> {
       body:
           'Replaces catalog, jobs, warehouse locations, inventory and its '
           'history, and photos on this device with the shop from '
-          '${offer.sourceName} (${offer.summary}). '
+          '${offer.sourceName} (${offer.summary}). Unfinished edits on this device are replaced too. '
           'Cannot undo. This device keeps its own id.',
       confirmLabel: 'Accept shop',
     );
@@ -331,7 +331,7 @@ class NearbyView extends StatelessWidget {
             leading: const Icon(Icons.download_outlined),
             title: Text('Incoming shop from ${state.incoming!.sourceName}'),
             subtitle: Text(
-              '${state.incoming!.summary}. Accept replaces the shop on this device.',
+              '${state.incoming!.summary}. Accept replaces the shop and unfinished edits on this device.',
             ),
           ),
           OverflowBar(

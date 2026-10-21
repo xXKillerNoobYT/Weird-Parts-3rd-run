@@ -33,6 +33,7 @@ class JobsRepository {
 
   Future<String> addLine({
     required String jobId,
+    String? reservedLineId,
     String? partId,
     String? brandVersionId,
     String? customName,
@@ -43,12 +44,15 @@ class JobsRepository {
     String? notes,
     List<({String supplierId, double qty})>? splits,
   }) async {
+    if (reservedLineId != null && reservedLineId.trim().isEmpty) {
+      throw StateError('Reserved Job line ID must not be empty');
+    }
     final savedSplits = splits == null ? null : List.of(splits);
     _requireQuantities(neededQty, shopPullQty, savedSplits);
     return legacyBusinessWrite(_db, () async {
       if (await getJob(jobId) == null) throw StateError('Job no longer exists');
       final id = await _db.jobsDao.insertJobLine(
-        id: newId(),
+        id: reservedLineId ?? newId(),
         jobId: jobId,
         partId: partId,
         brandVersionId: brandVersionId,
