@@ -25,6 +25,7 @@ class PartDetailPage extends StatefulWidget {
   State<PartDetailPage> createState() => _PartDetailPageState();
 }
 
+
 class _BrandGroup {
   _BrandGroup({required this.brandId, required this.brandName});
 
@@ -57,6 +58,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _specsController = TextEditingController();
   final _uomController = TextEditingController();
 
   List<Supplier> _suppliers = [];
@@ -93,6 +95,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
+    _specsController.dispose();
     _uomController.dispose();
     super.dispose();
   }
@@ -121,6 +124,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
     setState(() {
       _nameController.text = part.name;
       _descriptionController.text = part.description;
+      _specsController.text = part.specs;
       _uomController.text = part.uom;
       _defaultSupplierId = part.defaultSupplierId;
       _categoryId = part.categoryId;
@@ -543,6 +547,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
         categoryId: _categoryId,
         styleId: _styleId,
         typeId: _typeId,
+        specs: _specsController.text,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -766,6 +771,17 @@ class _PartDetailPageState extends State<PartDetailPage> {
                     border: OutlineInputBorder(),
                   ),
                   maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _specsController,
+                  decoration: const InputDecoration(
+                    labelText: 'Specifications',
+                    border: OutlineInputBorder(),
+                  ),
+                  minLines: 3,
+                  maxLines: 6,
+                  textAlignVertical: TextAlignVertical.top,
                 ),
                 const SizedBox(height: 12),
                 TextField(

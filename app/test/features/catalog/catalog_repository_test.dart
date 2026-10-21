@@ -109,6 +109,87 @@ void main() {
     expect(part.revision, 2);
   });
 
+  test(
+    'part Specifications update, omission preserve, and empty clears',
+    () async {
+      final id = await createValidPart(name: 'Specifications part');
+      await db.partsDao.setPhotoPath(id, 'synthetic-photo.jpg');
+      final original = (await catalog.getPart(id))!;
+
+      Future<void> update({String? name, String? specs}) => catalog.updatePart(
+        partId: id,
+        name: name ?? original.name,
+        description: original.description,
+        uom: original.uom,
+        defaultSupplierId: original.defaultSupplierId,
+        active: original.active,
+        categoryId: original.categoryId,
+        styleId: original.styleId,
+        typeId: original.typeId,
+        specs: specs,
+      );
+
+      await update(specs: '120 V\n20 A');
+      await update(name: 'Renamed part');
+      var saved = (await catalog.getPart(id))!;
+      expect(saved.specs, '120 V\n20 A');
+      expect(saved.name, 'Renamed part');
+      expect(saved.photoPath, 'synthetic-photo.jpg');
+      expect(saved.categoryId, original.categoryId);
+      expect(saved.styleId, original.styleId);
+      expect(saved.typeId, original.typeId);
+
+      await update(specs: '');
+      saved = (await catalog.getPart(id))!;
+      expect(saved.specs, isEmpty);
+    },
+  );
+
+  test('locked PIN and company marker refuse Specifications changes', () async {
+    final id = await createValidPart(name: 'Protected specifications');
+    final original = (await catalog.getPart(id))!;
+    Future<void> updateSpecs(String value) => catalog.updatePart(
+      partId: id,
+      name: original.name,
+      description: original.description,
+      uom: original.uom,
+      defaultSupplierId: original.defaultSupplierId,
+      active: original.active,
+      categoryId: original.categoryId,
+      styleId: original.styleId,
+      typeId: original.typeId,
+      specs: value,
+    );
+
+    await catalog.updatePart(
+      partId: id,
+      name: original.name,
+      description: original.description,
+      uom: original.uom,
+      defaultSupplierId: original.defaultSupplierId,
+      active: original.active,
+      categoryId: original.categoryId,
+      styleId: original.styleId,
+      typeId: original.typeId,
+      specs: 'Existing specifications',
+    );
+    final beforeRefusals = (await catalog.getPart(id))!;
+    await pin.setPin('2468');
+    await expectLater(updateSpecs('Blocked by PIN'), throwsStateError);
+    expect(await catalog.getPart(id), beforeRefusals);
+
+    await pin.unlock('2468');
+    await db.customStatement(
+      'INSERT INTO company_join_events (request_id, ordinal, kind, evidence_bytes) VALUES (?, ?, ?, ?)',
+      ['synthetic-specs-blocker', 1, 'blocked', 'synthetic-refusal-marker'],
+    );
+    await expectLater(
+      updateSpecs('Blocked by company marker'),
+      throwsStateError,
+    );
+    expect(await catalog.getPart(id), beforeRefusals);
+  });
+
   test('variance write blocked when PIN set and locked', () async {
     await pin.setPin('2468');
     final partId = await db.partsDao.insertGeneralPart(

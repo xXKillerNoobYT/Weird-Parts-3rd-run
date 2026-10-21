@@ -167,6 +167,7 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
     String? categoryId,
     String? styleId,
     String? typeId,
+    String? specs,
   }) async {
     await legacyBusinessWrite(db, () async {
       final now = DateTime.now().toUtc();
@@ -180,6 +181,7 @@ class PartsDao extends DatabaseAccessor<AppDatabase> with _$PartsDaoMixin {
           categoryId: Variable(categoryId),
           styleId: Variable(styleId),
           typeId: Variable(typeId),
+          specs: specs == null ? null : Variable(specs),
           modifiedAt: Variable(now),
           revision: parts.revision + const Constant(1),
         ),

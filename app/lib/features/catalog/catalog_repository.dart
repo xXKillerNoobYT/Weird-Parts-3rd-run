@@ -151,6 +151,7 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
+    String? specs,
   }) async {
     await _pin.requireUnlocked();
     await legacyBusinessWrite(_db, () async {
@@ -170,6 +171,7 @@ class CatalogRepository {
         categoryId: categoryId,
         styleId: styleId,
         typeId: typeId,
+        specs: specs,
       );
     });
   }

@@ -9,6 +9,7 @@ import 'package:wired_parts/features/catalog/catalog_page.dart';
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
 import 'package:wired_parts/features/catalog/catalog_tree.dart';
 import 'package:wired_parts/features/catalog/part_details_dialog.dart';
+import 'package:wired_parts/features/catalog/part_detail_page.dart';
 import 'package:wired_parts/features/jobs/job_line_editor.dart';
 import 'package:wired_parts/features/jobs/jobs_repository.dart';
 import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
@@ -453,13 +454,28 @@ void main() {
         name: 'Outlet',
       );
       final variant = await folders.createType(styleId: style, name: 'GFI');
+      final supplier = await folders.createSupplier('Synthetic supply');
       final id = await CatalogRepository(first, firstPin, firstDevice)
           .createGeneralPart(
             name: 'Persistent first part',
+            defaultSupplierId: supplier,
             categoryId: category,
             styleId: style,
             typeId: variant,
           );
+      await first.partsDao.setPhotoPath(id, 'synthetic-photo.jpg');
+      await CatalogRepository(first, firstPin, firstDevice).updatePart(
+        partId: id,
+        name: 'Persistent first part',
+        description: '',
+        uom: 'ea',
+        defaultSupplierId: supplier,
+        active: true,
+        categoryId: category,
+        styleId: style,
+        typeId: variant,
+        specs: 'Voltage: 120 V\nCurrent: 20 A',
+      );
       await first.close();
       db = AppDatabase.forTesting(NativeDatabase(file));
       final reopened = db;
@@ -470,6 +486,28 @@ void main() {
         expect(parts.single.categoryId, category);
         expect(parts.single.styleId, style);
         expect(parts.single.typeId, variant);
+        expect(parts.single.specs, 'Voltage: 120 V\nCurrent: 20 A');
+        expect(parts.single.photoPath, 'synthetic-photo.jpg');
+        expect(parts.single.defaultSupplierId, supplier);
+        await CatalogRepository(
+          reopened,
+          PinService(reopened.settingsDao),
+          firstDevice,
+        ).updatePart(
+          partId: id,
+          name: parts.single.name,
+          description: parts.single.description,
+          uom: parts.single.uom,
+          defaultSupplierId: supplier,
+          active: parts.single.active,
+          categoryId: category,
+          styleId: style,
+          typeId: variant,
+        );
+        expect(
+          (await reopened.partsDao.getPart(id))!.specs,
+          'Voltage: 120 V\nCurrent: 20 A',
+        );
         expect(
           (await reopened.taxonomyDao.listStyles(categoryId: category))
               .single
@@ -488,4 +526,56 @@ void main() {
       }
     },
   );
+
+  testWidgets('Part detail can edit and clear Specifications offline', (
+    WidgetTester tester,
+  ) async {
+    final h = await hierarchy();
+    final supplierId = await maintenance.createSupplier('Synthetic supply');
+    final id = await catalog.createGeneralPart(
+      name: 'Offline part',
+      defaultSupplierId: supplierId,
+      categoryId: h.category,
+      styleId: h.style,
+      typeId: h.variant,
+    );
+    await catalog.updatePart(
+      partId: id,
+      name: 'Offline part',
+      description: 'Known description',
+      uom: 'box',
+      defaultSupplierId: supplierId,
+      active: true,
+      categoryId: h.category,
+      styleId: h.style,
+      typeId: h.variant,
+    );
+
+    await mount(tester, PartDetailPage(partId: id));
+    final specs = field('Specifications');
+    expect(specs, findsOneWidget);
+    await tester.enterText(specs, '120 V\n20 A');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    var saved = await catalog.getPart(id);
+    expect(saved!.specs, '120 V\n20 A');
+    expect(saved.id, id);
+    expect(saved.name, 'Offline part');
+    expect(saved.description, 'Known description');
+    expect(saved.uom, 'box');
+    expect(saved.defaultSupplierId, supplierId);
+    expect(saved.categoryId, h.category);
+    expect(saved.styleId, h.style);
+    expect(saved.typeId, h.variant);
+
+    await tester.enterText(specs, '');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    saved = await catalog.getPart(id);
+    expect(saved!.specs, isEmpty);
+    expect(saved.categoryId, h.category);
+    expect(saved.styleId, h.style);
+    expect(saved.typeId, h.variant);
+  });
 }
