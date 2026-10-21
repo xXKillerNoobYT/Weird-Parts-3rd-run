@@ -71,6 +71,8 @@ Map<String, Object?> _control(String raw) {
     final result = _strings(value['result']);
     final expected = command == 'part-save'
         ? {'part'}
+        : command == 'job-create'
+        ? {'job', 'name'}
         : command == 'line-save' || command == 'line-remove'
         ? {'line'}
         : command.startsWith('line-promote/')
@@ -93,6 +95,7 @@ Map<String, Object?> _control(String raw) {
 }
 
 Map<String, Object?> _inputJson(Object input) => switch (input) {
+  NewJobInput j => {'name': j.nameText},
   PartInput p => {
     'name': p.nameText,
     'description': p.descriptionText,
@@ -123,6 +126,10 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
 };
 Object _parseInput(String kind, Object? value) {
   final m = _map(value);
+  if (kind == 'job-new') {
+    _keys(m, {'name'});
+    return NewJobInput(nameText: _text(m['name']));
+  }
   if (kind == 'part') {
     _keys(m, {
       'name',
@@ -189,6 +196,7 @@ SplitInput _parseSplit(Object? value) {
 String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
   if (target['kind'] == 'part') return 'part/${segment('id')}';
+  if (target['kind'] == 'job-new') return 'job-new';
   return target.containsKey('line')
       ? 'job-line/${segment('job')}/${segment('line')}'
       : 'job-line-new/${segment('job')}';
@@ -245,6 +253,10 @@ final class _DraftRecord {
     if (target['kind'] == 'part') {
       if (target.length != 2 || !target.containsKey('id')) {
         throw const FormatException('Invalid Part target');
+      }
+    } else if (target['kind'] == 'job-new') {
+      if (target.length != 2 || !target.containsKey('reserved')) {
+        throw const FormatException('Invalid new Job target');
       }
     } else if (target['kind'] == 'line') {
       if (!target.containsKey('job') ||
@@ -353,6 +365,11 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'job-new') {
+      final job = await _row('jobs', target['reserved']!);
+      if (job != null) throw StateError('Reserved Job ID is already in use');
+      return {'job': _digest(job)};
+    }
     if (target['kind'] == 'part') {
       final row = await _row('parts', target['id']!);
       if (row == null || row['deleted_at'] != null) {
@@ -394,6 +411,8 @@ class EditDrafts {
     }
 
     switch (input) {
+      case NewJobInput():
+        break;
       case PartInput p:
         add('categories', p.categoryId);
         add('styles', p.styleId);
@@ -483,6 +502,54 @@ class EditDrafts {
     }
   }
 
+  Future<EditOpening<NewJobEditSession>> openNewJob() =>
+      _open<NewJobEditSession>(
+        {'kind': 'job-new', 'reserved': newId()},
+        () async => const NewJobInput(nameText: ''),
+        (record) => NewJobEditSession._(this, record),
+        onCommitted: _createdJob,
+      );
+
+  Future<NewJobCreated> _createdJob(String raw) async {
+    if (_closed || _quiescing) throw StateError('Job storage is changing');
+    final control = _control(raw);
+    if (control['phase'] != 'committed' || control['command'] != 'job-create') {
+      throw const FormatException('Unsupported created Job receipt');
+    }
+    final result = _strings(control['result']);
+    final id = result['job']!;
+    final name = result['name']!;
+    Future<void> validate() async {
+      if (_digest(_origin()) != _digest(control['origin'])) {
+        throw StateError('Created Job belongs to another installation');
+      }
+      final job = await _row('jobs', id);
+      if (job == null || job['deleted_at'] != null || job['name'] != name) {
+        throw StateError('The created Job changed or is no longer available');
+      }
+    }
+
+    await validate();
+    return NewJobCreated._(
+      id: id,
+      name: name,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing) throw StateError('Job storage is changing');
+        await _db.transaction(() async {
+          const key = '${editDraftPrefix}job-new/control';
+          final current = await _read(key);
+          if (current == null) return;
+          if (current != raw ||
+              await _read('${editDraftPrefix}job-new/input') != null) {
+            throw StateError('A newer Job edit replaced this receipt');
+          }
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
+  }
+
   Future<EditOpening<PartEditSession>> openPart(String partId) =>
       _open<PartEditSession>({'kind': 'part', 'id': partId}, () async {
         final p = await _db.partsDao.getPart(partId);
@@ -546,8 +613,9 @@ class EditDrafts {
   Future<EditOpening<S>> _open<S extends _EditSession>(
     Map<String, String> target,
     Future<Object> Function() initial,
-    S Function(_DraftRecord) create,
-  ) => _queue(() async {
+    S Function(_DraftRecord) create, {
+    Future<EditOpening<S>> Function(String raw)? onCommitted,
+  }) => _queue(() async {
     final slot = _slot(target);
     final inputKey = '$editDraftPrefix$slot/input';
     final controlKey = '$editDraftPrefix$slot/control';
@@ -622,6 +690,7 @@ class EditDrafts {
         if (control['phase'] != 'committed') {
           throw const FormatException('Unfinished edit input is missing');
         }
+        if (onCommitted != null) return await onCommitted(rawControl);
       } catch (e) {
         return BlockedEdit<S>(
           reason: e.toString(),

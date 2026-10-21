@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../data/app_database.dart';
+import '../edit_drafts/edit_drafts.dart';
 import 'job_detail_page.dart';
 import 'jobs_repository.dart';
+import 'new_job_dialog.dart';
 
 class JobsPage extends StatefulWidget {
   const JobsPage({super.key});
@@ -36,6 +38,7 @@ class _JobsPageState extends State<JobsPage> {
   }
 
   Future<void> _reload() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     final all = await _jobs.listActiveJobs();
     if (!mounted) return;
@@ -58,24 +61,32 @@ class _JobsPageState extends State<JobsPage> {
   }
 
   Future<void> _createJob() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => const _NewJobNameDialog(),
-    );
-    if (name == null || name.isEmpty) return;
-
-    late final String id;
-    try {
-      id = await _jobs.createJob(name);
-    } on StateError catch (error) {
-      _showWriteRefusal(error);
+    final edits = AppScope.of(context).edits;
+    if (edits == null) {
+      _showWriteRefusal(StateError('Unfinished edits are unavailable'));
       return;
     }
+    final created = await showDialog<NewJobCreated>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => NewJobDialog(edits: edits),
+    );
+    if (created == null) return;
+    if (!mounted) return;
     await _reload();
     if (!mounted) return;
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => JobDetailPage(jobId: id)));
+    final detailRoute = Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => JobDetailPage(jobId: created.id)),
+    );
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      await created.acknowledge();
+    } catch (_) {
+      _showWriteRefusal(
+        StateError('Job saved. Its completion confirmation is still pending.'),
+      );
+    }
+    await detailRoute;
     await _reload();
   }
 
@@ -183,55 +194,6 @@ class _JobsPageState extends State<JobsPage> {
         tooltip: 'New job',
         child: const Icon(Icons.add),
       ),
-    );
-  }
-}
-
-/// Owns its [TextEditingController] so it is not disposed while the dialog
-/// route is still animating out (that corrupts overlays / job detail chrome).
-class _NewJobNameDialog extends StatefulWidget {
-  const _NewJobNameDialog();
-
-  @override
-  State<_NewJobNameDialog> createState() => _NewJobNameDialogState();
-}
-
-class _NewJobNameDialogState extends State<_NewJobNameDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final v = _controller.text.trim();
-    if (v.isEmpty) return;
-    Navigator.of(context).pop(v);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('New job'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(
-          labelText: 'Name',
-          hintText: 'Job name',
-        ),
-        textCapitalization: TextCapitalization.sentences,
-        onSubmitted: (_) => _submit(),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Create')),
-      ],
     );
   }
 }

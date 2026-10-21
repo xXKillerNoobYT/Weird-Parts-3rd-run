@@ -8,10 +8,15 @@ class JobsRepository {
   final AppDatabase _db;
   final String _deviceId;
 
-  Future<String> createJob(String name) {
+  Future<String> createJob(String name, {String? reservedJobId}) async {
+    final savedName = name.trim();
+    if (savedName.isEmpty) throw StateError('Job name is required');
+    if (reservedJobId != null && reservedJobId.trim().isEmpty) {
+      throw StateError('Reserved Job ID must not be empty');
+    }
     return _db.jobsDao.insertJob(
-      id: newId(),
-      name: name,
+      id: reservedJobId ?? newId(),
+      name: savedName,
       deviceId: _deviceId,
     );
   }
@@ -25,8 +30,7 @@ class JobsRepository {
   Future<List<JobLine>> listLinesForJob(String jobId) =>
       _db.jobsDao.listLinesForJob(jobId);
 
-  Future<JobLine?> getJobLine(String lineId) =>
-      _db.jobsDao.getJobLine(lineId);
+  Future<JobLine?> getJobLine(String lineId) => _db.jobsDao.getJobLine(lineId);
 
   Future<List<OrderSplit>> orderSplitsForLine(String lineId) =>
       _db.jobsDao.orderSplitsForLine(lineId);

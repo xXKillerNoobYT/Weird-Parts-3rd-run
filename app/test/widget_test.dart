@@ -10,6 +10,7 @@ import 'package:wired_parts/app.dart';
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
+import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
@@ -31,6 +32,7 @@ Future<void> _pumpShell(
   required AppDatabase db,
   required PinService pin,
   required String deviceId,
+  EditDrafts? edits,
   Future<void> Function()? wipeLocalData,
 }) async {
   tester.view.physicalSize = const Size(800, 1600);
@@ -44,6 +46,7 @@ Future<void> _pumpShell(
       db: db,
       pin: pin,
       deviceId: deviceId,
+      edits: edits,
       wipeLocalData: wipeLocalData ?? () async {},
       restoreFromBackup: (_, _) async {},
       child: const RepaintBoundary(
@@ -1143,7 +1146,13 @@ void main() {
     final deviceId = await db.settingsDao.ensureDeviceId();
     final pin = PinService(db.settingsDao);
 
-    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _pumpShell(
+      tester,
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      edits: EditDrafts(db: db, pin: pin, deviceId: deviceId),
+    );
 
     await tester.tap(find.byTooltip('New job'));
     await tester.pumpAndSettle();
@@ -1153,6 +1162,13 @@ void main() {
         matching: find.byType(TextField),
       ),
       'Test #1',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Create'))
+          .onPressed,
+      isNotNull,
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Create'));
     await tester.pumpAndSettle();

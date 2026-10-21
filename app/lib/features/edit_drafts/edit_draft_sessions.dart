@@ -238,6 +238,31 @@ abstract class _EditSession {
   }
 }
 
+class NewJobEditSession extends _EditSession {
+  NewJobEditSession._(super.owner, super.record);
+  NewJobInput get initial => _record.input as NewJobInput;
+  void replace(NewJobInput input) => _replace(input);
+
+  Future<NewJobCreated> save() async {
+    final result = await _settle('job-create', () async {
+      final name = initial.nameText.trim();
+      final id = await JobsRepository(
+        _owner._db,
+        _owner._deviceId,
+      ).createJob(name, reservedJobId: _record.target['reserved']!);
+      return {'job': id, 'name': name};
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) throw StateError('Created Job receipt is unavailable');
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer Job edit replaced this receipt');
+    }
+    return _owner._createdJob(raw);
+  }
+}
+
 class PartEditSession extends _EditSession {
   PartEditSession._(super.owner, super.record);
   PartInput get initial => _record.input as PartInput;

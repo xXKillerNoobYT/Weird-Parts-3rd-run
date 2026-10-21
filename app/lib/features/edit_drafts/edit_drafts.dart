@@ -52,6 +52,11 @@ final class EditStatus {
   final Object? error;
 }
 
+final class NewJobInput {
+  const NewJobInput({required this.nameText});
+  final String nameText;
+}
+
 final class PartInput {
   const PartInput({
     required this.nameText,
@@ -120,6 +125,18 @@ final class BlockedEdit<S> extends EditOpening<S> {
   final String? preservedInput;
   final Future<void> Function() _discard;
   Future<void> discard() => _discard();
+}
+
+final class NewJobCreated extends EditOpening<NewJobEditSession> {
+  NewJobCreated._({
+    required this.id,
+    required this.name,
+    required this._acknowledge,
+  });
+
+  final String id, name;
+  final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
 }
 
 final class PartSaved {
