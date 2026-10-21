@@ -33,8 +33,38 @@ void main() {
     await db.close();
   });
 
+  Future<String> createValidPart({
+    required String name,
+    String? defaultSupplierId,
+  }) async {
+    final category = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Synthetic category',
+      deviceId: deviceId,
+    );
+    final style = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: category,
+      name: 'Synthetic type',
+      deviceId: deviceId,
+    );
+    final variant = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: style,
+      name: 'Synthetic variant',
+      deviceId: deviceId,
+    );
+    return catalog.createGeneralPart(
+      name: name,
+      defaultSupplierId: defaultSupplierId,
+      categoryId: category,
+      styleId: style,
+      typeId: variant,
+    );
+  }
+
   test('create part allowed when no PIN set', () async {
-    final id = await catalog.createGeneralPart(name: 'Valve');
+    final id = await createValidPart(name: 'Valve');
     final part = await catalog.getPart(id);
     expect(part!.name, 'Valve');
   });
@@ -56,10 +86,11 @@ void main() {
     await pin.setPin('2468');
     await pin.unlock('2468');
 
-    final id = await catalog.createGeneralPart(
+    final id = await createValidPart(
       name: 'Relay',
       defaultSupplierId: supplierId,
     );
+    final original = (await catalog.getPart(id))!;
     await catalog.updatePart(
       partId: id,
       name: 'Relay 24V',
@@ -67,10 +98,9 @@ void main() {
       uom: 'ea',
       defaultSupplierId: supplierId,
       active: true,
-      categoryId: null,
-      styleId: null,
-      typeId: null,
-      requireNestedTaxonomy: false,
+      categoryId: original.categoryId,
+      styleId: original.styleId,
+      typeId: original.typeId,
     );
     final part = await catalog.getPart(id);
     expect(part!.name, 'Relay 24V');
@@ -110,7 +140,7 @@ void main() {
     img.fill(raw, color: img.ColorRgb8(9, 9, 9));
     final bytes = Uint8List.fromList(img.encodePng(raw));
 
-    final id = await catalog.createGeneralPart(name: 'With photo');
+    final id = await createValidPart(name: 'With photo');
     final stored = await catalog.attachPhoto(
       partId: id,
       bytes: bytes,
@@ -137,7 +167,7 @@ void main() {
       final bytes = Uint8List.fromList(
         img.encodePng(img.Image(width: 8, height: 8)),
       );
-      final id = await catalog.createGeneralPart(name: 'Swap photo');
+      final id = await createValidPart(name: 'Swap photo');
       final first = await catalog.attachPhoto(
         partId: id,
         bytes: bytes,
@@ -171,7 +201,7 @@ void main() {
   test('delete part is PIN-gated and tombstones the row', () async {
     final dir = Directory.systemTemp.createTempSync('wp-del-tombstone-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final id = await catalog.createGeneralPart(name: 'Scrap');
+    final id = await createValidPart(name: 'Scrap');
     await pin.setPin('2468');
     await expectLater(
       catalog.deletePart(id, root: dir),
@@ -194,7 +224,7 @@ void main() {
     final bytes = Uint8List.fromList(
       img.encodePng(img.Image(width: 8, height: 8)),
     );
-    final id = await catalog.createGeneralPart(name: 'With photo');
+    final id = await createValidPart(name: 'With photo');
     final stored = await catalog.attachPhoto(
       partId: id,
       bytes: bytes,
@@ -256,7 +286,7 @@ void main() {
   test('deleted part stays off the catalog but job lines remain', () async {
     final dir = Directory.systemTemp.createTempSync('wp-del-jobline-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final partId = await catalog.createGeneralPart(name: 'On a job');
+    final partId = await createValidPart(name: 'On a job');
     final jobId = await db.jobsDao.insertJob(
       id: newId(),
       name: 'Job',
@@ -277,48 +307,48 @@ void main() {
     expect(await catalog.countJobLinesForPart(partId), 1);
   });
 
-  test(
-    'create general part with nested required refuses empty folders',
-    () async {
-      await expectLater(
-        catalog.createGeneralPart(name: 'Unfiled', requireNestedTaxonomy: true),
-        throwsA(isA<StateError>()),
-      );
+  test('create general part refuses empty folders', () async {
+    await expectLater(
+      catalog.createGeneralPart(name: 'Unfiled'),
+      throwsA(isA<StateError>()),
+    );
 
-      final cat = await db.taxonomyDao.insertCategory(
-        id: newId(),
-        name: 'Outlet',
-        deviceId: deviceId,
-      );
-      final type = await db.taxonomyDao.insertStyle(
-        id: newId(),
-        categoryId: cat,
-        name: 'Decora',
-        deviceId: deviceId,
-      );
-      final variant = await db.taxonomyDao.insertType(
-        id: newId(),
-        styleId: type,
-        name: 'GFI',
-        deviceId: deviceId,
-      );
-      final id = await catalog.createGeneralPart(
-        name: 'Decora GFI',
-        categoryId: cat,
-        styleId: type,
-        typeId: variant,
-        requireNestedTaxonomy: true,
-      );
-      final part = await catalog.getPart(id);
-      expect(part!.name, 'Decora GFI');
-      expect(part.categoryId, cat);
-      expect(part.styleId, type);
-      expect(part.typeId, variant);
-    },
-  );
+    final cat = await db.taxonomyDao.insertCategory(
+      id: newId(),
+      name: 'Outlet',
+      deviceId: deviceId,
+    );
+    final type = await db.taxonomyDao.insertStyle(
+      id: newId(),
+      categoryId: cat,
+      name: 'Decora',
+      deviceId: deviceId,
+    );
+    final variant = await db.taxonomyDao.insertType(
+      id: newId(),
+      styleId: type,
+      name: 'GFI',
+      deviceId: deviceId,
+    );
+    final id = await catalog.createGeneralPart(
+      name: 'Decora GFI',
+      categoryId: cat,
+      styleId: type,
+      typeId: variant,
+    );
+    final part = await catalog.getPart(id);
+    expect(part!.name, 'Decora GFI');
+    expect(part.categoryId, cat);
+    expect(part.styleId, type);
+    expect(part.typeId, variant);
+  });
 
   test('update part requires nested category type variant', () async {
-    final id = await catalog.createGeneralPart(name: 'Unfiled');
+    final id = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Unfiled',
+      deviceId: deviceId,
+    );
     await expectLater(
       catalog.updatePart(
         partId: id,
@@ -390,7 +420,11 @@ void main() {
       name: 'Single pole',
       deviceId: deviceId,
     );
-    final id = await catalog.createGeneralPart(name: 'Mismatch');
+    final id = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Mismatch',
+      deviceId: deviceId,
+    );
     await expectLater(
       catalog.updatePart(
         partId: id,
@@ -430,7 +464,11 @@ void main() {
       name: 'Tamper resistant',
       deviceId: deviceId,
     );
-    final id = await catalog.createGeneralPart(name: 'Crossed');
+    final id = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Crossed',
+      deviceId: deviceId,
+    );
     await expectLater(
       catalog.updatePart(
         partId: id,
@@ -447,9 +485,13 @@ void main() {
   });
 
   test(
-    'brand version before nested save still allows taxonomy update',
+    'legacy unassigned part with brand version can recover its hierarchy',
     () async {
-      final id = await catalog.createGeneralPart(name: 'Decora GFI');
+      final id = await db.partsDao.insertGeneralPart(
+        id: newId(),
+        name: 'Decora GFI',
+        deviceId: deviceId,
+      );
       final cat = await db.taxonomyDao.insertCategory(
         id: newId(),
         name: 'Outlet',
@@ -517,7 +559,7 @@ void main() {
         name: 'Leviton',
         deviceId: deviceId,
       );
-      final partId = await catalog.createGeneralPart(name: 'Decora outlet');
+      final partId = await createValidPart(name: 'Decora outlet');
       final bvId = await catalog.createBrandVersion(
         partId: partId,
         brandId: brandId,

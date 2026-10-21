@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../../core/new_id.dart';
 import '../../data/app_database.dart';
 import '../backup/backup_store.dart';
+import '../company/company_store_markers.dart';
 import '../pin/pin_service.dart';
 import 'catalog_tree.dart';
 import 'part_photo_store.dart';
@@ -90,25 +91,27 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
-    bool requireNestedTaxonomy = false,
   }) async {
     await _pin.requireUnlocked();
-    if (requireNestedTaxonomy) {
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) throw StateError('Part name is required');
+    return legacyBusinessWrite(_db, () async {
       await _requireNestedTaxonomy(
         categoryId: categoryId,
         styleId: styleId,
         typeId: typeId,
       );
-    }
-    return _db.partsDao.insertGeneralPart(
-      id: newId(),
-      name: name,
-      deviceId: _deviceId,
-      defaultSupplierId: defaultSupplierId,
-      categoryId: categoryId,
-      styleId: styleId,
-      typeId: typeId,
-    );
+      await _pin.requireUnlocked();
+      return _db.partsDao.insertGeneralPart(
+        id: newId(),
+        name: trimmedName,
+        deviceId: _deviceId,
+        defaultSupplierId: defaultSupplierId,
+        categoryId: categoryId,
+        styleId: styleId,
+        typeId: typeId,
+      );
+    });
   }
 
   Future<void> _requireNestedTaxonomy({
@@ -123,6 +126,10 @@ class CatalogRepository {
         typeId == null ||
         typeId.isEmpty) {
       throw StateError('Category, Type, and Variant are required');
+    }
+    final categories = await _db.taxonomyDao.listCategories();
+    if (!categories.any((c) => c.id == categoryId)) {
+      throw StateError('Category must exist');
     }
     final styles = await _db.taxonomyDao.listStyles(categoryId: categoryId);
     if (!styles.any((s) => s.id == styleId)) {
@@ -144,27 +151,27 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
-    bool requireNestedTaxonomy = true,
   }) async {
     await _pin.requireUnlocked();
-    if (requireNestedTaxonomy) {
+    await legacyBusinessWrite(_db, () async {
       await _requireNestedTaxonomy(
         categoryId: categoryId,
         styleId: styleId,
         typeId: typeId,
       );
-    }
-    await _db.partsDao.updatePart(
-      id: partId,
-      name: name,
-      description: description,
-      uom: uom,
-      defaultSupplierId: defaultSupplierId,
-      active: active,
-      categoryId: categoryId,
-      styleId: styleId,
-      typeId: typeId,
-    );
+      await _pin.requireUnlocked();
+      await _db.partsDao.updatePart(
+        id: partId,
+        name: name,
+        description: description,
+        uom: uom,
+        defaultSupplierId: defaultSupplierId,
+        active: active,
+        categoryId: categoryId,
+        styleId: styleId,
+        typeId: typeId,
+      );
+    });
   }
 
   Future<String> createBrandVersion({
@@ -242,24 +249,27 @@ class CatalogRepository {
     required String id,
   }) async {
     await _pin.requireUnlocked();
-    switch (kind) {
-      case CatalogTreeKind.category:
-        if (!await _db.taxonomyDao.isCategoryEmpty(id)) {
-          throw StateError('Folder is not empty');
-        }
-        await _db.taxonomyDao.softDeleteCategory(id);
-      case CatalogTreeKind.type:
-        if (!await _db.taxonomyDao.isStyleEmpty(id)) {
-          throw StateError('Folder is not empty');
-        }
-        await _db.taxonomyDao.softDeleteStyle(id);
-      case CatalogTreeKind.variant:
-        if (!await _db.taxonomyDao.isTypeEmpty(id)) {
-          throw StateError('Folder is not empty');
-        }
-        await _db.taxonomyDao.softDeleteType(id);
-      default:
-        throw StateError('Not an empty folder');
-    }
+    await legacyBusinessWrite(_db, () async {
+      await _pin.requireUnlocked();
+      switch (kind) {
+        case CatalogTreeKind.category:
+          if (!await _db.taxonomyDao.isCategoryEmpty(id)) {
+            throw StateError('Folder is not empty');
+          }
+          await _db.taxonomyDao.softDeleteCategory(id);
+        case CatalogTreeKind.type:
+          if (!await _db.taxonomyDao.isStyleEmpty(id)) {
+            throw StateError('Folder is not empty');
+          }
+          await _db.taxonomyDao.softDeleteStyle(id);
+        case CatalogTreeKind.variant:
+          if (!await _db.taxonomyDao.isTypeEmpty(id)) {
+            throw StateError('Folder is not empty');
+          }
+          await _db.taxonomyDao.softDeleteType(id);
+        default:
+          throw StateError('Not an empty folder');
+      }
+    });
   }
 }

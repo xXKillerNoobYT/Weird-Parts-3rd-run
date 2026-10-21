@@ -7,6 +7,7 @@ import 'catalog_repository.dart';
 import 'catalog_tree.dart';
 import 'catalog_tree_view.dart';
 import 'part_detail_page.dart';
+import 'part_details_dialog.dart';
 import 'tree_edit_prompts.dart';
 
 class CatalogPage extends StatefulWidget {
@@ -73,14 +74,22 @@ class _CatalogPageState extends State<CatalogPage> {
 
   Future<void> _addPart({CatalogTreeNode? parent}) async {
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'New part');
-    if (name == null || name.isEmpty || !mounted) return;
+    final details = await showDialog<PartDetails>(
+      context: context,
+      builder: (_) => PartDetailsDialog(
+        maintenance: _maintenance,
+        initialCategoryId: parent?.categoryId,
+        initialStyleId: parent?.styleId,
+        initialTypeId: parent?.typeId,
+      ),
+    );
+    if (details == null || !mounted) return;
     try {
       final id = await _catalog.createGeneralPart(
-        name: name,
-        categoryId: parent?.categoryId,
-        styleId: parent?.styleId,
-        typeId: parent?.typeId,
+        name: details.name,
+        categoryId: details.categoryId,
+        styleId: details.styleId,
+        typeId: details.typeId,
       );
       await _reload();
       if (!mounted) return;
@@ -173,7 +182,6 @@ class _CatalogPageState extends State<CatalogPage> {
             categoryId: part.categoryId,
             styleId: part.styleId,
             typeId: part.typeId,
-            requireNestedTaxonomy: false,
           );
         case CatalogTreeKind.brand:
           if (node.brandId != null) {

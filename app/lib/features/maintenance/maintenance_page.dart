@@ -5,6 +5,7 @@ import '../catalog/catalog_repository.dart';
 import '../catalog/catalog_tree.dart';
 import '../catalog/catalog_tree_view.dart';
 import '../catalog/part_detail_page.dart';
+import '../catalog/part_details_dialog.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../pin/pin_gate.dart';
 import 'maintenance_repository.dart';
@@ -126,13 +127,21 @@ class _MaintenancePageState extends State<MaintenancePage> {
           if (name == null || name.isEmpty) return;
           await _repo.createType(styleId: parent.id, name: name);
         case CatalogTreeKind.variant:
-          final name = await promptName(context, title: 'Add part');
-          if (name == null || name.isEmpty) return;
+          final details = await showDialog<PartDetails>(
+            context: context,
+            builder: (_) => PartDetailsDialog(
+              maintenance: _repo,
+              initialCategoryId: parent.categoryId,
+              initialStyleId: parent.styleId,
+              initialTypeId: parent.typeId,
+            ),
+          );
+          if (details == null || !mounted) return;
           await _catalog.createGeneralPart(
-            name: name,
-            categoryId: parent.categoryId,
-            styleId: parent.styleId,
-            typeId: parent.typeId,
+            name: details.name,
+            categoryId: details.categoryId,
+            styleId: details.styleId,
+            typeId: details.typeId,
           );
         case CatalogTreeKind.part:
         case CatalogTreeKind.brand:
@@ -179,7 +188,6 @@ class _MaintenancePageState extends State<MaintenancePage> {
             categoryId: part.categoryId,
             styleId: part.styleId,
             typeId: part.typeId,
-            requireNestedTaxonomy: false,
           );
         case CatalogTreeKind.brand:
           if (node.brandId != null) {
