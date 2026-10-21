@@ -12,6 +12,7 @@ import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
+import 'package:wired_parts/features/warehouse/warehouse_repository.dart';
 
 import 'nearby_lan_validation.dart';
 import 'nearby_lan_workspace.dart';
@@ -132,7 +133,38 @@ class RecoveryScenario {
       final db = openDatabase(workspace);
       try {
         await seedValidationShop(db, workspace);
-        await PinService(db.settingsDao).setPin('1234');
+        final pin = PinService(db.settingsDao);
+        final warehouse = WarehouseRepository(db, pin, workspace.deviceId);
+        final prefix = '${workspace.run}-${workspace.role.name}';
+        await warehouse.createLocation(
+          id: '$prefix-warehouse',
+          name: '$prefix warehouse',
+        );
+        await warehouse.recordCount(
+          WarehouseCountDraft(
+            id: '$prefix-count-first',
+            locationId: '$prefix-warehouse',
+            partId: '$prefix-part',
+            expectedPriorCountId: null,
+            quantity: workspace.role == ValidationRole.sender ? 12.5 : 4.25,
+            uom: 'box',
+            observedAt: DateTime.utc(2026, 10, 7, 8),
+            note: '$prefix opening count',
+          ),
+        );
+        await warehouse.recordCount(
+          WarehouseCountDraft(
+            id: '$prefix-count-zero',
+            locationId: '$prefix-warehouse',
+            partId: '$prefix-part',
+            expectedPriorCountId: '$prefix-count-first',
+            quantity: 0,
+            uom: 'box',
+            observedAt: DateTime.utc(2026, 10, 7, 8, 15),
+            note: '$prefix counted empty\nVerified shelf',
+          ),
+        );
+        await pin.setPin('1234');
         await checkpointWalForExport(db);
         workspace.markInitialized();
       } finally {
