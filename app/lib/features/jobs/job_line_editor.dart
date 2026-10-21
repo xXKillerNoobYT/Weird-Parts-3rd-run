@@ -13,6 +13,7 @@ import '../maintenance/maintenance_repository.dart';
 import '../pin/pin_gate.dart';
 import 'job_line_qty.dart';
 import 'jobs_repository.dart';
+import 'catalog_promotion.dart';
 
 class JobLineEditor extends StatefulWidget {
   const JobLineEditor({
@@ -40,6 +41,7 @@ class _SplitDraft {
 
 class _JobLineEditorState extends State<JobLineEditor> {
   late final JobsRepository _jobs;
+  late final CatalogPromotion _promotion;
   late final CatalogRepository _catalog;
   late final MaintenanceRepository _maintenance;
   late final AppDatabase _db;
@@ -80,6 +82,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
     final scope = AppScope.of(context);
     _db = scope.db;
     _jobs = JobsRepository(scope.db, scope.deviceId);
+    _promotion = CatalogPromotion(scope.db, scope.pin, scope.deviceId);
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
     _maintenance = MaintenanceRepository(scope.db, scope.pin, scope.deviceId);
     _lineId = widget.lineId;
@@ -500,55 +503,55 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
     setState(() => _saving = true);
     try {
-      final partId = await _catalog.createGeneralPart(
+      final promotion = await _promotion.promote(
+        jobId: widget.jobId,
+        lineId: _lineId,
         name: result.name,
         categoryId: result.categoryId,
         styleId: result.styleId,
         typeId: result.typeId,
-      );
-      if (_lineId != null) {
-        await _jobs.attachCatalogPart(
-          lineId: _lineId!,
-          partId: partId,
-          neededQty: quantities.neededQty,
-          shopPullQty: quantities.shopPullQty,
-          splits: quantities.splits,
-        );
-      } else {
-        _lineId = await _jobs.addLine(
-          jobId: widget.jobId,
-          partId: partId,
-          neededQty: quantities.neededQty,
-          shopPullQty: quantities.shopPullQty,
-          splits: quantities.splits,
-        );
-      }
-
-      final versions = await _catalog.listBrandVersionsForPart(partId);
-      final parts = await _catalog.listParts(
-        activeOnly: false,
-        includeDeleted: true,
-      );
-      final tree = buildCatalogTree(
-        await _catalog.loadTreeSnapshot(activeOnly: true),
+        neededQty: quantities.neededQty,
+        shopPullQty: quantities.shopPullQty,
+        splits: quantities.splits,
       );
       if (!mounted) return;
+      final partId = promotion.partId;
       setState(() {
+        _lineId = promotion.lineId;
         _useCustom = false;
         _partId = partId;
         _brandVersionId = null;
-        _brandVersions = versions;
-        _parts = parts;
-        _tree = tree;
+        _brandVersions = [];
+        _pickLabel = result.name;
         _catalogPartMissing = false;
         _customNameController.clear();
       });
-      _refreshPickLabel();
-      await _refreshSupplierChoices();
-      if (!mounted) return;
-      _toast('On this job as a catalog part. Back out when you are done.');
+      try {
+        final versions = await _catalog.listBrandVersionsForPart(partId);
+        final parts = await _catalog.listParts(
+          activeOnly: false,
+          includeDeleted: true,
+        );
+        final tree = buildCatalogTree(
+          await _catalog.loadTreeSnapshot(activeOnly: true),
+        );
+        if (!mounted) return;
+        setState(() {
+          _brandVersions = versions;
+          _parts = parts;
+          _tree = tree;
+        });
+        _refreshPickLabel();
+        await _refreshSupplierChoices();
+        if (!mounted) return;
+        _toast('On this job as a catalog part. Back out when you are done.');
+      } catch (_) {
+        if (mounted) _toast('Catalog part saved. Reopen this line to refresh.');
+      }
     } on StateError catch (e) {
       if (mounted) _toast(e.message);
+    } catch (_) {
+      if (mounted) _toast('Promotion failed. Changes were not saved.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

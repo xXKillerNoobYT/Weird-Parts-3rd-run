@@ -6,11 +6,25 @@ import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/jobs/job_line_editor.dart';
 import 'package:wired_parts/features/jobs/jobs_repository.dart';
+import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 Finder _field(String label) => find.byWidgetPredicate(
   (widget) => widget is TextField && widget.decoration?.labelText == label,
 );
+
+Future<void> _selectPromotionHierarchy(WidgetTester tester) async {
+  for (final entry in [
+    (0, 'Synthetic category'),
+    (1, 'Synthetic type'),
+    (2, 'Synthetic variant'),
+  ]) {
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(entry.$1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(entry.$2).last);
+    await tester.pumpAndSettle();
+  }
+}
 
 Future<void> _openEditor(
   WidgetTester tester, {
@@ -61,6 +75,160 @@ void main() {
     jobs = JobsRepository(db, deviceId);
   });
   tearDown(() async => db.close());
+
+  for (final editing in [false, true]) {
+    testWidgets(
+      'failed ${editing ? 'edit' : 'new'} promotion leaves no catalog orphan',
+      (tester) async {
+        final maintenance = MaintenanceRepository(
+          db,
+          PinService(db.settingsDao),
+          deviceId,
+        );
+        final category = await maintenance.createCategory('Synthetic category');
+        final style = await maintenance.createStyle(
+          categoryId: category,
+          name: 'Synthetic type',
+        );
+        await maintenance.createType(styleId: style, name: 'Synthetic variant');
+        final supplier = await maintenance.createSupplier('Synthetic supplier');
+        final jobId = await jobs.createJob('Atomic promotion');
+        String? lineId;
+        if (editing) {
+          lineId = await jobs.addLine(
+            jobId: jobId,
+            customName: 'Original custom line',
+            customNotes: 'Keep custom notes',
+            notes: 'Keep notes',
+            uom: 'box',
+            neededQty: 7,
+            shopPullQty: 2,
+            splits: [(supplierId: supplier, qty: 5)],
+          );
+        }
+        final originalParts = await db.select(db.parts).get();
+        final originalLines = await db.select(db.jobLines).get();
+        final originalSplits = await db.select(db.orderSplits).get();
+        await db.customStatement(
+          "CREATE TRIGGER reject_promotion_split BEFORE INSERT ON order_splits BEGIN SELECT RAISE(ABORT, 'synthetic promotion split failure'); END",
+        );
+        await _openEditor(
+          tester,
+          db: db,
+          deviceId: deviceId,
+          jobId: jobId,
+          lineId: lineId,
+        );
+        if (!editing) {
+          await tester.tap(find.text('Custom'));
+          await tester.pumpAndSettle();
+          await tester.enterText(_field('Custom name'), 'Promoted part');
+          await tester.ensureVisible(
+            find.byType(DropdownButtonFormField<String?>),
+          );
+          await tester.tap(find.byType(DropdownButtonFormField<String?>));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Synthetic supplier').last);
+          await tester.pumpAndSettle();
+        }
+        await tester.ensureVisible(_field('Qty'));
+        await tester.enterText(_field('Qty'), '4');
+        await tester.ensureVisible(find.text('Promote to catalog'));
+        await tester.tap(find.text('Promote to catalog'));
+        await tester.pumpAndSettle();
+        await _selectPromotionHierarchy(tester);
+        await tester.tap(find.text('Promote'));
+        await tester.pumpAndSettle();
+        final failure = tester.takeException();
+        expect(await db.select(db.parts).get(), originalParts);
+        expect(await db.select(db.jobLines).get(), originalLines);
+        expect(await db.select(db.orderSplits).get(), originalSplits);
+        expect(failure, isNull);
+        await db.customStatement('DROP TRIGGER reject_promotion_split');
+        await tester.tap(find.text('Promote to catalog'));
+        await tester.pumpAndSettle();
+        await _selectPromotionHierarchy(tester);
+        await tester.tap(find.text('Promote'));
+        await tester.pumpAndSettle();
+        final part = (await db.partsDao.listParts()).single;
+        final line = (await jobs.listLinesForJob(jobId)).single;
+        if (editing) expect(line.id, lineId);
+        expect(line.partId, part.id);
+        expect((await jobs.orderSplitsForLine(line.id)).single.quantity, 4);
+        expect(find.text('Promote to catalog'), findsNothing);
+      },
+    );
+  }
+
+  for (final stop in [
+    'cancel',
+    'incomplete',
+    'locked PIN',
+    'expired PIN',
+    'company marker',
+  ]) {
+    testWidgets('$stop leaves promotion business rows unchanged', (
+      tester,
+    ) async {
+      final maintenance = MaintenanceRepository(
+        db,
+        PinService(db.settingsDao),
+        deviceId,
+      );
+      final category = await maintenance.createCategory('Synthetic category');
+      final style = await maintenance.createStyle(
+        categoryId: category,
+        name: 'Synthetic type',
+      );
+      await maintenance.createType(styleId: style, name: 'Synthetic variant');
+      final jobId = await jobs.createJob('Stopped promotion');
+      await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+      await tester.tap(find.text('Custom'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Custom name'), 'Unsaved catalog part');
+      final pin = tester.widget<AppScope>(find.byType(AppScope)).pin;
+      if (stop == 'locked PIN' || stop == 'expired PIN') {
+        await pin.setPin('2468');
+        if (stop == 'expired PIN') await pin.unlock('2468');
+      }
+      final originalParts = await db.select(db.parts).get();
+      final originalLines = await db.select(db.jobLines).get();
+      final originalSplits = await db.select(db.orderSplits).get();
+      await tester.tap(find.text('Promote to catalog'));
+      await tester.pumpAndSettle();
+      if (stop == 'cancel' || stop == 'locked PIN') {
+        await tester.tap(find.text('Cancel'));
+      } else if (stop == 'incomplete') {
+        await tester.tap(find.text('Promote'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Category, Type, and Variant are required'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Cancel'));
+      } else {
+        await _selectPromotionHierarchy(tester);
+        if (stop == 'expired PIN') pin.lock();
+        if (stop == 'company marker') {
+          await db.customStatement(
+            'INSERT INTO company_join_events (request_id, ordinal, kind, evidence_bytes) VALUES (?, ?, ?, ?)',
+            [
+              'synthetic-promotion-stop',
+              1,
+              'blocked',
+              'synthetic-refusal-marker',
+            ],
+          );
+        }
+        await tester.tap(find.text('Promote'));
+      }
+      await tester.pumpAndSettle();
+      expect(await db.select(db.parts).get(), originalParts);
+      expect(await db.select(db.jobLines).get(), originalLines);
+      expect(await db.select(db.orderSplits).get(), originalSplits);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   for (final editing in [false, true]) {
     testWidgets(
