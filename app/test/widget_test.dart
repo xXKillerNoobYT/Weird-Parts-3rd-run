@@ -22,7 +22,7 @@ Finder _navLabel(String label) => find.descendant(
     );
 
 Finder _pinField() => find.descendant(
-      of: find.byType(AlertDialog),
+      of: find.byType(AlertDialog).last,
       matching: find.byType(TextField),
     );
 
@@ -76,8 +76,14 @@ Future<void> _openCatalogNewPart(WidgetTester tester, String name) async {
   await tester.pumpAndSettle();
   await tester.tap(find.byType(FloatingActionButton));
   await tester.pumpAndSettle();
-  await typeDialogName(tester, name);
-  expect(find.text('Part'), findsWidgets);
+  expect(find.text('New part'), findsOneWidget);
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(AlertDialog).last,
+      matching: find.byType(TextField),
+    ),
+    name,
+  );
 }
 
 Future<void> _expandFolder(WidgetTester tester, String label) async {
@@ -94,7 +100,7 @@ Future<void> _addNamedFolder(
   await tester.ensureVisible(find.text(label));
   await tester.tap(find.text(label));
   await tester.pumpAndSettle();
-  await typeDialogName(tester, name);
+  await typeTopDialogName(tester, name);
 }
 
 Future<void> _fillEmptyShopTree(WidgetTester tester) async {
@@ -106,9 +112,10 @@ Future<void> _fillEmptyShopTree(WidgetTester tester) async {
 
 Future<void> _fileEmptyShopTree(WidgetTester tester) async {
   await _fillEmptyShopTree(tester);
-  await tester.tap(find.widgetWithText(TextButton, 'Save'));
+  await tester.tap(find.widgetWithText(FilledButton, 'Save'));
   await tester.pumpAndSettle();
-  expect(find.text('Saved'), findsOneWidget);
+  expect(find.text('New part'), findsNothing);
+  expect(find.text('Part'), findsOneWidget);
 }
 
 Future<void> _addLevitonWhiteVariance(WidgetTester tester) async {
@@ -116,7 +123,7 @@ Future<void> _addLevitonWhiteVariance(WidgetTester tester) async {
   await tester.tap(find.text('Add variance').first);
   await tester.pumpAndSettle();
   expect(find.text('Add brand'), findsOneWidget);
-  await typeDialogName(tester, 'Leviton');
+  await typeTopDialogName(tester, 'Leviton');
   expect(find.text('Add variance'), findsWidgets);
   final varianceFields = find.descendant(
     of: find.byType(AlertDialog),
@@ -137,18 +144,6 @@ Future<void> _openPinAndType1234(WidgetTester tester) async {
   await tester.pump();
   await tester.enterText(_pinField(), '1234');
   await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
-  await tester.pumpAndSettle();
-}
-
-Future<void> typeDialogName(WidgetTester tester, String name) async {
-  await tester.enterText(
-    find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.byType(TextField),
-    ),
-    name,
-  );
-  await tester.tap(find.widgetWithText(FilledButton, 'Save'));
   await tester.pumpAndSettle();
 }
 
@@ -318,6 +313,14 @@ void main() {
     expect(find.text('Wrong PIN'), findsOneWidget);
     expect(find.text('Editor PIN'), findsOneWidget);
     expect(pin.isUnlocked, isFalse);
+    expect(await db.partsDao.listParts(), isEmpty);
+    expect(find.text('New part'), findsNothing);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsNothing);
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets('Reset cancel does not wipe local data', (WidgetTester tester) async {
@@ -382,23 +385,39 @@ void main() {
     expect(find.textContaining('No folders or parts yet'), findsOneWidget);
     await _dumpUi(tester, '00-empty-catalog');
 
-    await tester.tap(find.byTooltip('New part'));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Decora GFI');
+    await _openCatalogNewPart(tester, 'Decora GFI');
 
-    expect(find.text('Part'), findsWidgets);
+    expect(find.text('New part'), findsOneWidget);
     expect(find.text('Add Category'), findsOneWidget);
     expect(find.text('Add Type'), findsOneWidget);
     expect(find.text('Add Variant'), findsOneWidget);
-    expect(find.text('Add supplier'), findsOneWidget);
+    expect(find.text('Add supplier'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
 
     await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
     await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
     await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
 
-    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    expect(await db.partsDao.listParts(), isEmpty);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
-    expect(find.text('Saved'), findsOneWidget);
+    expect(find.text('New part'), findsNothing);
+    expect(find.text('Part'), findsOneWidget);
+    expect(find.text('Add supplier'), findsOneWidget);
+
+    final category = (await db.taxonomyDao.listCategories()).single;
+    final style = (await db.taxonomyDao.listStyles()).single;
+    final variant = (await db.taxonomyDao.listTypes()).single;
+    final part = (await db.partsDao.listParts()).single;
+    expect(category.name, 'Outlet');
+    expect(style.name, 'Decora');
+    expect(style.categoryId, category.id);
+    expect(variant.name, 'GFI');
+    expect(variant.styleId, style.id);
+    expect(part.name, 'Decora GFI');
+    expect(part.categoryId, category.id);
+    expect(part.styleId, style.id);
+    expect(part.typeId, variant.id);
 
     await tester.pageBack();
     await tester.pumpAndSettle();
@@ -419,15 +438,18 @@ void main() {
     final pin = PinService(db.settingsDao);
 
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
-    await tester.tap(_navLabel('Catalog'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(FloatingActionButton));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Unfiled');
+    await _openCatalogNewPart(tester, 'Unfiled');
 
-    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
     expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+    expect(find.text('New part'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets('cannot add variant before type', (WidgetTester tester) async {
@@ -437,16 +459,19 @@ void main() {
     final pin = PinService(db.settingsDao);
 
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
-    await tester.tap(_navLabel('Catalog'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(FloatingActionButton));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Skip type');
+    await _openCatalogNewPart(tester, 'Skip type');
 
     await tester.ensureVisible(find.text('Add Variant'));
     await tester.tap(find.text('Add Variant'));
     await tester.pumpAndSettle();
     expect(find.text('Set Type first'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+    expect(await db.taxonomyDao.listTypes(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets('cannot add type before category', (WidgetTester tester) async {
@@ -462,6 +487,13 @@ void main() {
     await tester.tap(find.text('Add Type'));
     await tester.pumpAndSettle();
     expect(find.text('Set Category first'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+    expect(await db.taxonomyDao.listStyles(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets('category alone is not enough to save', (WidgetTester tester) async {
@@ -474,9 +506,16 @@ void main() {
     await _openCatalogNewPart(tester, 'Outlet only');
     await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
 
-    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
     expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+    expect(find.text('New part'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets('PIN still gates in-place folder create', (WidgetTester tester) async {
@@ -492,14 +531,53 @@ void main() {
     await tester.tap(find.byType(FloatingActionButton));
     await tester.pumpAndSettle();
     await _openPinAndType1234(tester);
-    await typeDialogName(tester, 'Gated');
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.byType(TextField),
+      ),
+      'Gated',
+    );
+    pin.lock();
 
     await tester.ensureVisible(find.text('Add Category'));
     await tester.tap(find.text('Add Category'));
     await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsOneWidget);
+    await tester.enterText(_pinField(), '0000');
+    await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
+    await tester.pumpAndSettle();
+    expect(find.text('Wrong PIN'), findsOneWidget);
+    expect(pin.isUnlocked, isFalse);
+    expect(await db.taxonomyDao.listCategories(), isEmpty);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.widgetWithText(TextButton, 'Cancel'),
+      ),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Editor PIN'), findsNothing);
-    await typeDialogName(tester, 'Outlet');
+    expect(find.text('New part'), findsOneWidget);
+    expect(await db.taxonomyDao.listCategories(), isEmpty);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.ensureVisible(find.text('Add Category'));
+    await tester.tap(find.text('Add Category'));
+    await tester.pumpAndSettle();
+    await _openPinAndType1234(tester);
+    expect(find.text('Editor PIN'), findsNothing);
+    await typeTopDialogName(tester, 'Outlet');
     expect(find.text('Outlet'), findsWidgets);
+    expect((await db.taxonomyDao.listCategories()).single.name, 'Outlet');
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets(
@@ -511,21 +589,48 @@ void main() {
     final pin = PinService(db.settingsDao);
 
     await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
-    await _fillEmptyShopTree(tester);
-    expect(find.text('Outlet'), findsWidgets);
-    expect(find.text('Decora'), findsWidgets);
-    expect(find.text('GFI'), findsWidgets);
+    await _fileEmptyShopTree(tester);
+    final originalPart = (await db.partsDao.listParts()).single;
+    final originalCategory = (await db.taxonomyDao.listCategories()).single;
+    final originalStyle = (await db.taxonomyDao.listStyles()).single;
+    final originalVariant = (await db.taxonomyDao.listTypes()).single;
+    expect(originalPart.categoryId, originalCategory.id);
+    expect(originalPart.styleId, originalStyle.id);
+    expect(originalPart.typeId, originalVariant.id);
+
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Switch');
+    await _addNamedFolder(tester, label: 'Add Type', name: 'Toggle');
+    await _addNamedFolder(tester, label: 'Add Variant', name: 'Single pole');
+    final pendingCategory = (await db.taxonomyDao.listCategories())
+        .singleWhere((category) => category.name == 'Switch');
+    final pendingStyle = (await db.taxonomyDao.listStyles())
+        .singleWhere((style) => style.name == 'Toggle');
+    final pendingVariant = (await db.taxonomyDao.listTypes())
+        .singleWhere((variant) => variant.name == 'Single pole');
+    expect(pendingCategory.id, isNot(originalCategory.id));
+    expect(pendingStyle.id, isNot(originalStyle.id));
+    expect(pendingVariant.id, isNot(originalVariant.id));
+    expect(pendingStyle.categoryId, pendingCategory.id);
+    expect(pendingVariant.styleId, pendingStyle.id);
+    expect(find.text('Switch'), findsWidgets);
+    expect(find.text('Toggle'), findsWidgets);
+    expect(find.text('Single pole'), findsWidgets);
 
     await _addLevitonWhiteVariance(tester);
-    expect(find.text('Outlet'), findsWidgets);
-    expect(find.text('Decora'), findsWidgets);
-    expect(find.text('GFI'), findsWidgets);
+    expect(find.text('Switch'), findsWidgets);
+    expect(find.text('Toggle'), findsWidgets);
+    expect(find.text('Single pole'), findsWidgets);
+    final afterVariance = (await db.partsDao.listParts()).single;
+    expect(afterVariance.id, originalPart.id);
+    expect(afterVariance.categoryId, originalCategory.id);
+    expect(afterVariance.styleId, originalStyle.id);
+    expect(afterVariance.typeId, originalVariant.id);
 
     expect(find.text('Add listing'), findsWidgets);
     await tester.tap(find.text('Add listing').first);
     await tester.pumpAndSettle();
     expect(find.text('Add supplier'), findsWidgets);
-    await typeDialogName(tester, 'SupplyHouse');
+    await typeTopDialogName(tester, 'SupplyHouse');
     expect(find.text('Add supplier listing'), findsOneWidget);
     await tester.enterText(
       find.descendant(
@@ -538,21 +643,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('SupplyHouse'), findsWidgets);
     expect(find.text('SKU SH-100'), findsOneWidget);
-    expect(find.text('Outlet'), findsWidgets);
-    expect(find.text('Decora'), findsWidgets);
-    expect(find.text('GFI'), findsWidgets);
+    expect(find.text('Switch'), findsWidgets);
+    expect(find.text('Toggle'), findsWidgets);
+    expect(find.text('Single pole'), findsWidgets);
+    final beforeSave = (await db.partsDao.listParts()).single;
+    expect(beforeSave.id, originalPart.id);
+    expect(beforeSave.categoryId, originalCategory.id);
+    expect(beforeSave.styleId, originalStyle.id);
+    expect(beforeSave.typeId, originalVariant.id);
 
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
     expect(find.text('Category, Type, and Variant are required'), findsNothing);
     expect(find.text('Saved'), findsOneWidget);
+    final savedPart = (await db.partsDao.listParts()).single;
+    expect(savedPart.id, originalPart.id);
+    expect(savedPart.categoryId, pendingCategory.id);
+    expect(savedPart.styleId, pendingStyle.id);
+    expect(savedPart.typeId, pendingVariant.id);
+    expect(
+      (await db.taxonomyDao.listStyles())
+          .singleWhere((style) => style.id == originalStyle.id)
+          .categoryId,
+      originalCategory.id,
+    );
+    expect(
+      (await db.taxonomyDao.listTypes())
+          .singleWhere((variant) => variant.id == originalVariant.id)
+          .styleId,
+      originalStyle.id,
+    );
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('Outlet'), findsOneWidget);
-    await _expandFolder(tester, 'Outlet');
-    await _expandFolder(tester, 'Decora');
-    await _expandFolder(tester, 'GFI');
+    expect(find.text('Switch'), findsOneWidget);
+    await _expandFolder(tester, 'Switch');
+    await _expandFolder(tester, 'Toggle');
+    await _expandFolder(tester, 'Single pole');
     expect(find.text('Decora GFI'), findsOneWidget);
   });
 
@@ -573,7 +700,7 @@ void main() {
     await tester.tap(find.text('Add listing').first);
     await tester.pumpAndSettle();
     expect(find.text('Add supplier'), findsWidgets);
-    await typeDialogName(tester, 'SupplyHouse');
+    await typeTopDialogName(tester, 'SupplyHouse');
 
     expect(find.text('Add supplier listing'), findsOneWidget);
     await tester.enterText(
@@ -607,7 +734,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Add category'));
     await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Switch');
+    await typeTopDialogName(tester, 'Switch');
     expect(find.text('Switch'), findsOneWidget);
 
     await tester.pageBack();
@@ -616,6 +743,15 @@ void main() {
     await tester.tap(find.byType(DropdownButtonFormField<String>).first);
     await tester.pumpAndSettle();
     expect(find.text('Switch').hitTestable(), findsWidgets);
+    await tester.tap(find.text('Switch').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Switch'), findsWidgets);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
   });
 
   testWidgets('job picker can take a part filed from an empty shop',
@@ -692,15 +828,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('No folders or parts yet'), findsOneWidget);
     await _dumpUi(tester, '04-wiped-empty-shop');
-    await tester.tap(find.byType(FloatingActionButton));
-    await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Decora GFI');
-    await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
-    await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
-    await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
-    await tester.tap(find.widgetWithText(TextButton, 'Save'));
-    await tester.pumpAndSettle();
-    expect(find.text('Saved'), findsOneWidget);
+    expect(await wiped.partsDao.listParts(), isEmpty);
+    await _fileEmptyShopTree(tester);
+    final category = (await wiped.taxonomyDao.listCategories()).single;
+    final style = (await wiped.taxonomyDao.listStyles()).single;
+    final variant = (await wiped.taxonomyDao.listTypes()).single;
+    final part = (await wiped.partsDao.listParts()).single;
+    expect(part.name, 'Decora GFI');
+    expect(part.categoryId, category.id);
+    expect(part.styleId, style.id);
+    expect(part.typeId, variant.id);
+    expect(style.categoryId, category.id);
+    expect(variant.styleId, style.id);
   });
 
   testWidgets(
@@ -813,7 +952,7 @@ void main() {
     expect(find.text('Add supplier'), findsOneWidget);
     await tester.tap(find.text('Add supplier'));
     await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Codale');
+    await typeTopDialogName(tester, 'Codale');
     expect(find.text('Codale'), findsWidgets);
   });
 
@@ -869,7 +1008,7 @@ void main() {
     await tester.ensureVisible(find.text('Add supplier'));
     await tester.tap(find.text('Add supplier'));
     await tester.pumpAndSettle();
-    await typeDialogName(tester, 'Codale');
+    await typeTopDialogName(tester, 'Codale');
     expect(find.text('Codale'), findsWidgets);
 
     final listings = await db.partsDao.listingsForBrandVersion(bvId);
@@ -898,7 +1037,7 @@ void main() {
     await tester.tap(find.text('Add listing').first);
     await tester.pumpAndSettle();
     expect(find.text('Add supplier'), findsWidgets);
-    await typeDialogName(tester, 'SupplyHouse');
+    await typeTopDialogName(tester, 'SupplyHouse');
     expect(find.text('Add supplier listing'), findsOneWidget);
     expect(find.text('SKU (optional)'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Add'));
