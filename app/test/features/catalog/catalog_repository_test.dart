@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:wired_parts/core/new_id.dart';
@@ -13,6 +14,37 @@ import 'package:wired_parts/features/catalog/catalog_tree.dart';
 import 'package:wired_parts/features/catalog/part_photo_store.dart';
 import 'package:wired_parts/features/jobs/job_line_qty.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
+
+class _LockAfterSavePhotoStore extends PartPhotoStore {
+  _LockAfterSavePhotoStore(this.pin);
+
+  final PinService pin;
+
+  @override
+  Future<String> saveForPart({
+    required String partId,
+    required Uint8List bytes,
+    Directory? root,
+  }) async {
+    final stored = await super.saveForPart(
+      partId: partId,
+      bytes: bytes,
+      root: root,
+    );
+    pin.lock();
+    return stored;
+  }
+}
+
+class _CleanupFailurePhotoStore extends PartPhotoStore {
+  final attempted = <String>[];
+
+  @override
+  Future<void> deleteAt(String stored, {Directory? root}) async {
+    attempted.add(stored);
+    throw FileSystemException('synthetic cleanup denied', root!.path);
+  }
+}
 
 void main() {
   late AppDatabase db;
@@ -676,6 +708,77 @@ void main() {
       await expectLater(catalog.clearPhoto(id, root: photos), throwsStateError);
       expect(await partRows(), beforeRows);
       expect(await photoSnapshot(photos), beforePhotos);
+    },
+  );
+
+  test(
+    'locking the PIN during photo staging rolls back and removes the new file',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-late-pin-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      await pin.setPin('2468');
+      expect(await pin.unlock('2468'), isTrue);
+      final id = await createValidPart(name: 'Late PIN photo');
+      await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      final beforeRows = await partRows();
+      final beforePhotos = await photoSnapshot(photos);
+      await expectLater(
+        catalog.attachPhoto(
+          partId: id,
+          bytes: photoBytes(210, 30, 40),
+          root: photos,
+          store: _LockAfterSavePhotoStore(pin),
+        ),
+        throwsStateError,
+      );
+      expect(pin.isUnlocked, isFalse);
+      expect(await partRows(), beforeRows);
+      expect(await photoSnapshot(photos), beforePhotos);
+    },
+  );
+
+  test(
+    'postcommit photo cleanup failure preserves success and reports no paths',
+    () async {
+      final photos = Directory.systemTemp.createTempSync('wp-photo-cleanup-');
+      addTearDown(() => photos.deleteSync(recursive: true));
+      final messages = <String>[];
+      final previousPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) messages.add(message);
+      };
+      addTearDown(() => debugPrint = previousPrint);
+      final id = await createValidPart(name: 'Cleanup failure photo');
+      final first = await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(20, 80, 140),
+        root: photos,
+      );
+      final store = _CleanupFailurePhotoStore();
+      final second = await catalog.attachPhoto(
+        partId: id,
+        bytes: photoBytes(210, 30, 40),
+        root: photos,
+        store: store,
+      );
+      expect((await catalog.getPart(id))!.photoPath, second);
+      expect(store.attempted, [first]);
+      expect(
+        await File(p.join(photos.path, second)).readAsBytes(),
+        PartPhotoStore.compress(photoBytes(210, 30, 40)),
+      );
+      await catalog.clearPhoto(id, root: photos, store: store);
+      expect((await catalog.getPart(id))!.photoPath, isNull);
+      expect(store.attempted, [first, second]);
+      expect((await photoSnapshot(photos))['files'], hasLength(2));
+      expect(messages, contains(contains('attachment commit')));
+      expect(messages, contains(contains('clear commit')));
+      expect(messages.join('\n'), isNot(contains(photos.path)));
+      expect(messages.join('\n'), isNot(contains('synthetic cleanup denied')));
     },
   );
 
