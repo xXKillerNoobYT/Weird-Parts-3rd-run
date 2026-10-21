@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../core/new_id.dart';
 import '../../data/app_database.dart';
 import '../backup/backup_store.dart';
@@ -52,18 +54,53 @@ class CatalogRepository {
     PartPhotoStore store = const PartPhotoStore(),
     Directory? root,
   }) async {
+    if (_db.hasCallerTransaction) {
+      throw StateError('Photo changes require their own transaction');
+    }
     await _pin.requireUnlocked();
     return BackupIo.waitAndRun(() async {
-      final part = await _db.partsDao.getPart(partId);
-      final previous = part?.photoPath;
-      final stored = await store.saveForPart(
-        partId: partId,
-        bytes: bytes,
-        root: root,
-      );
-      await _db.partsDao.setPhotoPath(partId, stored);
-      if (previous != null && previous.isNotEmpty && previous != stored) {
-        await store.deleteAt(previous, root: root);
+      String? previous;
+      String? staged;
+      final String stored;
+      try {
+        stored = await legacyBusinessWrite(_db, () async {
+          await _pin.requireUnlocked();
+          final part = await _db.partsDao.getPart(partId);
+          if (part == null) {
+            throw StateError('Part is no longer in the catalog');
+          }
+          previous = part.photoPath;
+          final path = await store.saveForPart(
+            partId: partId,
+            bytes: bytes,
+            root: root,
+          );
+          staged = path;
+          await _pin.requireUnlocked();
+          await _db.partsDao.setPhotoPath(partId, path);
+          await _pin.requireUnlocked();
+          return path;
+        });
+      } catch (_) {
+        final failed = staged;
+        if (failed != null && failed != previous) {
+          await _cleanupPhotoFile(
+            failed,
+            phase: 'attachment rollback',
+            store: store,
+            root: root,
+          );
+        }
+        rethrow;
+      }
+      final oldPath = previous;
+      if (oldPath != null && oldPath.isNotEmpty && oldPath != stored) {
+        await _cleanupPhotoFile(
+          oldPath,
+          phase: 'attachment commit',
+          store: store,
+          root: root,
+        );
       }
       return stored;
     });
@@ -74,15 +111,43 @@ class CatalogRepository {
     PartPhotoStore store = const PartPhotoStore(),
     Directory? root,
   }) async {
+    if (_db.hasCallerTransaction) {
+      throw StateError('Photo changes require their own transaction');
+    }
     await _pin.requireUnlocked();
     await BackupIo.waitAndRun(() async {
-      final part = await _db.partsDao.getPart(partId);
-      final existing = part?.photoPath;
-      await _db.partsDao.setPhotoPath(partId, null);
+      final existing = await legacyBusinessWrite(_db, () async {
+        await _pin.requireUnlocked();
+        final part = await _db.partsDao.getPart(partId);
+        if (part == null) throw StateError('Part is no longer in the catalog');
+        await _db.partsDao.setPhotoPath(partId, null);
+        await _pin.requireUnlocked();
+        return part.photoPath;
+      });
       if (existing != null && existing.isNotEmpty) {
-        await store.deleteAt(existing, root: root);
+        await _cleanupPhotoFile(
+          existing,
+          phase: 'clear commit',
+          store: store,
+          root: root,
+        );
       }
     });
+  }
+
+  Future<void> _cleanupPhotoFile(
+    String path, {
+    required String phase,
+    required PartPhotoStore store,
+    Directory? root,
+  }) async {
+    try {
+      await store.deleteAt(path, root: root);
+    } on FileSystemException catch (error) {
+      debugPrint(
+        'Part photo cleanup failed after $phase, OS code ${error.osError?.errorCode ?? 'unknown'}.',
+      );
+    }
   }
 
   Future<String> createGeneralPart({
