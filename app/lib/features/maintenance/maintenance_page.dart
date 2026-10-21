@@ -176,6 +176,15 @@ class _MaintenancePageState extends State<MaintenancePage> {
 
   Future<void> _rename(CatalogTreeNode node) async {
     if (!await _gate() || !mounted) return;
+    if (node.kind == CatalogTreeKind.part) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PartDetailPage(partId: node.id),
+        ),
+      );
+      if (mounted) await _reload();
+      return;
+    }
     final target = switch (node.kind) {
       CatalogTreeKind.category => CatalogNameTarget.renameCategory(node.id),
       CatalogTreeKind.type => CatalogNameTarget.renameType(node.id),
@@ -186,32 +195,6 @@ class _MaintenancePageState extends State<MaintenancePage> {
     };
     if (target != null) {
       await _editTaxonomyName(target, 'Rename');
-      return;
-    }
-    final name = await promptName(context, title: 'Rename', initial: node.label);
-    if (name == null || name.isEmpty) return;
-    try {
-      switch (node.kind) {
-        case CatalogTreeKind.part:
-          final part = await _catalog.getPart(node.id);
-          if (part == null) return;
-          await _catalog.updatePart(
-            partId: part.id,
-            name: name,
-            description: part.description,
-            uom: part.uom,
-            defaultSupplierId: part.defaultSupplierId,
-            active: part.active,
-            categoryId: part.categoryId,
-            styleId: part.styleId,
-            typeId: part.typeId,
-          );
-        default:
-          return;
-      }
-      await _reload();
-    } on StateError catch (e) {
-      _showMessage(e.message);
     }
   }
 
