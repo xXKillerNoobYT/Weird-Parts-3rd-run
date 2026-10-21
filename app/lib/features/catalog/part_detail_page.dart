@@ -10,6 +10,7 @@ import '../edit_drafts/edit_drafts.dart';
 import '../edit_drafts/edit_draft_widgets.dart';
 import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
+import 'catalog_name_dialog.dart';
 import 'part_photo_store.dart';
 import 'tree_edit_prompts.dart';
 
@@ -77,6 +78,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
   EditOpening<PartEditSession>? _opening;
   bool _applyingInput = false;
   bool _allowPop = false;
+  String? _catalogNameNotice;
 
   void _capture() {
     if (_loading || _applyingInput) return;
@@ -529,21 +531,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   Future<void> _addCategory() async {
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add category');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await _maintenance.createCategory(name);
-      await _refreshTaxonomyLists();
-      if (!mounted) return;
-      _change(() {
-        _categoryId = id;
-        _styleId = null;
-        _typeId = null;
-      });
-    } on StateError catch (e) {
-      if (!mounted) return;
-      _toast(e.message);
-    }
+    await _editTaxonomyName(CatalogNameTarget.newCategory(), 'Add category');
   }
 
   Future<void> _addType() async {
@@ -552,23 +540,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add type');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await _maintenance.createStyle(
-        categoryId: _categoryId!,
-        name: name,
-      );
-      await _refreshTaxonomyLists();
-      if (!mounted) return;
-      _change(() {
-        _styleId = id;
-        _typeId = null;
-      });
-    } on StateError catch (e) {
-      if (!mounted) return;
-      _toast(e.message);
-    }
+    await _editTaxonomyName(CatalogNameTarget.newType(_categoryId!), 'Add type');
   }
 
   Future<void> _addVariant() async {
@@ -577,16 +549,40 @@ class _PartDetailPageState extends State<PartDetailPage> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add variant');
-    if (name == null || name.isEmpty || !mounted) return;
+    await _editTaxonomyName(CatalogNameTarget.newVariant(_styleId!), 'Add variant');
+  }
+
+  Future<void> _editTaxonomyName(CatalogNameTarget target, String title) async {
+    if (mounted) setState(() => _catalogNameNotice = null);
     try {
-      final id = await _maintenance.createType(styleId: _styleId!, name: name);
-      await _refreshTaxonomyLists();
-      if (!mounted) return;
-      _change(() => _typeId = id);
-    } on StateError catch (e) {
-      if (!mounted) return;
-      _toast(e.message);
+      await showCatalogNameDialog(
+        context,
+        target: target,
+        title: title,
+        onNotice: (message) {
+          if (mounted) setState(() => _catalogNameNotice = message);
+        },
+        onSaved: (saved) async {
+          await _refreshTaxonomyLists();
+          if (!mounted) return;
+          _change(() {
+            switch (saved.kind) {
+              case CatalogNameKind.category:
+                _categoryId = saved.id;
+                _styleId = null;
+                _typeId = null;
+              case CatalogNameKind.type:
+                _styleId = saved.id;
+                _typeId = null;
+              case CatalogNameKind.variant:
+                _typeId = saved.id;
+            }
+          });
+          await _session?.flush();
+        },
+      );
+    } catch (error) {
+      if (mounted) _toast('$error');
     }
   }
 
@@ -790,6 +786,17 @@ class _PartDetailPageState extends State<PartDetailPage> {
         if (!didPop) _leave(LeaveIntent.back);
       },
       child: Scaffold(
+        bottomNavigationBar: _catalogNameNotice == null
+            ? null
+            : SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(_catalogNameNotice!),
+                  ),
+                ),
+              ),
         appBar: AppBar(
           title: const Text('Part'),
           actions: [

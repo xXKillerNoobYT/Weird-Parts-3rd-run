@@ -3,6 +3,65 @@ part of 'edit_drafts.dart';
 const _rowLimit = 256 * 1024;
 const _splitLimit = 512;
 
+extension _CatalogNameStore on CatalogNameKind {
+  String get _table => switch (this) {
+    CatalogNameKind.category => 'categories',
+    CatalogNameKind.type => 'styles',
+    CatalogNameKind.variant => 'types',
+  };
+
+  String? get _parentColumn => switch (this) {
+    CatalogNameKind.category => null,
+    CatalogNameKind.type => 'category_id',
+    CatalogNameKind.variant => 'style_id',
+  };
+}
+
+CatalogNameKind _catalogNameKind(String? value) => switch (value) {
+  'category' => CatalogNameKind.category,
+  'type' => CatalogNameKind.type,
+  'variant' => CatalogNameKind.variant,
+  _ => throw const FormatException('Unsupported catalog name entity'),
+};
+
+void _catalogNameTarget(Map<String, String> target) {
+  final kind = _catalogNameKind(target['entity']);
+  final rename = target['kind'] == 'catalog-name-rename';
+  if (!rename && target['kind'] != 'catalog-name-new') {
+    throw const FormatException('Unsupported catalog name target');
+  }
+  final expected = {
+    'kind',
+    'entity',
+    rename ? 'id' : 'reserved',
+    if (!rename && kind != CatalogNameKind.category) 'parent',
+  };
+  if (target.length != expected.length ||
+      !expected.every(target.containsKey) ||
+      target.values.any((value) => value.trim().isEmpty)) {
+    throw const FormatException('Invalid catalog name target');
+  }
+}
+
+Set<String> _catalogNameResultFields(Map<String, String> result) {
+  final kind = _catalogNameKind(result['entity']);
+  return {
+    'entity',
+    'id',
+    'name',
+    'row',
+    'slot',
+    'target',
+    if (kind != CatalogNameKind.category) 'parent',
+    if (kind == CatalogNameKind.variant) 'category',
+  };
+}
+
+String? _catalogNameParent(CatalogNameKind kind, Map<String, Object?> row) {
+  final column = kind._parentColumn;
+  return column == null ? null : _text(row[column]);
+}
+
 String _digest(Object? value) =>
     sha256.convert(utf8.encode(jsonEncode(value))).toString();
 String _encoded(Object value) {
@@ -78,6 +137,8 @@ Map<String, Object?> _control(String raw) {
         : command == 'warehouse-location-create' ||
               command == 'warehouse-location-rename'
         ? {'location', 'row'}
+        : command == 'catalog-name-create' || command == 'catalog-name-rename'
+        ? _catalogNameResultFields(result)
         : command == 'line-save' || command == 'line-remove'
         ? {'line'}
         : command.startsWith('line-promote/')
@@ -100,6 +161,7 @@ Map<String, Object?> _control(String raw) {
 }
 
 Map<String, Object?> _inputJson(Object input) => switch (input) {
+  CatalogNameInput c => {'name': c.nameText},
   NewJobInput j => {'name': j.nameText},
   WarehouseLocationNameInput l => {'name': l.nameText},
   WarehouseCountInput c => {
@@ -137,6 +199,10 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
 };
 Object _parseInput(String kind, Object? value) {
   final m = _map(value);
+  if (kind == 'catalog-name-new' || kind == 'catalog-name-rename') {
+    _keys(m, {'name'});
+    return CatalogNameInput(nameText: _text(m['name']));
+  }
   if (kind == 'warehouse-location-new' || kind == 'warehouse-location-rename') {
     _keys(m, {'name'});
     return WarehouseLocationNameInput(nameText: _text(m['name']));
@@ -223,6 +289,13 @@ SplitInput _parseSplit(Object? value) {
 
 String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
+  if (target['kind'] == 'catalog-name-new') {
+    return 'catalog-name-new/${segment('entity')}'
+        '${target.containsKey('parent') ? '/${segment('parent')}' : ''}';
+  }
+  if (target['kind'] == 'catalog-name-rename') {
+    return 'catalog-name-rename/${segment('entity')}/${segment('id')}';
+  }
   if (target['kind'] == 'part') return 'part/${segment('id')}';
   if (target['kind'] == 'job-new') return 'job-new';
   if (target['kind'] == 'warehouse-location-new') {
@@ -287,7 +360,10 @@ final class _DraftRecord {
       throw const FormatException('Unsupported unfinished edit version');
     }
     final target = _strings(m['target']);
-    if (target['kind'] == 'part') {
+    if (target['kind'] == 'catalog-name-new' ||
+        target['kind'] == 'catalog-name-rename') {
+      _catalogNameTarget(target);
+    } else if (target['kind'] == 'part') {
       if (target.length != 2 || !target.containsKey('id')) {
         throw const FormatException('Invalid Part target');
       }
@@ -430,6 +506,26 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'catalog-name-new' ||
+        target['kind'] == 'catalog-name-rename') {
+      final kind = _catalogNameKind(target['entity']);
+      final rename = target['kind'] == 'catalog-name-rename';
+      final row = await _row(kind._table, target[rename ? 'id' : 'reserved']!);
+      if (rename && (row == null || row['deleted_at'] != null)) {
+        throw StateError('Catalog record is unavailable');
+      }
+      if (!rename && row != null) {
+        throw StateError('Reserved catalog ID is already in use');
+      }
+      final ancestors = await _catalogNameAncestors(
+        kind,
+        rename ? _catalogNameParent(kind, row!) : target['parent'],
+      );
+      return {
+        'record': _digest(row),
+        for (final entry in ancestors.entries) entry.key: _digest(entry.value),
+      };
+    }
     if (target['kind'] == 'warehouse-location-new') {
       final row = await _row('warehouse_locations', target['reserved']!);
       if (row != null) {
@@ -533,6 +629,8 @@ class EditDrafts {
     }
 
     switch (input) {
+      case CatalogNameInput():
+        break;
       case NewJobInput():
         break;
       case WarehouseLocationNameInput():
@@ -626,6 +724,147 @@ class EditDrafts {
         }
       }
     }
+  }
+
+  Future<Map<String, Object?>> _catalogNameRow(
+    CatalogNameKind kind,
+    String id,
+  ) async {
+    final row = await _row(kind._table, id);
+    if (row == null || row['deleted_at'] != null) {
+      throw StateError('Catalog record is unavailable');
+    }
+    return row;
+  }
+
+  Future<Map<String, Map<String, Object?>>> _catalogNameAncestors(
+    CatalogNameKind kind,
+    String? parentId,
+  ) async {
+    if (kind == CatalogNameKind.category) return {};
+    if (parentId == null) throw StateError('Catalog parent is unavailable');
+    final parent = await _catalogNameRow(
+      kind == CatalogNameKind.type
+          ? CatalogNameKind.category
+          : CatalogNameKind.type,
+      parentId,
+    );
+    return {
+      'parent': parent,
+      if (kind == CatalogNameKind.variant)
+        'category': await _catalogNameRow(
+          CatalogNameKind.category,
+          _text(parent['category_id']),
+        ),
+    };
+  }
+
+  Future<EditOpening<CatalogNameEditSession>> openCatalogName(
+    CatalogNameTarget target,
+  ) {
+    final recordTarget = {
+      'kind': target.isRename ? 'catalog-name-rename' : 'catalog-name-new',
+      'entity': target.kind.name,
+      if (target.isRename) 'id': target.id! else 'reserved': newId(),
+      if (target.parentId != null) 'parent': target.parentId!,
+    };
+    return _open<CatalogNameEditSession>(
+      recordTarget,
+      () async => CatalogNameInput(
+        nameText: target.isRename
+            ? _text((await _catalogNameRow(target.kind, target.id!))['name'])
+            : '',
+      ),
+      (record) => CatalogNameEditSession._(this, record),
+      onCommitted: (raw) => _savedCatalogName(raw, recordTarget),
+    );
+  }
+
+  Future<CatalogNameSaved> _savedCatalogName(
+    String raw,
+    Map<String, String> wanted,
+  ) async {
+    if (_closed || _quiescing) {
+      throw StateError('Catalog storage is changing');
+    }
+    final control = _control(raw);
+    if (control['phase'] != 'committed' ||
+        !{
+          'catalog-name-create',
+          'catalog-name-rename',
+        }.contains(control['command'])) {
+      throw const FormatException('Unsupported saved catalog name receipt');
+    }
+    final result = _strings(control['result']);
+    final target = _strings(jsonDecode(result['target']!));
+    _catalogNameTarget(target);
+    final kind = _catalogNameKind(target['entity']);
+    final rename = target['kind'] == 'catalog-name-rename';
+    final command = rename ? 'catalog-name-rename' : 'catalog-name-create';
+    if (control['phase'] != 'committed' ||
+        control['command'] != command ||
+        result['entity'] != target['entity'] ||
+        result['id'] != target[rename ? 'id' : 'reserved'] ||
+        result['slot'] != _slot(target) ||
+        result['slot'] != _slot(wanted) ||
+        ![
+          'kind',
+          'entity',
+          'id',
+          'parent',
+        ].every((key) => target[key] == wanted[key]) ||
+        (!rename &&
+            kind != CatalogNameKind.category &&
+            result['parent'] != target['parent']) ||
+        result['name']!.trim().isEmpty ||
+        result['name'] != result['name']!.trim()) {
+      throw const FormatException('Saved catalog name target mismatch');
+    }
+
+    Future<void> validate() async {
+      if (_digest(_origin()) != _digest(control['origin'])) {
+        throw StateError('Saved catalog name belongs to another installation');
+      }
+      final row = await _catalogNameRow(kind, result['id']!);
+      if ((!rename && row['origin_device_id'] != _deviceId) ||
+          row['name'] != result['name'] ||
+          _digest(row) != result['row']) {
+        throw StateError('The saved catalog name changed or is unavailable');
+      }
+      final ancestors = await _catalogNameAncestors(
+        kind,
+        _catalogNameParent(kind, row),
+      );
+      for (final entry in ancestors.entries) {
+        if (entry.value['id'] != result[entry.key]) {
+          throw StateError('The saved catalog name hierarchy changed');
+        }
+      }
+    }
+
+    await validate();
+    return CatalogNameSaved._(
+      kind: kind,
+      id: result['id']!,
+      name: result['name']!,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing) {
+          throw StateError('Catalog storage is changing');
+        }
+        await _db.transaction(() async {
+          final slot = result['slot']!;
+          final key = '$editDraftPrefix$slot/control';
+          final current = await _read(key);
+          if (current == null) return;
+          if (current != raw ||
+              await _read('$editDraftPrefix$slot/input') != null) {
+            throw StateError('A newer catalog edit replaced this receipt');
+          }
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
   }
 
   Future<EditOpening<WarehouseLocationEditSession>>
@@ -963,6 +1202,8 @@ class EditDrafts {
               'line',
               'location',
               'part',
+              'entity',
+              'parent',
             ].every((key) => record.target[key] == target[key])) {
           throw const FormatException('Unfinished edits target mismatch');
         }

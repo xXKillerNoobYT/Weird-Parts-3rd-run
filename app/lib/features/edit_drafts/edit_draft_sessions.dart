@@ -238,6 +238,81 @@ abstract class _EditSession {
   }
 }
 
+class CatalogNameEditSession extends _EditSession {
+  CatalogNameEditSession._(super.owner, super.record);
+  CatalogNameInput get initial => _record.input as CatalogNameInput;
+  CatalogNameKind get kind => _catalogNameKind(_record.target['entity']);
+  bool get isRename => _record.target['kind'] == 'catalog-name-rename';
+  String get recordId => _record.target[isRename ? 'id' : 'reserved']!;
+  void replace(CatalogNameInput input) => _replace(input);
+
+  Future<CatalogNameSaved> save() async {
+    final command = isRename ? 'catalog-name-rename' : 'catalog-name-create';
+    final result = await _settle(command, () async {
+      final name = initial.nameText.trim();
+      if (name.isEmpty) throw StateError('Name is required');
+      final repo = MaintenanceRepository(
+        _owner._db,
+        _owner._pin,
+        _owner._deviceId,
+      );
+      switch (kind) {
+        case CatalogNameKind.category:
+          if (isRename) {
+            await repo.renameCategory(recordId, name);
+          } else {
+            await repo.createCategory(name, reservedId: recordId);
+          }
+        case CatalogNameKind.type:
+          if (isRename) {
+            await repo.renameStyle(recordId, name);
+          } else {
+            await repo.createStyle(
+              categoryId: _record.target['parent']!,
+              name: name,
+              reservedId: recordId,
+            );
+          }
+        case CatalogNameKind.variant:
+          if (isRename) {
+            await repo.renameType(recordId, name);
+          } else {
+            await repo.createType(
+              styleId: _record.target['parent']!,
+              name: name,
+              reservedId: recordId,
+            );
+          }
+      }
+      final row = await _owner._catalogNameRow(kind, recordId);
+      final ancestors = await _owner._catalogNameAncestors(
+        kind,
+        _catalogNameParent(kind, row),
+      );
+      return {
+        'entity': kind.name,
+        'id': recordId,
+        'name': _text(row['name']),
+        'row': _digest(row),
+        'slot': _record.slot,
+        'target': jsonEncode(_record.target),
+        for (final entry in ancestors.entries)
+          entry.key: _text(entry.value['id']),
+      };
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) {
+      throw StateError('Saved catalog name receipt is unavailable');
+    }
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer catalog edit replaced this receipt');
+    }
+    return _owner._savedCatalogName(raw, _record.target);
+  }
+}
+
 class WarehouseLocationEditSession extends _EditSession {
   WarehouseLocationEditSession._(super.owner, super.record);
   WarehouseLocationNameInput get initial =>

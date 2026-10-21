@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../edit_drafts/edit_drafts.dart';
 import '../maintenance/maintenance_repository.dart';
 import '../pin/pin_gate.dart';
 import 'catalog_repository.dart';
+import 'catalog_name_dialog.dart';
 import 'catalog_tree.dart';
 import 'catalog_tree_view.dart';
 import 'part_detail_page.dart';
@@ -27,6 +29,7 @@ class _CatalogPageState extends State<CatalogPage> {
   List<CatalogTreeNode> _tree = [];
   bool _loading = true;
   bool _initialized = false;
+  String? _catalogNameNotice;
 
   @override
   void didChangeDependencies() {
@@ -120,16 +123,11 @@ class _CatalogPageState extends State<CatalogPage> {
     try {
       switch (parent.kind) {
         case CatalogTreeKind.category:
-          final name = await promptName(context, title: 'Add type');
-          if (name == null || name.isEmpty) return;
-          await _maintenance.createStyle(
-            categoryId: parent.id,
-            name: name,
-          );
+          await _editTaxonomyName(CatalogNameTarget.newType(parent.id), 'Add type');
+          return;
         case CatalogTreeKind.type:
-          final name = await promptName(context, title: 'Add variant');
-          if (name == null || name.isEmpty) return;
-          await _maintenance.createType(styleId: parent.id, name: name);
+          await _editTaxonomyName(CatalogNameTarget.newVariant(parent.id), 'Add variant');
+          return;
         case CatalogTreeKind.variant:
           await _addPart(parent: parent);
           return;
@@ -155,6 +153,16 @@ class _CatalogPageState extends State<CatalogPage> {
 
   Future<void> _rename(CatalogTreeNode node) async {
     if (!await _gate() || !mounted) return;
+    final target = switch (node.kind) {
+      CatalogTreeKind.category => CatalogNameTarget.renameCategory(node.id),
+      CatalogTreeKind.type => CatalogNameTarget.renameType(node.id),
+      CatalogTreeKind.variant => CatalogNameTarget.renameVariant(node.id),
+      _ => null,
+    };
+    if (target != null) {
+      await _editTaxonomyName(target, 'Rename');
+      return;
+    }
     final name = await promptName(
       context,
       title: 'Rename',
@@ -163,12 +171,6 @@ class _CatalogPageState extends State<CatalogPage> {
     if (name == null || name.isEmpty) return;
     try {
       switch (node.kind) {
-        case CatalogTreeKind.category:
-          await _maintenance.renameCategory(node.id, name);
-        case CatalogTreeKind.type:
-          await _maintenance.renameStyle(node.id, name);
-        case CatalogTreeKind.variant:
-          await _maintenance.renameType(node.id, name);
         case CatalogTreeKind.part:
           final part = await _catalog.getPart(node.id);
           if (part == null) return;
@@ -193,6 +195,30 @@ class _CatalogPageState extends State<CatalogPage> {
       await _reload();
     } on StateError catch (e) {
       _toast(e.message);
+    }
+  }
+
+  Future<void> _editTaxonomyName(CatalogNameTarget target, String title) async {
+    if (mounted) setState(() => _catalogNameNotice = null);
+    try {
+      await showCatalogNameDialog(
+        context,
+        target: target,
+        title: title,
+        onNotice: (message) {
+          if (mounted) setState(() => _catalogNameNotice = message);
+        },
+        onSaved: (_) async {
+          try {
+            await _reload();
+          } catch (_) {
+            if (mounted) setState(() => _loading = false);
+            rethrow;
+          }
+        },
+      );
+    } catch (error) {
+      _toast('$error');
     }
   }
 
@@ -240,6 +266,14 @@ class _CatalogPageState extends State<CatalogPage> {
       appBar: AppBar(title: const Text('Catalog')),
       body: Column(
         children: [
+          if (_catalogNameNotice != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(_catalogNameNotice!),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: TextField(

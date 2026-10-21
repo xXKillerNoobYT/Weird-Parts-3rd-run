@@ -17,6 +17,7 @@ import '../company/company_store_markers.dart';
 import '../jobs/jobs_repository.dart';
 import '../jobs/catalog_promotion.dart';
 import '../installation/installation_security.dart';
+import '../maintenance/maintenance_repository.dart';
 import '../pin/pin_service.dart';
 import '../warehouse/warehouse_repository.dart';
 
@@ -55,6 +56,52 @@ final class EditStatus {
 
 final class NewJobInput {
   const NewJobInput({required this.nameText});
+  final String nameText;
+}
+
+enum CatalogNameKind { category, type, variant }
+
+final class CatalogNameTarget {
+  const CatalogNameTarget._(this.kind, this.isRename, {this.id, this.parentId});
+
+  const CatalogNameTarget.newCategory()
+    : this._(CatalogNameKind.category, false);
+
+  factory CatalogNameTarget.newType(String categoryId) => CatalogNameTarget._(
+    CatalogNameKind.type,
+    false,
+    parentId: _identity(categoryId),
+  );
+
+  factory CatalogNameTarget.newVariant(String styleId) => CatalogNameTarget._(
+    CatalogNameKind.variant,
+    false,
+    parentId: _identity(styleId),
+  );
+
+  factory CatalogNameTarget.renameCategory(String id) =>
+      CatalogNameTarget._(CatalogNameKind.category, true, id: _identity(id));
+
+  factory CatalogNameTarget.renameType(String id) =>
+      CatalogNameTarget._(CatalogNameKind.type, true, id: _identity(id));
+
+  factory CatalogNameTarget.renameVariant(String id) =>
+      CatalogNameTarget._(CatalogNameKind.variant, true, id: _identity(id));
+
+  final CatalogNameKind kind;
+  final bool isRename;
+  final String? id, parentId;
+
+  static String _identity(String value) {
+    if (value.trim().isEmpty) {
+      throw ArgumentError.value(value, 'id', 'Catalog identity is required');
+    }
+    return value;
+  }
+}
+
+final class CatalogNameInput {
+  const CatalogNameInput({required this.nameText});
   final String nameText;
 }
 
@@ -150,6 +197,20 @@ final class NewJobCreated extends EditOpening<NewJobEditSession> {
     required this._acknowledge,
   });
 
+  final String id, name;
+  final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
+}
+
+final class CatalogNameSaved extends EditOpening<CatalogNameEditSession> {
+  CatalogNameSaved._({
+    required this.kind,
+    required this.id,
+    required this.name,
+    required this._acknowledge,
+  });
+
+  final CatalogNameKind kind;
   final String id, name;
   final Future<void> Function() _acknowledge;
   Future<void> acknowledge() => _acknowledge();

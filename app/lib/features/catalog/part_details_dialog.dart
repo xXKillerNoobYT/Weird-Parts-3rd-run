@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../app.dart';
 import '../../data/app_database.dart';
 import '../maintenance/maintenance_repository.dart';
+import '../edit_drafts/edit_drafts.dart';
 import '../pin/pin_gate.dart';
+import 'catalog_name_dialog.dart';
 import 'tree_edit_prompts.dart';
 
 class PartDetails {
@@ -56,6 +58,7 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
   String? _styleId;
   String? _typeId;
   String? _error;
+  String? _notice;
   bool _loading = true;
 
   @override
@@ -109,21 +112,7 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
 
   Future<void> _addCategory() async {
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add category');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await widget.maintenance.createCategory(name);
-      await _load();
-      if (!mounted) return;
-      setState(() {
-        _categoryId = id;
-        _styleId = null;
-        _typeId = null;
-        _error = null;
-      });
-    } on StateError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    }
+    await _editTaxonomyName(CatalogNameTarget.newCategory(), 'Add category');
   }
 
   Future<void> _addType() async {
@@ -132,23 +121,7 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add type');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await widget.maintenance.createStyle(
-        categoryId: _categoryId!,
-        name: name,
-      );
-      await _load();
-      if (!mounted) return;
-      setState(() {
-        _styleId = id;
-        _typeId = null;
-        _error = null;
-      });
-    } on StateError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    }
+    await _editTaxonomyName(CatalogNameTarget.newType(_categoryId!), 'Add type');
   }
 
   Future<void> _addVariant() async {
@@ -157,21 +130,39 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add variant');
-    if (name == null || name.isEmpty || !mounted) return;
+    await _editTaxonomyName(CatalogNameTarget.newVariant(_styleId!), 'Add variant');
+  }
+
+  Future<void> _editTaxonomyName(CatalogNameTarget target, String title) async {
     try {
-      final id = await widget.maintenance.createType(
-        styleId: _styleId!,
-        name: name,
+      await showCatalogNameDialog(
+        context,
+        target: target,
+        title: title,
+        onSaved: (saved) async {
+          await _load();
+          if (!mounted) return;
+          setState(() {
+            switch (saved.kind) {
+              case CatalogNameKind.category:
+                _categoryId = saved.id;
+                _styleId = null;
+                _typeId = null;
+              case CatalogNameKind.type:
+                _styleId = saved.id;
+                _typeId = null;
+              case CatalogNameKind.variant:
+                _typeId = saved.id;
+            }
+            _error = null;
+          });
+        },
+        onNotice: (message) {
+          if (mounted) setState(() => _notice = message);
+        },
       );
-      await _load();
-      if (!mounted) return;
-      setState(() {
-        _typeId = id;
-        _error = null;
-      });
-    } on StateError catch (e) {
-      if (mounted) setState(() => _error = e.message);
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
     }
   }
 
@@ -199,7 +190,24 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.title),
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.title),
+          if (_notice != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  _notice!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            ),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: _loading

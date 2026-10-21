@@ -24,10 +24,10 @@ class MaintenanceRepository {
 
   Future<List<Supplier>> listSuppliers() => _db.taxonomyDao.listSuppliers();
 
-  Future<String> createCategory(String name) async {
+  Future<String> createCategory(String name, {String? reservedId}) async {
     await _pin.requireUnlocked();
     return _db.taxonomyDao.insertCategory(
-      id: newId(),
+      id: _recordId(reservedId),
       name: name,
       deviceId: _deviceId,
     );
@@ -36,6 +36,7 @@ class MaintenanceRepository {
   Future<String> createStyle({
     required String categoryId,
     required String name,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
     return legacyBusinessWrite(_db, () async {
@@ -45,7 +46,7 @@ class MaintenanceRepository {
       }
       await _pin.requireUnlocked();
       return _db.taxonomyDao.insertStyle(
-        id: newId(),
+        id: _recordId(reservedId),
         categoryId: categoryId,
         name: name,
         deviceId: _deviceId,
@@ -56,6 +57,7 @@ class MaintenanceRepository {
   Future<String> createType({
     required String styleId,
     required String name,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
     return legacyBusinessWrite(_db, () async {
@@ -68,7 +70,7 @@ class MaintenanceRepository {
       }
       await _pin.requireUnlocked();
       return _db.taxonomyDao.insertType(
-        id: newId(),
+        id: _recordId(reservedId),
         styleId: styleId,
         name: name,
         deviceId: _deviceId,
@@ -121,5 +123,12 @@ class MaintenanceRepository {
   Future<void> renameBrand(String id, String name) async {
     await _pin.requireUnlocked();
     await _db.taxonomyDao.renameBrand(id, name);
+  }
+
+  String _recordId(String? reservedId) {
+    if (reservedId != null && reservedId.trim().isEmpty) {
+      throw StateError('Reserved catalog ID must not be empty');
+    }
+    return reservedId ?? newId();
   }
 }

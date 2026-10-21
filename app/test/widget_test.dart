@@ -46,7 +46,7 @@ Future<void> _pumpShell(
       db: db,
       pin: pin,
       deviceId: deviceId,
-      edits: edits,
+      edits: edits ?? EditDrafts(db: db, pin: pin, deviceId: deviceId),
       wipeLocalData: wipeLocalData ?? () async {},
       restoreFromBackup: (_, _) async {},
       child: const RepaintBoundary(
@@ -658,7 +658,9 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
     expect(find.text('Category, Type, and Variant are required'), findsNothing);
-    expect(find.text('Saved'), findsOneWidget);
+    expect(find.text('Saved'), findsOneWidget,
+        reason: tester.widgetList<Text>(find.byType(Text))
+            .map((widget) => widget.data).whereType<String>().join('\n'));
     final savedPart = (await db.partsDao.listParts()).single;
     expect(savedPart.id, originalPart.id);
     expect(savedPart.categoryId, pendingCategory.id);

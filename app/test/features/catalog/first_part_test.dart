@@ -10,6 +10,7 @@ import 'package:wired_parts/features/catalog/catalog_repository.dart';
 import 'package:wired_parts/features/catalog/catalog_tree.dart';
 import 'package:wired_parts/features/catalog/part_details_dialog.dart';
 import 'package:wired_parts/features/catalog/part_detail_page.dart';
+import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
 import 'package:wired_parts/features/jobs/job_line_editor.dart';
 import 'package:wired_parts/features/jobs/jobs_repository.dart';
 import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
@@ -25,6 +26,7 @@ void main() {
   late String device;
   late CatalogRepository catalog;
   late MaintenanceRepository maintenance;
+  late EditDrafts edits;
 
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -32,6 +34,7 @@ void main() {
     pin = PinService(db.settingsDao);
     catalog = CatalogRepository(db, pin, device);
     maintenance = MaintenanceRepository(db, pin, device);
+    edits = EditDrafts(db: db, pin: pin, deviceId: device);
   });
   tearDown(() async => db.close());
 
@@ -58,6 +61,7 @@ void main() {
         db: db,
         pin: pin,
         deviceId: device,
+        edits: edits,
         wipeLocalData: () async {},
         restoreFromBackup: (_, _) async {},
         child: MaterialApp(home: home),
