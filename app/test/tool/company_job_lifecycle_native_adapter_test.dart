@@ -47,6 +47,17 @@ Object? canonicalValue(Object? value) {
 
 String canonical(Object? value) => jsonEncode(canonicalValue(value));
 
+const _schema12OnlyTables = {'warehouse_locations', 'warehouse_counts'};
+
+List<String> _schema11TableNames(AppDatabase db) {
+  final names = db.allTables
+      .map((table) => table.actualTableName)
+      .where((name) => !_schema12OnlyTables.contains(name))
+      .toList();
+  expect(names, hasLength(34));
+  return names;
+}
+
 Map<String, Object?> terminal(
   int sent,
   int received,
@@ -255,7 +266,7 @@ void main() {
   test('pending lifecycle readback is exact by role and cannot masquerade as acknowledged conflict', () {
     final tables = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(tables.close);
-    final names = tables.allTables.map((t) => t.actualTableName).toList();
+    final names = _schema11TableNames(tables);
     for (final role in ['owner', 'member']) {
       final value = pendingEvidence(names, role);
       void validate(Map<String, dynamic> e) =>
@@ -668,9 +679,8 @@ void main() {
     );
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
-    final saved = evidence(
-      db.allTables.map((table) => table.actualTableName).toList(),
-    )..['sqlSha256'] = 'a' * 64;
+    final saved = evidence(_schema11TableNames(db))
+      ..['sqlSha256'] = 'a' * 64;
     final checkpoint = <String, dynamic>{
       'lifecycleStage': 'conflict',
       'interruptedConflictRecovery': recovery,
@@ -796,7 +806,7 @@ void main() {
   late List<String> tables;
   setUpAll(() async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
-    tables = db.allTables.map((t) => t.actualTableName).toList();
+    tables = _schema11TableNames(db);
     await db.close();
   });
 

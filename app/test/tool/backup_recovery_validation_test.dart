@@ -4,11 +4,103 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:wired_parts/app.dart';
+import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
+import 'package:wired_parts/features/warehouse/warehouse_repository.dart';
 
 import '../../tool/backup_recovery_scenario.dart';
+
+void expectWarehouseRecords(
+  Map records, {
+  required String prefix,
+  required String deviceId,
+  required double firstQuantity,
+}) {
+  final locations = records['warehouse_locations'] as List;
+  final counts = records['warehouse_counts'] as List;
+  expect(locations, hasLength(1), reason: 'Recovery must contain a warehouse');
+  expect(
+    locations.single,
+    allOf(
+      containsPair('id', '$prefix-warehouse'),
+      containsPair('name', '$prefix warehouse'),
+      containsPair('origin_device_id', deviceId),
+      containsPair('revision', 1),
+      containsPair('deleted_at', null),
+    ),
+  );
+  expect(counts, hasLength(2), reason: 'Recovery must retain count history');
+  final first = counts.singleWhere((row) => row['ordinal'] == 1) as Map;
+  final latest = counts.singleWhere((row) => row['ordinal'] == 2) as Map;
+  for (final row in [first, latest]) {
+    expect(
+      row,
+      allOf(
+        containsPair('location_id', '$prefix-warehouse'),
+        containsPair('part_id', '$prefix-part'),
+        containsPair('uom', 'box'),
+        containsPair('origin_device_id', deviceId),
+        containsPair('recorded_at', isA<int>()),
+      ),
+    );
+  }
+  expect(
+    first,
+    allOf(
+      containsPair('id', '$prefix-count-first'),
+      containsPair('prior_count_id', null),
+      containsPair('quantity', firstQuantity),
+      containsPair('note', '$prefix opening count'),
+      containsPair(
+        'observed_at',
+        DateTime.utc(2026, 10, 7, 8).millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+  );
+  expect(
+    latest,
+    allOf(
+      containsPair('id', '$prefix-count-zero'),
+      containsPair('prior_count_id', '$prefix-count-first'),
+      containsPair('quantity', 0),
+      containsPair('note', '$prefix counted empty\nVerified shelf'),
+      containsPair(
+        'observed_at',
+        DateTime.utc(2026, 10, 7, 8, 15).millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+  );
+}
+
+Future<void> expectRestoredWarehouse(
+  AppDatabase db, {
+  required String prefix,
+  required String localDeviceId,
+}) async {
+  final warehouse = WarehouseRepository(
+    db,
+    PinService(db.settingsDao),
+    localDeviceId,
+  );
+  final stock = (await warehouse.loadLatestCounts('$prefix-warehouse')).single;
+  expect(stock.part.id, '$prefix-part');
+  expect(stock.count.id, '$prefix-count-zero');
+  expect(stock.count.quantity, 0);
+  expect(stock.count.uom, 'box');
+  expect(stock.count.ordinal, 2);
+  expect(stock.needsRecount, isFalse);
+  final history = await warehouse.loadCountHistory(
+    '$prefix-warehouse',
+    '$prefix-part',
+  );
+  expect(history.map((row) => row.id), [
+    '$prefix-count-zero',
+    '$prefix-count-first',
+  ]);
+  expect(history.map((row) => row.quantity), [0, 12.5]);
+}
 
 void main() {
   test('restart refuses missing evidence without creating a shop', () {
@@ -88,6 +180,8 @@ void main() {
         'brands',
         'suppliers',
         'parts',
+        'warehouse_locations',
+        'warehouse_counts',
         'part_devices',
         'brand_versions',
         'supplier_listings',
@@ -138,6 +232,12 @@ void main() {
         expect(registry[table], isEmpty);
       }
       final prefix = '${scenario.source.run}-sender';
+      expectWarehouseRecords(
+        registry,
+        prefix: prefix,
+        deviceId: scenario.source.deviceId,
+        firstQuantity: 12.5,
+      );
       expect(
         (registry['parts'] as List).single,
         containsPair('id', '$prefix-part'),
@@ -179,6 +279,20 @@ void main() {
       final receiverProfileBefore = await tester.runAsync(
         () =>
             db.customSelect('SELECT * FROM device_profiles ORDER BY id').get(),
+      );
+      final receiverPrefix = '${scenario.receiver.run}-receiver';
+      final receiverBefore = await tester.runAsync(
+        () => scenario.receipt(db, scenario.receiver),
+      );
+      expectWarehouseRecords(
+        receiverBefore!['records'] as Map,
+        prefix: receiverPrefix,
+        deviceId: scenario.receiver.deviceId,
+        firstQuantity: 4.25,
+      );
+      expect(
+        (receiverBefore['records'] as Map)['warehouse_counts'],
+        isNot(registry['warehouse_counts']),
       );
       expect(receiverProfileBefore!.single.data, {
         'id': scenario.receiver.deviceId,
@@ -231,9 +345,37 @@ void main() {
       for (final row in reports.where((row) => row['step'] != 'restore')) {
         expect(row['after']['deviceProfiles'], row['before']['deviceProfiles']);
         expect(row['after']['sqliteSha256'], row['before']['sqliteSha256']);
+        expectWarehouseRecords(
+          row['after']['records'] as Map,
+          prefix: receiverPrefix,
+          deviceId: scenario.receiver.deviceId,
+          firstQuantity: 4.25,
+        );
+        for (final table in ['warehouse_locations', 'warehouse_counts']) {
+          expect(
+            row['after']['records'][table],
+            row['before']['records'][table],
+          );
+        }
       }
       final restoreReport = reports.singleWhere(
         (row) => row['step'] == 'restore',
+      );
+      expectWarehouseRecords(
+        restoreReport['after']['records'] as Map,
+        prefix: prefix,
+        deviceId: scenario.source.deviceId,
+        firstQuantity: 12.5,
+      );
+      for (final table in ['warehouse_locations', 'warehouse_counts']) {
+        expect(restoreReport['after']['records'][table], registry[table]);
+      }
+      await tester.runAsync(
+        () => expectRestoredWarehouse(
+          scope().db,
+          prefix: prefix,
+          localDeviceId: scenario.receiver.deviceId,
+        ),
       );
       expect(restoreReport['after']['deviceProfiles'], [
         receiverProfileBefore.single.data,
@@ -262,6 +404,25 @@ void main() {
       liveDatabase = reopened;
       try {
         await tester.runAsync(() => scenario.restart(reopened));
+        final reopenedReceipt = await tester.runAsync(
+          () => scenario.receipt(reopened, scenario.receiver),
+        );
+        expectWarehouseRecords(
+          reopenedReceipt!['records'] as Map,
+          prefix: prefix,
+          deviceId: scenario.source.deviceId,
+          firstQuantity: 12.5,
+        );
+        for (final table in ['warehouse_locations', 'warehouse_counts']) {
+          expect((reopenedReceipt['records'] as Map)[table], registry[table]);
+        }
+        await tester.runAsync(
+          () => expectRestoredWarehouse(
+            reopened,
+            prefix: prefix,
+            localDeviceId: scenario.receiver.deviceId,
+          ),
+        );
         final profileAfterRestart = await tester.runAsync(
           () => reopened
               .customSelect('SELECT * FROM device_profiles ORDER BY id')

@@ -689,13 +689,13 @@ void main() {
             );
         expect(
           currentDb.select('PRAGMA user_version').single.values.single,
-          11,
+          12,
         );
         expect(
           currentDb.select(
             "SELECT name FROM sqlite_master WHERE type = 'table'",
           ),
-          hasLength(34),
+          hasLength(36),
         );
         final currentSql = await adapter.detailsNativeSqlHash(f.bDb);
         await expectLater(checkCold(), throwsA(isA<NativeTestFailure>()));
