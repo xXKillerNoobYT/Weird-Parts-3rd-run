@@ -6,6 +6,7 @@ import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
+import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
 import 'package:wired_parts/features/warehouse/warehouse_page.dart';
 
 import 'warehouse_test_support.dart';
@@ -29,6 +30,7 @@ void main() {
         db: f.db,
         pin: f.pin,
         deviceId: f.device,
+        edits: EditDrafts(db: f.db, pin: f.pin, deviceId: f.device),
         wipeLocalData: () async {},
         restoreFromBackup: (_, _) async {},
         child: MaterialApp(
@@ -241,7 +243,7 @@ void main() {
       await tester.tap(find.text('Save count'));
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('Catalog editor PIN required'),
+        find.text('Bad state: Catalog editor PIN required'),
         findsOneWidget,
       );
       expect(find.text('4'), findsOneWidget);
@@ -257,12 +259,13 @@ void main() {
     await location(tester);
     await pick(tester);
     final concurrent = await f.repo.recordCount(f.draft(quantity: 7));
-    final before = await f.snapshot();
     await tester.enterText(field('Count quantity'), '99');
+    await tester.pumpAndSettle();
+    final before = await f.snapshot();
     await tester.tap(find.text('Save count'));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('Count changed. Cancel and reload'),
+      find.text('Bad state: Count changed. Cancel and reload before recounting.'),
       findsOneWidget,
     );
     expect(await f.snapshot(), before);

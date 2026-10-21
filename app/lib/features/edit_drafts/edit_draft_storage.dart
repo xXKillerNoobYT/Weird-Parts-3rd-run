@@ -73,6 +73,8 @@ Map<String, Object?> _control(String raw) {
         ? {'part'}
         : command == 'job-create'
         ? {'job', 'name'}
+        : command == 'warehouse-count-save'
+        ? {'count', 'location', 'part', 'row'}
         : command == 'line-save' || command == 'line-remove'
         ? {'line'}
         : command.startsWith('line-promote/')
@@ -96,6 +98,11 @@ Map<String, Object?> _control(String raw) {
 
 Map<String, Object?> _inputJson(Object input) => switch (input) {
   NewJobInput j => {'name': j.nameText},
+  WarehouseCountInput c => {
+    'quantity': c.quantityText,
+    'note': c.noteText,
+    'observedAt': c.observedAt.toUtc().toIso8601String(),
+  },
   PartInput p => {
     'name': p.nameText,
     'description': p.descriptionText,
@@ -126,6 +133,19 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
 };
 Object _parseInput(String kind, Object? value) {
   final m = _map(value);
+  if (kind == 'warehouse-count') {
+    _keys(m, {'quantity', 'note', 'observedAt'});
+    final text = _text(m['observedAt']);
+    final observed = DateTime.tryParse(text);
+    if (observed == null || observed.toUtc().toIso8601String() != text) {
+      throw const FormatException('Invalid unfinished observation time');
+    }
+    return WarehouseCountInput(
+      quantityText: _text(m['quantity']),
+      noteText: _text(m['note']),
+      observedAt: observed,
+    );
+  }
   if (kind == 'job-new') {
     _keys(m, {'name'});
     return NewJobInput(nameText: _text(m['name']));
@@ -197,6 +217,9 @@ String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
   if (target['kind'] == 'part') return 'part/${segment('id')}';
   if (target['kind'] == 'job-new') return 'job-new';
+  if (target['kind'] == 'warehouse-count') {
+    return 'warehouse-count/${segment('location')}/${segment('part')}';
+  }
   return target.containsKey('line')
       ? 'job-line/${segment('job')}/${segment('line')}'
       : 'job-line-new/${segment('job')}';
@@ -257,6 +280,21 @@ final class _DraftRecord {
     } else if (target['kind'] == 'job-new') {
       if (target.length != 2 || !target.containsKey('reserved')) {
         throw const FormatException('Invalid new Job target');
+      }
+    } else if (target['kind'] == 'warehouse-count') {
+      final expected = {
+        'kind',
+        'location',
+        'part',
+        'reserved',
+        'uom',
+        if (target.containsKey('prior')) 'prior',
+      };
+      if (target.length != expected.length ||
+          !expected.every(target.containsKey) ||
+          target['uom']!.trim().isEmpty ||
+          target['uom'] != target['uom']!.trim()) {
+        throw const FormatException('Invalid warehouse count target');
       }
     } else if (target['kind'] == 'line') {
       if (!target.containsKey('job') ||
@@ -365,6 +403,46 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'warehouse-count') {
+      final location = await _row('warehouse_locations', target['location']!);
+      final part = await _row('parts', target['part']!);
+      if (location == null || location['deleted_at'] != null) {
+        throw StateError('Warehouse location is unavailable');
+      }
+      if (part == null || part['deleted_at'] != null) {
+        throw StateError('Part is no longer in the catalog');
+      }
+      if (target['uom']!.isEmpty ||
+          part['uom'].toString().trim() != target['uom']) {
+        throw StateError(
+          'Part unit changed. Reload and recount without conversion.',
+        );
+      }
+      final heads = await _db
+          .customSelect(
+            'SELECT * FROM warehouse_counts WHERE location_id = ? AND part_id = ? '
+            'ORDER BY ordinal DESC LIMIT 1',
+            variables: [
+              Variable(target['location']!),
+              Variable(target['part']!),
+            ],
+          )
+          .get();
+      final head = heads.isEmpty ? null : heads.single.data;
+      if (head?['id'] != target['prior']) {
+        throw StateError('Count changed. Cancel and reload before recounting.');
+      }
+      final reserved = await _row('warehouse_counts', target['reserved']!);
+      if (reserved != null) {
+        throw StateError('Reserved count ID is already in use');
+      }
+      return {
+        'location': _digest(location),
+        'part': _digest(part),
+        'head': _digest(head),
+        'count': _digest(reserved),
+      };
+    }
     if (target['kind'] == 'job-new') {
       final job = await _row('jobs', target['reserved']!);
       if (job != null) throw StateError('Reserved Job ID is already in use');
@@ -412,6 +490,8 @@ class EditDrafts {
 
     switch (input) {
       case NewJobInput():
+        break;
+      case WarehouseCountInput():
         break;
       case PartInput p:
         add('categories', p.categoryId);
@@ -500,6 +580,90 @@ class EditDrafts {
         }
       }
     }
+  }
+
+  Future<EditOpening<WarehouseCountEditSession>> openWarehouseCount({
+    required String locationId,
+    required String partId,
+    required String uom,
+    required String? expectedPriorCountId,
+  }) => _open<WarehouseCountEditSession>(
+    {
+      'kind': 'warehouse-count',
+      'location': locationId,
+      'part': partId,
+      'reserved': newId(),
+      'uom': uom.trim(),
+      'prior': ?expectedPriorCountId,
+    },
+    () async => WarehouseCountInput(
+      quantityText: '',
+      noteText: '',
+      observedAt: DateTime.now().toUtc(),
+    ),
+    (record) => WarehouseCountEditSession._(this, record),
+    onCommitted: (raw) => _savedWarehouseCount(raw, locationId, partId),
+  );
+
+  Future<WarehouseCountSaved> _savedWarehouseCount(
+    String raw,
+    String locationId,
+    String partId,
+  ) async {
+    if (_closed || _quiescing) throw StateError('Count storage is changing');
+    final control = _control(raw);
+    if (control['phase'] != 'committed' ||
+        control['command'] != 'warehouse-count-save') {
+      throw const FormatException('Unsupported saved count receipt');
+    }
+    final result = _strings(control['result']);
+    if (result['location'] != locationId || result['part'] != partId) {
+      throw const FormatException(
+        'Saved count belongs to another location or Part',
+      );
+    }
+    Future<WarehouseCount> validate() async {
+      if (_digest(_origin()) != _digest(control['origin'])) {
+        throw StateError('Saved count belongs to another installation');
+      }
+      final count = await (_db.select(
+        _db.warehouseCounts,
+      )..where((t) => t.id.equals(result['count']!))).getSingleOrNull();
+      if (count == null ||
+          count.locationId != locationId ||
+          count.partId != partId ||
+          count.originDeviceId != _deviceId ||
+          _digest(count.toJson()) != result['row']) {
+        throw StateError('The saved count changed or is unavailable');
+      }
+      return count;
+    }
+
+    final count = await validate();
+    final slot = _slot({
+      'kind': 'warehouse-count',
+      'location': locationId,
+      'part': partId,
+    });
+    return WarehouseCountSaved._(
+      count: count,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing) {
+          throw StateError('Count storage is changing');
+        }
+        await _db.transaction(() async {
+          final key = '$editDraftPrefix$slot/control';
+          final current = await _read(key);
+          if (current == null) return;
+          if (current != raw ||
+              await _read('$editDraftPrefix$slot/input') != null) {
+            throw StateError('A newer count edit replaced this receipt');
+          }
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
   }
 
   Future<EditOpening<NewJobEditSession>> openNewJob() =>
@@ -650,6 +814,8 @@ class EditDrafts {
               'id',
               'job',
               'line',
+              'location',
+              'part',
             ].every((key) => record.target[key] == target[key])) {
           throw const FormatException('Unfinished edits target mismatch');
         }

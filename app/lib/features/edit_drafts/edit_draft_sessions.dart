@@ -238,6 +238,60 @@ abstract class _EditSession {
   }
 }
 
+class WarehouseCountEditSession extends _EditSession {
+  WarehouseCountEditSession._(super.owner, super.record);
+  WarehouseCountInput get initial => _record.input as WarehouseCountInput;
+  String get countId => _record.target['reserved']!;
+  void replace(WarehouseCountInput input) => _replace(input);
+
+  Future<WarehouseCountSaved> save() async {
+    final result = await _settle('warehouse-count-save', () async {
+      final quantity = double.tryParse(initial.quantityText.trim());
+      if (quantity == null) {
+        throw StateError(
+          'Enter a finite, nonnegative quantity. Zero is a count.',
+        );
+      }
+      final target = _record.target;
+      final count =
+          await WarehouseRepository(
+            _owner._db,
+            _owner._pin,
+            _owner._deviceId,
+          ).recordCount(
+            WarehouseCountDraft(
+              id: countId,
+              locationId: target['location']!,
+              partId: target['part']!,
+              expectedPriorCountId: target['prior'],
+              quantity: quantity,
+              uom: target['uom']!,
+              observedAt: initial.observedAt,
+              note: initial.noteText,
+            ),
+          );
+      return {
+        'count': count.id,
+        'location': count.locationId,
+        'part': count.partId,
+        'row': _digest(count.toJson()),
+      };
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) throw StateError('Saved count receipt is unavailable');
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer count edit replaced this receipt');
+    }
+    return _owner._savedWarehouseCount(
+      raw,
+      _record.target['location']!,
+      _record.target['part']!,
+    );
+  }
+}
+
 class NewJobEditSession extends _EditSession {
   NewJobEditSession._(super.owner, super.record);
   NewJobInput get initial => _record.input as NewJobInput;

@@ -5,9 +5,11 @@ import '../../core/new_id.dart';
 import '../../data/app_database.dart';
 import '../catalog/catalog_tree.dart';
 import '../catalog/catalog_tree_picker.dart';
+import '../edit_drafts/edit_drafts.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../pin/pin_gate.dart';
 import 'warehouse_repository.dart';
+import 'warehouse_count_dialog.dart';
 
 class WarehousePage extends StatefulWidget {
   const WarehousePage({super.key});
@@ -173,24 +175,42 @@ class _LocationPageState extends State<_LocationPage> {
 
   Future<void> _count(Part part) async {
     if (!await ensurePinUnlocked(context, AppScope.of(context).pin)) return;
+    if (!mounted) return;
     try {
+      final scope = AppScope.of(context);
+      final edits = scope.edits;
+      if (edits == null) {
+        throw StateError('Unfinished edits are unavailable');
+      }
       final head = await _repo.latestCount(_location.id, part.id);
       if (!mounted) return;
-      final saved = await showDialog<bool>(
+      final saved = await showDialog<WarehouseCountSaved>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => _CountDialog(
-          repo: _repo,
+        builder: (_) => WarehouseCountDialog(
+          edits: edits,
           locationId: _location.id,
           part: part,
           head: head,
         ),
       );
       if (!mounted) return;
-      if (saved == true) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Count saved')));
+      if (saved != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Count saved')),
+        );
         _reload();
+        await WidgetsBinding.instance.endOfFrame;
+        try {
+          await saved.acknowledge();
+        } catch (error) {
+          if (mounted) {
+            _showError(
+              context,
+              'Count saved. Confirmation remains pending: $error',
+            );
+          }
+        }
       }
     } catch (e) {
       if (mounted) _showError(context, e);
@@ -324,161 +344,6 @@ class _LocationPageState extends State<_LocationPage> {
           ],
         );
       },
-    ),
-  );
-}
-
-class _CountDialog extends StatefulWidget {
-  const _CountDialog({
-    required this.repo,
-    required this.locationId,
-    required this.part,
-    required this.head,
-  });
-  final WarehouseRepository repo;
-  final String locationId;
-  final Part part;
-  final WarehouseCount? head;
-
-  @override
-  State<_CountDialog> createState() => _CountDialogState();
-}
-
-class _CountDialogState extends State<_CountDialog> {
-  final _quantityController = TextEditingController();
-  final _noteController = TextEditingController();
-  final _requestId = newId();
-  var _observedAt = DateTime.now();
-  bool _busy = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _quantityController.dispose();
-    _noteController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _chooseTime() async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: _observedAt,
-      firstDate: DateTime(1970),
-      lastDate: DateTime(2100),
-    );
-    if (date == null || !mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_observedAt),
-    );
-    if (time == null || !mounted) return;
-    setState(
-      () => _observedAt = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-      ),
-    );
-  }
-
-  Future<void> _save() async {
-    if (_busy) return;
-    final quantity = double.tryParse(_quantityController.text.trim());
-    if (quantity == null || !quantity.isFinite || quantity < 0) {
-      setState(
-        () => _error = 'Enter a finite, nonnegative quantity. Zero is a count.',
-      );
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.repo.recordCount(
-        WarehouseCountDraft(
-          id: _requestId,
-          locationId: widget.locationId,
-          partId: widget.part.id,
-          expectedPriorCountId: widget.head?.id,
-          quantity: quantity,
-          uom: widget.part.uom,
-          observedAt: _observedAt,
-          note: _noteController.text,
-        ),
-      );
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = '$e';
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !_busy,
-    child: AlertDialog(
-      title: Text('Count ${widget.part.name}'),
-      content: SizedBox(
-        width: 480,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                widget.head == null
-                    ? 'Not counted'
-                    : 'Previous observation: ${_quantity(widget.head!.quantity)} ${widget.head!.uom}',
-              ),
-              Text(
-                'Record the absolute physical quantity in ${widget.part.uom}. No conversion is applied.',
-              ),
-              TextField(
-                controller: _quantityController,
-                enabled: !_busy,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Count quantity'),
-              ),
-              TextButton(
-                onPressed: _busy ? null : _chooseTime,
-                child: Text('Observed ${_stamp(_observedAt)}'),
-              ),
-              TextField(
-                controller: _noteController,
-                enabled: !_busy,
-                minLines: 2,
-                maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Count note'),
-              ),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _busy ? null : _save,
-          child: const Text('Save count'),
-        ),
-      ],
     ),
   );
 }

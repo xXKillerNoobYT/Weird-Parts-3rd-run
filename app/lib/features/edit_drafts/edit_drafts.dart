@@ -18,6 +18,7 @@ import '../jobs/jobs_repository.dart';
 import '../jobs/catalog_promotion.dart';
 import '../installation/installation_security.dart';
 import '../pin/pin_service.dart';
+import '../warehouse/warehouse_repository.dart';
 
 part 'edit_draft_storage.dart';
 part 'edit_draft_sessions.dart';
@@ -55,6 +56,16 @@ final class EditStatus {
 final class NewJobInput {
   const NewJobInput({required this.nameText});
   final String nameText;
+}
+
+final class WarehouseCountInput {
+  const WarehouseCountInput({
+    required this.quantityText,
+    required this.noteText,
+    required this.observedAt,
+  });
+  final String quantityText, noteText;
+  final DateTime observedAt;
 }
 
 final class PartInput {
@@ -135,6 +146,13 @@ final class NewJobCreated extends EditOpening<NewJobEditSession> {
   });
 
   final String id, name;
+  final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
+}
+
+final class WarehouseCountSaved extends EditOpening<WarehouseCountEditSession> {
+  WarehouseCountSaved._({required this.count, required this._acknowledge});
+  final WarehouseCount count;
   final Future<void> Function() _acknowledge;
   Future<void> acknowledge() => _acknowledge();
 }
