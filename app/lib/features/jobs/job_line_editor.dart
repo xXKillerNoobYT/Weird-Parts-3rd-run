@@ -378,17 +378,46 @@ class _JobLineEditorState extends State<JobLineEditor> {
     }
   }
 
-  Future<void> _save() async {
+  ({
+    double neededQty,
+    double shopPullQty,
+    List<({String supplierId, double qty})> splits,
+  })?
+  _validatedQuantities() {
     final needed = double.tryParse(_neededController.text.trim());
     final pull = double.tryParse(_pullController.text.trim());
-    if (needed == null || needed < 0) {
+    if (needed == null || !needed.isFinite || needed < 0) {
       _toast('Enter a valid requested quantity');
-      return;
+      return null;
     }
-    if (pull == null || pull < 0) {
+    if (pull == null || !pull.isFinite || pull < 0) {
       _toast('Enter a valid shop quantity');
-      return;
+      return null;
     }
+
+    final splits = <({String supplierId, double qty})>[];
+    for (final draft in _splits) {
+      final qtyText = draft.qtyController.text.trim();
+      if (draft.supplierId == null && qtyText.isEmpty) continue;
+      if (draft.supplierId == null) {
+        _toast('Each order split needs a supplier');
+        return null;
+      }
+      final qty = double.tryParse(qtyText);
+      if (qty == null || !qty.isFinite || qty <= 0) {
+        _toast('Each order split needs a quantity > 0');
+        return null;
+      }
+      splits.add((supplierId: draft.supplierId!, qty: qty));
+    }
+
+    return (neededQty: needed, shopPullQty: pull, splits: splits);
+  }
+
+  Future<void> _save() async {
+    if (_saving || _loading) return;
+    final quantities = _validatedQuantities();
+    if (quantities == null) return;
 
     String? partId;
     String? brandVersionId;
@@ -409,49 +438,32 @@ class _JobLineEditorState extends State<JobLineEditor> {
       brandVersionId = _brandVersionId;
     }
 
-    final splits = <({String supplierId, double qty})>[];
-    for (final draft in _splits) {
-      final qtyText = draft.qtyController.text.trim();
-      if (draft.supplierId == null && qtyText.isEmpty) continue;
-      if (draft.supplierId == null) {
-        _toast('Each order split needs a supplier');
-        return;
-      }
-      final qty = double.tryParse(qtyText);
-      if (qty == null || qty <= 0) {
-        _toast('Each order split needs a quantity > 0');
-        return;
-      }
-      splits.add((supplierId: draft.supplierId!, qty: qty));
-    }
-
     setState(() => _saving = true);
     try {
-      late final String lineId;
       if (_isEditing) {
-        lineId = _lineId!;
         await _jobs.updateLine(
-          lineId: lineId,
+          lineId: _lineId!,
           partId: partId,
           brandVersionId: brandVersionId,
           customName: customName,
           customNotes: _customNotes,
           uom: _uom,
           notes: _notes,
-          neededQty: needed,
-          shopPullQty: pull,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
         );
       } else {
-        lineId = await _jobs.addLine(
+        await _jobs.addLine(
           jobId: widget.jobId,
           partId: partId,
           brandVersionId: brandVersionId,
           customName: customName,
-          neededQty: needed,
-          shopPullQty: pull,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
         );
       }
-      await _jobs.replaceOrderSplits(lineId, splits);
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
@@ -469,6 +481,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
       return;
     }
 
+    final quantities = _validatedQuantities();
+    if (quantities == null) return;
     final scope = AppScope.of(context);
     if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
 
@@ -478,8 +492,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
         initialName: name,
         title: 'Promote to catalog',
         submitLabel: 'Promote',
-        introduction:
-            'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.',
+        introduction: 'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.',
         maintenance: _maintenance,
       ),
     );
@@ -493,27 +506,22 @@ class _JobLineEditorState extends State<JobLineEditor> {
         styleId: result.styleId,
         typeId: result.typeId,
       );
-      final needed = double.tryParse(_neededController.text.trim()) ?? 1.0;
-      final pull = double.tryParse(_pullController.text.trim()) ?? 0.0;
-      final neededQty = needed < 0 ? 1.0 : needed;
-      final shopPullQty = pull < 0 ? 0.0 : pull;
-      final splits = _previewSplits();
       if (_lineId != null) {
         await _jobs.attachCatalogPart(
           lineId: _lineId!,
           partId: partId,
-          neededQty: neededQty,
-          shopPullQty: shopPullQty,
-          splits: splits,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
         );
       } else {
         _lineId = await _jobs.addLine(
           jobId: widget.jobId,
           partId: partId,
-          neededQty: neededQty,
-          shopPullQty: shopPullQty,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
         );
-        await _jobs.replaceOrderSplits(_lineId!, splits);
       }
 
       final versions = await _catalog.listBrandVersionsForPart(partId);
@@ -544,16 +552,6 @@ class _JobLineEditorState extends State<JobLineEditor> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
-  }
-
-  List<({String supplierId, double qty})> _previewSplits() {
-    final splits = <({String supplierId, double qty})>[];
-    for (final draft in _splits) {
-      final qty = double.tryParse(draft.qtyController.text.trim());
-      if (draft.supplierId == null || qty == null || qty <= 0) continue;
-      splits.add((supplierId: draft.supplierId!, qty: qty));
-    }
-    return splits;
   }
 
   void _toast(String message) {
@@ -818,8 +816,5 @@ class _JobLineEditorState extends State<JobLineEditor> {
     );
   }
 
-  static String _qtyText(double v) {
-    if (v == v.roundToDouble()) return v.toInt().toString();
-    return v.toString();
-  }
+  static String _qtyText(double v) => formatQty(v);
 }

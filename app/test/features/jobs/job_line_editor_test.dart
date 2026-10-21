@@ -62,6 +62,137 @@ void main() {
   });
   tearDown(() async => db.close());
 
+  for (final editing in [false, true]) {
+    testWidgets(
+      'split insert failure rolls back the ${editing ? 'edited' : 'new'} line Save',
+      (tester) async {
+        final supplierId = await db.taxonomyDao.insertSupplier(
+          id: newId(),
+          name: 'Synthetic supplier',
+          deviceId: deviceId,
+        );
+        final jobId = await jobs.createJob('Atomic save');
+        String? lineId;
+        if (editing) {
+          lineId = await jobs.addLine(
+            jobId: jobId,
+            customName: 'Original name',
+            customNotes: 'Original metadata',
+            uom: 'box',
+            notes: 'Keep notes',
+            neededQty: 7,
+            shopPullQty: 2,
+          );
+          await jobs.replaceOrderSplits(lineId, [
+            (supplierId: supplierId, qty: 1),
+          ]);
+          await jobs.replaceOrderSplits(lineId, [
+            (supplierId: supplierId, qty: 5),
+          ]);
+        }
+        final originalLines = await db.select(db.jobLines).get();
+        final originalSplits = await db.select(db.orderSplits).get();
+        await db.customStatement(
+          "CREATE TRIGGER fail_split_insert BEFORE INSERT ON order_splits BEGIN SELECT RAISE(ABORT, 'synthetic split failure'); END",
+        );
+        await _openEditor(
+          tester,
+          db: db,
+          deviceId: deviceId,
+          jobId: jobId,
+          lineId: lineId,
+        );
+        if (!editing) {
+          await tester.tap(find.text('Custom'));
+          await tester.pumpAndSettle();
+        }
+        await tester.enterText(_field('Custom name'), 'Changed name');
+        await tester.enterText(_field('Requested'), '9');
+        await tester.enterText(_field('Shop'), '3');
+        if (!editing) {
+          final supplier = find.byType(DropdownButtonFormField<String?>);
+          await tester.ensureVisible(supplier);
+          await tester.tap(supplier);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Synthetic supplier').last);
+          await tester.pumpAndSettle();
+        }
+        await tester.ensureVisible(_field('Qty'));
+        await tester.enterText(_field('Qty'), '4');
+        await tester.tap(find.widgetWithText(TextButton, 'Save'));
+        await tester.pumpAndSettle();
+        expect(await db.select(db.jobLines).get(), originalLines);
+        expect(await db.select(db.orderSplits).get(), originalSplits);
+        expect(find.byType(JobLineEditor), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await db.customStatement('DROP TRIGGER fail_split_insert');
+        await tester.tap(find.widgetWithText(TextButton, 'Save'));
+        await tester.pumpAndSettle();
+        final saved = (await jobs.listLinesForJob(jobId)).single;
+        if (editing) expect(saved.id, lineId);
+        expect(saved.customName, 'Changed name');
+        expect(saved.neededQty, 9);
+        expect(saved.shopPullQty, 3);
+        expect((await jobs.orderSplitsForLine(saved.id)).single.quantity, 4);
+        expect(find.text('Open editor'), findsOneWidget);
+      },
+    );
+  }
+
+  testWidgets('overflowing decimal input refuses Save without preview crash', (
+    tester,
+  ) async {
+    final jobId = await jobs.createJob('Invalid quantity');
+    await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_field('Custom name'), 'Unsaved');
+    await tester.enterText(_field('Requested'), '9' * 400);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(await jobs.listLinesForJob(jobId), isEmpty);
+    expect(find.text('Enter a valid requested quantity'), findsOneWidget);
+  });
+
+  testWidgets('incomplete supplier draft can still open Add supplier', (
+    tester,
+  ) async {
+    final jobId = await jobs.createJob('Supplier draft');
+    await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(_field('Qty'));
+    await tester.enterText(_field('Qty'), '4');
+    await tester.tap(find.text('Add supplier'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add supplier'), findsNWidgets(2));
+    expect(_field('Name'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(await jobs.listLinesForJob(jobId), isEmpty);
+  });
+
+  testWidgets(
+    'invalid quantities refuse promotion before creating a catalog part',
+    (tester) async {
+      final jobId = await jobs.createJob('Invalid promotion');
+      await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+      await tester.tap(find.text('Custom'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Custom name'), 'Unsaved promotion');
+      await tester.enterText(_field('Requested'), '9' * 400);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Promote to catalog'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter a valid requested quantity'), findsOneWidget);
+      expect(find.text('Part name'), findsNothing);
+      expect(await db.select(db.parts).get(), isEmpty);
+      expect(await jobs.listLinesForJob(jobId), isEmpty);
+    },
+  );
+
   for (final catalogLinked in [true, false]) {
     testWidgets(
       'quantity edit preserves metadata on ${catalogLinked ? 'catalog' : 'custom'} line',
