@@ -85,14 +85,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
       case _Kind.types:
         await _editTaxonomyName(CatalogNameTarget.newCategory(), 'Add category');
       case _Kind.brands:
-        final name = await promptName(context, title: 'Add brand');
-        if (name == null || name.isEmpty) return;
-        try {
-          await _repo.createBrand(name);
-          await _reload();
-        } on StateError catch (e) {
-          _showMessage(e.message);
-        }
+        await _editTaxonomyName(CatalogNameTarget.newBrand(), 'Add brand');
       case _Kind.suppliers:
         final name = await promptName(context, title: 'Add supplier');
         if (name == null || name.isEmpty) return;
@@ -187,6 +180,8 @@ class _MaintenancePageState extends State<MaintenancePage> {
       CatalogTreeKind.category => CatalogNameTarget.renameCategory(node.id),
       CatalogTreeKind.type => CatalogNameTarget.renameType(node.id),
       CatalogTreeKind.variant => CatalogNameTarget.renameVariant(node.id),
+      CatalogTreeKind.brand when node.brandId != null =>
+        CatalogNameTarget.renameBrand(node.brandId!),
       _ => null,
     };
     if (target != null) {
@@ -211,10 +206,6 @@ class _MaintenancePageState extends State<MaintenancePage> {
             styleId: part.styleId,
             typeId: part.typeId,
           );
-        case CatalogTreeKind.brand:
-          if (node.brandId != null) {
-            await _repo.renameBrand(node.brandId!, name);
-          }
         default:
           return;
       }

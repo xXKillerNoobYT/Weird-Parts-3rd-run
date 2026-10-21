@@ -563,6 +563,9 @@ class _PartDetailPageState extends State<PartDetailPage> {
           if (mounted) setState(() => _catalogNameNotice = message);
         },
         onSaved: (saved) async {
+          if (saved.kind == CatalogNameKind.brand) {
+            throw StateError('A brand cannot change the part taxonomy');
+          }
           await _refreshTaxonomyLists();
           if (!mounted) return;
           _change(() {
@@ -576,6 +579,8 @@ class _PartDetailPageState extends State<PartDetailPage> {
                 _typeId = null;
               case CatalogNameKind.variant:
                 _typeId = saved.id;
+              case CatalogNameKind.brand:
+                throw StateError('A brand cannot change the part taxonomy');
             }
           });
           await _session?.flush();
@@ -586,23 +591,54 @@ class _PartDetailPageState extends State<PartDetailPage> {
     }
   }
 
-  Future<Brand?> _addBrandInPlace() async {
-    if (!await _gate() || !mounted) return null;
-    final name = await promptName(context, title: 'Add brand');
-    if (name == null || name.isEmpty || !mounted) return null;
-    try {
-      final id = await _maintenance.createBrand(name);
-      await _refreshTaxonomyLists();
-      if (!mounted) return null;
-      for (final b in _brands) {
-        if (b.id == id) return b;
-      }
-      return null;
-    } on StateError catch (e) {
-      if (!mounted) return null;
-      _toast(e.message);
+  Future<Brand?> _addBrandInPlace({
+    BuildContext? consumerContext,
+    ValueChanged<Brand>? onAdopt,
+    ValueChanged<String>? onNotice,
+  }) async {
+    final consumer = consumerContext ?? context;
+    if (!consumer.mounted || !await _gate() || !mounted || !consumer.mounted) {
       return null;
     }
+    setState(() => _catalogNameNotice = null);
+    Brand? created;
+    void notice(String message) {
+      if (!consumer.mounted) return;
+      if (mounted) setState(() => _catalogNameNotice = message);
+      onNotice?.call(message);
+    }
+
+    try {
+      await showCatalogNameDialog(
+        consumer,
+        target: CatalogNameTarget.newBrand(),
+        title: 'Add brand',
+        onSaved: (saved) async {
+          await _refreshTaxonomyLists();
+          if (!mounted || !consumer.mounted) {
+            throw StateError('The brand consumer is no longer available');
+          }
+          final matching = _brands.where(
+            (brand) => brand.id == saved.id && brand.name == saved.name,
+          );
+          if (saved.kind != CatalogNameKind.brand || matching.isEmpty) {
+            throw StateError(
+              'The saved brand is not available in the refreshed list',
+            );
+          }
+          final brand = matching.first;
+          onAdopt?.call(brand);
+          if (!mounted || !consumer.mounted) {
+            throw StateError('The brand consumer is no longer available');
+          }
+          created = brand;
+        },
+        onNotice: notice,
+      );
+    } catch (error) {
+      notice('$error');
+    }
+    return created;
   }
 
   Future<Supplier?> _addSupplierInPlace() async {
@@ -685,9 +721,10 @@ class _PartDetailPageState extends State<PartDetailPage> {
       selectedBrand = _brands.first.id;
     }
     if (selectedBrand == null) {
-      final created = await _addBrandInPlace();
-      selectedBrand = created?.id;
-      if (selectedBrand == null || !mounted) return;
+      final created = await _addBrandInPlace(
+        onAdopt: (brand) => selectedBrand = brand.id,
+      );
+      if (created == null || selectedBrand == null || !mounted) return;
     }
 
     final result = await showDialog<_VarianceDraft>(
@@ -696,7 +733,11 @@ class _PartDetailPageState extends State<PartDetailPage> {
         brands: List<Brand>.of(_brands),
         groups: _brandGroups,
         initialBrandId: selectedBrand,
-        onAddBrand: _addBrandInPlace,
+        onAddBrand: (consumer, onAdopt, onNotice) => _addBrandInPlace(
+          consumerContext: consumer,
+          onAdopt: onAdopt,
+          onNotice: onNotice,
+        ),
       ),
     );
     if (result == null || !mounted) return;
@@ -1078,7 +1119,11 @@ class _VarianceDialog extends StatefulWidget {
   final List<Brand> brands;
   final List<_BrandGroup> groups;
   final String? initialBrandId;
-  final Future<Brand?> Function() onAddBrand;
+  final Future<Brand?> Function(
+    BuildContext consumer,
+    ValueChanged<Brand> onAdopt,
+    ValueChanged<String> onNotice,
+  ) onAddBrand;
 
   @override
   State<_VarianceDialog> createState() => _VarianceDialogState();
@@ -1090,6 +1135,7 @@ class _VarianceDialogState extends State<_VarianceDialog> {
   late bool _isMain;
   final _nameController = TextEditingController();
   final _mpnController = TextEditingController();
+  String? _notice;
 
   @override
   void initState() {
@@ -1115,15 +1161,27 @@ class _VarianceDialogState extends State<_VarianceDialog> {
   }
 
   Future<void> _addBrand() async {
-    final created = await widget.onAddBrand();
-    if (created == null || !mounted) return;
-    setState(() {
-      if (!_brands.any((b) => b.id == created.id)) {
-        _brands = [..._brands, created];
-      }
-      _brandId = created.id;
-      _isMain = _existingForBrand(_brandId).isEmpty;
-    });
+    setState(() => _notice = null);
+    await widget.onAddBrand(
+      context,
+      (brand) {
+        if (!mounted) {
+          throw StateError('The variance dialog is no longer available');
+        }
+        setState(() {
+          _brands = [
+            for (final existing in _brands)
+              if (existing.id != brand.id) existing,
+            brand,
+          ];
+          _brandId = brand.id;
+          _isMain = _existingForBrand(_brandId).isEmpty;
+        });
+      },
+      (message) {
+        if (mounted) setState(() => _notice = message);
+      },
+    );
   }
 
   void _submit() {
@@ -1144,7 +1202,17 @@ class _VarianceDialogState extends State<_VarianceDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add variance'),
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Add variance'),
+          if (_notice != null) ...[
+            const SizedBox(height: 8),
+            Semantics(liveRegion: true, child: Text(_notice!)),
+          ],
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,

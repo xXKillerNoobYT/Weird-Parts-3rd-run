@@ -140,6 +140,9 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
         target: target,
         title: title,
         onSaved: (saved) async {
+          if (saved.kind == CatalogNameKind.brand) {
+            throw StateError('A brand cannot change the part taxonomy');
+          }
           await _load();
           if (!mounted) return;
           setState(() {
@@ -153,6 +156,8 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
                 _typeId = null;
               case CatalogNameKind.variant:
                 _typeId = saved.id;
+              case CatalogNameKind.brand:
+                throw StateError('A brand cannot change the part taxonomy');
             }
             _error = null;
           });

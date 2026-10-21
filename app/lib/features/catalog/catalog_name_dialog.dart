@@ -23,6 +23,7 @@ Future<void> showCatalogNameDialog(
   );
   if (!context.mounted || saved == null) return;
   final label = switch (saved.kind) {
+    CatalogNameKind.brand => 'Brand',
     CatalogNameKind.category => 'Category',
     CatalogNameKind.type => 'Type',
     CatalogNameKind.variant => 'Variant',
@@ -41,6 +42,7 @@ Future<void> showCatalogNameDialog(
   if (!context.mounted) return;
   notice('$label saved: ${saved.name}');
   await WidgetsBinding.instance.endOfFrame;
+  if (!context.mounted) return;
   try {
     await saved.acknowledge();
   } catch (error) {

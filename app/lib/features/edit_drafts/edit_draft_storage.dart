@@ -8,12 +8,14 @@ extension _CatalogNameStore on CatalogNameKind {
     CatalogNameKind.category => 'categories',
     CatalogNameKind.type => 'styles',
     CatalogNameKind.variant => 'types',
+    CatalogNameKind.brand => 'brands',
   };
 
   String? get _parentColumn => switch (this) {
     CatalogNameKind.category => null,
     CatalogNameKind.type => 'category_id',
     CatalogNameKind.variant => 'style_id',
+    CatalogNameKind.brand => null,
   };
 }
 
@@ -21,6 +23,7 @@ CatalogNameKind _catalogNameKind(String? value) => switch (value) {
   'category' => CatalogNameKind.category,
   'type' => CatalogNameKind.type,
   'variant' => CatalogNameKind.variant,
+  'brand' => CatalogNameKind.brand,
   _ => throw const FormatException('Unsupported catalog name entity'),
 };
 
@@ -34,7 +37,7 @@ void _catalogNameTarget(Map<String, String> target) {
     'kind',
     'entity',
     rename ? 'id' : 'reserved',
-    if (!rename && kind != CatalogNameKind.category) 'parent',
+    if (!rename && kind._parentColumn != null) 'parent',
   };
   if (target.length != expected.length ||
       !expected.every(target.containsKey) ||
@@ -52,7 +55,7 @@ Set<String> _catalogNameResultFields(Map<String, String> result) {
     'row',
     'slot',
     'target',
-    if (kind != CatalogNameKind.category) 'parent',
+    if (kind._parentColumn != null) 'parent',
     if (kind == CatalogNameKind.variant) 'category',
   };
 }
@@ -741,7 +744,7 @@ class EditDrafts {
     CatalogNameKind kind,
     String? parentId,
   ) async {
-    if (kind == CatalogNameKind.category) return {};
+    if (kind._parentColumn == null) return {};
     if (parentId == null) throw StateError('Catalog parent is unavailable');
     final parent = await _catalogNameRow(
       kind == CatalogNameKind.type
@@ -814,7 +817,7 @@ class EditDrafts {
           'parent',
         ].every((key) => target[key] == wanted[key]) ||
         (!rename &&
-            kind != CatalogNameKind.category &&
+            kind._parentColumn != null &&
             result['parent'] != target['parent']) ||
         result['name']!.trim().isEmpty ||
         result['name'] != result['name']!.trim()) {

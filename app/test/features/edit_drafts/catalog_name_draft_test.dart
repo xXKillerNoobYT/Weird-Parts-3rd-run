@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
+import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 import '../warehouse/warehouse_test_support.dart';
@@ -17,6 +18,7 @@ void main() {
   late String device;
   late PinService pin;
   late EditDrafts edits;
+  late Brand brand;
 
   void bind() {
     pin = PinService(db.settingsDao);
@@ -60,6 +62,17 @@ void main() {
         'revision': row.revision,
         'deleted': row.deletedAt?.toIso8601String(),
       },
+    for (final row in await db.select(db.brands).get())
+      {
+        'kind': 'brand',
+        'id': row.id,
+        'parent': null,
+        'name': row.name,
+        'origin': row.originDeviceId,
+        'created': row.createdAt.toIso8601String(),
+        'revision': row.revision,
+        'deleted': row.deletedAt?.toIso8601String(),
+      },
   ];
 
   Future<List<Map<String, Object?>>> draftRows() async =>
@@ -86,6 +99,8 @@ void main() {
         return (await db.taxonomyDao.listTypes(styleId: parent))
             .map((r) => r.name)
             .toList();
+      case CatalogNameKind.brand:
+        return (await db.taxonomyDao.listBrands()).map((r) => r.name).toList();
     }
   }
 
@@ -105,6 +120,12 @@ void main() {
     db = fixture.db;
     device = fixture.device;
     bind();
+    await MaintenanceRepository(
+      db,
+      pin,
+      'synthetic-original-brand-device',
+    ).createBrand('Synthetic brand');
+    brand = (await db.select(db.brands).get()).single;
   });
 
   tearDown(() async {
@@ -112,7 +133,7 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('raw input for all six operations resumes after file reopen without business writes', () async {
+  test('raw input for all eight operations resumes after file reopen without business writes', () async {
     final category = (await db.select(db.categories).get()).single;
     final type = (await db.select(db.styles).get()).single;
     final variant = (await db.select(db.types).get()).single;
@@ -158,6 +179,20 @@ void main() {
         rename: true,
         id: variant.id,
         raw: '  Rename variant\npending · exact  ',
+      ),
+      (
+        target: const CatalogNameTarget.newBrand(),
+        kind: CatalogNameKind.brand,
+        rename: false,
+        id: null,
+        raw: '  New brand\npending · exact  ',
+      ),
+      (
+        target: CatalogNameTarget.renameBrand(brand.id),
+        kind: CatalogNameKind.brand,
+        rename: true,
+        id: brand.id,
+        raw: '  Rename brand\npending · exact  ',
       ),
     ];
     final before = await taxonomyRows();
@@ -220,6 +255,12 @@ void main() {
         kind: CatalogNameKind.variant,
         parent: type.id,
         duplicate: variant.name,
+      ),
+      (
+        target: const CatalogNameTarget.newBrand(),
+        kind: CatalogNameKind.brand,
+        parent: null,
+        duplicate: brand.name,
       ),
     ];
     for (final c in cases) {
@@ -292,6 +333,13 @@ void main() {
         originalName: variant.name,
         origin: 'synthetic-original-variant-device',
       ),
+      (
+        target: CatalogNameTarget.renameBrand(brand.id),
+        kind: CatalogNameKind.brand,
+        id: brand.id,
+        originalName: brand.name,
+        origin: 'synthetic-original-brand-device',
+      ),
     ];
     for (final c in cases) {
       final beforeRows = await taxonomyRows();
@@ -314,6 +362,10 @@ void main() {
       );
       expect(after['name'], 'Renamed ${c.kind.name}');
       expect(after['origin'], c.origin);
+      if (c.kind == CatalogNameKind.brand) {
+        expect(after['created'], before['created']);
+        expect(after['parent'], isNull);
+      }
       expect(after['revision'], (before['revision'] as int) + 1);
       expect((await taxonomyRows()).length, beforeRows.length);
       await reopen();
@@ -348,6 +400,20 @@ void main() {
       expect(saved.name, category.name);
       expect(after.revision, category.revision + 1);
       await saved.acknowledge();
+
+      final renameBrand = (await edits.openCatalogName(
+        CatalogNameTarget.renameBrand(brand.id),
+      ) as FreshEdit<CatalogNameEditSession>).session;
+      renameBrand.replace(CatalogNameInput(nameText: '  ${brand.name}  '));
+      await renameBrand.flush();
+      final savedBrand = await renameBrand.save();
+      final afterBrand = (await db.select(db.brands).get()).single;
+      expect(savedBrand.id, brand.id);
+      expect(savedBrand.name, brand.name);
+      expect(afterBrand.revision, brand.revision + 1);
+      expect(afterBrand.createdAt, brand.createdAt);
+      expect(afterBrand.originDeviceId, brand.originDeviceId);
+      await savedBrand.acknowledge();
     },
   );
 
@@ -542,6 +608,20 @@ void main() {
             'catalog-name-rename/category/${Uri.encodeComponent(category.id)}',
         raw: 'Receipt failure rename',
       ),
+      (
+        session: (await edits.openCatalogName(
+          const CatalogNameTarget.newBrand(),
+        ) as FreshEdit<CatalogNameEditSession>).session,
+        slot: 'catalog-name-new/brand',
+        raw: 'Receipt failure brand create',
+      ),
+      (
+        session: (await edits.openCatalogName(
+          CatalogNameTarget.renameBrand(brand.id),
+        ) as FreshEdit<CatalogNameEditSession>).session,
+        slot: 'catalog-name-rename/brand/${Uri.encodeComponent(brand.id)}',
+        raw: 'Receipt failure brand rename',
+      ),
     ];
     for (final c in cases) {
       c.session.replace(CatalogNameInput(nameText: c.raw));
@@ -568,6 +648,259 @@ void main() {
       expect(await draftRows(), beforeDrafts);
       await db.customStatement('DROP TRIGGER reject_catalog_name_receipt');
     }
+  });
+
+  test(
+    'brand create and rename have no taxonomy parent or ancestor dependency',
+    () async {
+      const createTarget = CatalogNameTarget.newBrand();
+      final renameTarget = CatalogNameTarget.renameBrand(brand.id);
+      expect(createTarget.parentId, isNull);
+      expect(renameTarget.parentId, isNull);
+      final create = (await edits.openCatalogName(
+        createTarget,
+      ) as FreshEdit<CatalogNameEditSession>).session;
+      final rename = (await edits.openCatalogName(
+        renameTarget,
+      ) as FreshEdit<CatalogNameEditSession>).session;
+      create.replace(const CatalogNameInput(nameText: '  Independent brand  '));
+      rename.replace(
+        const CatalogNameInput(nameText: '  Independent rename  '),
+      );
+      await create.flush();
+      await rename.flush();
+      final category = (await db.select(db.categories).get()).single;
+      await MaintenanceRepository(
+        db,
+        pin,
+        device,
+      ).renameCategory(category.id, 'Unrelated category changed');
+      final savedCreate = await create.save();
+      final savedRename = await rename.save();
+      expect(savedCreate.id, create.recordId);
+      expect(savedCreate.name, 'Independent brand');
+      expect(savedRename.id, brand.id);
+      expect(savedRename.name, 'Independent rename');
+      final renamed = (await db.select(db.brands).get()).singleWhere(
+        (row) => row.id == brand.id,
+      );
+      expect(renamed.createdAt, brand.createdAt);
+      expect(renamed.originDeviceId, brand.originDeviceId);
+      await savedCreate.acknowledge();
+      await savedRename.acknowledge();
+      expect(await draftRows(), isEmpty);
+    },
+  );
+
+  test('brand blank, discard, PIN, and company refusal preserve business rows and exact input', () async {
+    const target = CatalogNameTarget.newBrand();
+    final blank = (await edits.openCatalogName(
+      target,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    blank.replace(const CatalogNameInput(nameText: ' \n\t '));
+    await blank.flush();
+    final initialRows = await taxonomyRows();
+    final blankDrafts = await draftRows();
+    await expectLater(blank.save(), throwsStateError);
+    expect(await taxonomyRows(), initialRows);
+    expect(await draftRows(), blankDrafts);
+    await blank.leave(LeaveIntent.discard);
+    expect(await draftRows(), isEmpty);
+
+    final cancel = (await edits.openCatalogName(
+      target,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    cancel.replace(const CatalogNameInput(nameText: '  Canceled brand  '));
+    await cancel.flush();
+    await cancel.leave(LeaveIntent.discard);
+    expect(await taxonomyRows(), initialRows);
+    expect(await draftRows(), isEmpty);
+
+    final create = (await edits.openCatalogName(
+      target,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    final rename = (await edits.openCatalogName(
+      CatalogNameTarget.renameBrand(brand.id),
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    create.replace(
+      const CatalogNameInput(nameText: '  Blocked brand create  '),
+    );
+    rename.replace(
+      const CatalogNameInput(nameText: '  Blocked brand rename  '),
+    );
+    await create.flush();
+    await rename.flush();
+    final blockedDrafts = await draftRows();
+    await pin.setPin('1234');
+    pin.lock();
+    await expectLater(create.save(), throwsStateError);
+    await expectLater(rename.save(), throwsStateError);
+    expect(await taxonomyRows(), initialRows);
+    expect(await draftRows(), blockedDrafts);
+    await pin.unlock('1234');
+
+    await db.customStatement(
+      'INSERT INTO company_join_events '
+      '(request_id, ordinal, kind, evidence_bytes) '
+      "VALUES ('synthetic-brand-refusal', 1, 'blocked', 'synthetic-marker')",
+    );
+    await expectLater(create.save(), throwsStateError);
+    await expectLater(rename.save(), throwsStateError);
+    expect(await taxonomyRows(), initialRows);
+    expect(await draftRows(), blockedDrafts);
+  });
+
+  test('brand reserved collision, stale rename, and deleted target preserve competing rows and drafts', () async {
+    const target = CatalogNameTarget.newBrand();
+    final create = (await edits.openCatalogName(
+      target,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    create.replace(const CatalogNameInput(nameText: '  Collided brand  '));
+    await create.flush();
+    await MaintenanceRepository(
+      db,
+      pin,
+      device,
+    ).createBrand('Competing brand', reservedId: create.recordId);
+    final collidedRows = await taxonomyRows();
+    final collidedDrafts = await draftRows();
+    await expectLater(create.save(), throwsStateError);
+    expect(await taxonomyRows(), collidedRows);
+    expect(await draftRows(), collidedDrafts);
+    await create.leave(LeaveIntent.discard);
+
+    final renameTarget = CatalogNameTarget.renameBrand(brand.id);
+    final stale = (await edits.openCatalogName(
+      renameTarget,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    stale.replace(const CatalogNameInput(nameText: '  Stale brand rename  '));
+    await stale.flush();
+    await MaintenanceRepository(
+      db,
+      pin,
+      device,
+    ).renameBrand(brand.id, 'Concurrent brand name');
+    final staleRows = await taxonomyRows();
+    final staleDrafts = await draftRows();
+    await expectLater(stale.save(), throwsStateError);
+    expect(await taxonomyRows(), staleRows);
+    expect(await draftRows(), staleDrafts);
+    await reopen();
+    final blockedStale = await edits.openCatalogName(renameTarget);
+    expect(blockedStale, isA<BlockedEdit<CatalogNameEditSession>>());
+    await (blockedStale as BlockedEdit<CatalogNameEditSession>).discard();
+
+    final deleted = (await edits.openCatalogName(
+      renameTarget,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    deleted.replace(
+      const CatalogNameInput(nameText: '  Deleted brand rename  '),
+    );
+    await deleted.flush();
+    await db.customStatement('UPDATE brands SET deleted_at = 1 WHERE id = ?', [
+      brand.id,
+    ]);
+    final deletedRows = await taxonomyRows();
+    final deletedDrafts = await draftRows();
+    await expectLater(deleted.save(), throwsStateError);
+    expect(await taxonomyRows(), deletedRows);
+    expect(await draftRows(), deletedDrafts);
+    await reopen();
+    expect(
+      await edits.openCatalogName(renameTarget),
+      isA<BlockedEdit<CatalogNameEditSession>>(),
+    );
+    expect(await taxonomyRows(), deletedRows);
+    expect(await draftRows(), deletedDrafts);
+  });
+
+  test('brand drafts reject foreign origin and an extra parent without altering evidence', () async {
+    const target = CatalogNameTarget.newBrand();
+    const slot = 'catalog-name-new/brand';
+    final session = (await edits.openCatalogName(
+      target,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    session.replace(const CatalogNameInput(nameText: '  Root brand input  '));
+    await session.flush();
+    final initialRows = await taxonomyRows();
+    final raw = (await db.settingsDao.getSetting(inputKey(slot)))!;
+    await reopen();
+    final foreign = EditDrafts(
+      db: db,
+      pin: pin,
+      deviceId: 'foreign-brand-device',
+    );
+    expect(
+      await foreign.openCatalogName(target),
+      isA<BlockedEdit<CatalogNameEditSession>>(),
+    );
+    expect(await db.settingsDao.getSetting(inputKey(slot)), raw);
+    final malformed = Map<String, Object?>.from(jsonDecode(raw) as Map);
+    malformed['target'] = Map<String, Object?>.from(malformed['target'] as Map)
+      ..['parent'] = (await db.select(db.categories).get()).single.id;
+    final malformedRaw = jsonEncode(malformed);
+    await db.settingsDao.setSetting(inputKey(slot), malformedRaw);
+    await reopen();
+    final blocked = await edits.openCatalogName(target);
+    expect(blocked, isA<BlockedEdit<CatalogNameEditSession>>());
+    expect(
+      (blocked as BlockedEdit<CatalogNameEditSession>).preservedInput,
+      malformedRaw,
+    );
+    expect(await db.settingsDao.getSetting(inputKey(slot)), malformedRaw);
+    expect(await taxonomyRows(), initialRows);
+  });
+
+  test('brand receipt rejects extra parent, mismatched identity, and replacement acknowledgement', () async {
+    const target = CatalogNameTarget.newBrand();
+    const slot = 'catalog-name-new/brand';
+    final session = (await edits.openCatalogName(
+      target,
+    ) as FreshEdit<CatalogNameEditSession>).session;
+    session.replace(const CatalogNameInput(nameText: '  Brand receipt  '));
+    await session.flush();
+    await session.save();
+    final initialRows = await taxonomyRows();
+    final raw = (await db.settingsDao.getSetting(controlKey(slot)))!;
+    for (final fault in ['target-parent', 'result-parent', 'result-id']) {
+      final control = Map<String, Object?>.from(jsonDecode(raw) as Map);
+      final result = Map<String, Object?>.from(control['result'] as Map);
+      if (fault == 'target-parent') {
+        final malformedTarget = Map<String, Object?>.from(
+          jsonDecode(result['target']! as String) as Map,
+        )..['parent'] = brand.id;
+        result['target'] = jsonEncode(malformedTarget);
+      } else if (fault == 'result-parent') {
+        result['parent'] = brand.id;
+      } else {
+        result['id'] = brand.id;
+      }
+      control['result'] = result;
+      final malformed = jsonEncode(control);
+      await db.settingsDao.setSetting(controlKey(slot), malformed);
+      await reopen();
+      final blocked = await edits.openCatalogName(target);
+      expect(
+        blocked,
+        isA<BlockedEdit<CatalogNameEditSession>>(),
+        reason: fault,
+      );
+      expect(
+        (blocked as BlockedEdit<CatalogNameEditSession>).preservedInput,
+        malformed,
+        reason: fault,
+      );
+      expect(await db.settingsDao.getSetting(controlKey(slot)), malformed);
+      expect(await taxonomyRows(), initialRows);
+    }
+    await db.settingsDao.setSetting(controlKey(slot), raw);
+    await reopen();
+    final recovered = await edits.openCatalogName(target) as CatalogNameSaved;
+    const replacement = '{"phase":"editing","token":"replacement-brand"}';
+    await db.settingsDao.setSetting(controlKey(slot), replacement);
+    await expectLater(recovered.acknowledge(), throwsStateError);
+    expect(await db.settingsDao.getSetting(controlKey(slot)), replacement);
+    expect(await taxonomyRows(), initialRows);
   });
 
   test('changed saved row blocks its receipt and leaves the exact receipt evidence', () async {

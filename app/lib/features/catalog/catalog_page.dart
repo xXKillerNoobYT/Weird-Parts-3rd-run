@@ -157,6 +157,8 @@ class _CatalogPageState extends State<CatalogPage> {
       CatalogTreeKind.category => CatalogNameTarget.renameCategory(node.id),
       CatalogTreeKind.type => CatalogNameTarget.renameType(node.id),
       CatalogTreeKind.variant => CatalogNameTarget.renameVariant(node.id),
+      CatalogTreeKind.brand when node.brandId != null =>
+        CatalogNameTarget.renameBrand(node.brandId!),
       _ => null,
     };
     if (target != null) {
@@ -185,10 +187,6 @@ class _CatalogPageState extends State<CatalogPage> {
             styleId: part.styleId,
             typeId: part.typeId,
           );
-        case CatalogTreeKind.brand:
-          if (node.brandId != null) {
-            await _maintenance.renameBrand(node.brandId!, name);
-          }
         default:
           return;
       }

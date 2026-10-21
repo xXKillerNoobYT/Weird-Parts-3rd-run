@@ -257,6 +257,12 @@ class CatalogNameEditSession extends _EditSession {
         _owner._deviceId,
       );
       switch (kind) {
+        case CatalogNameKind.brand:
+          if (isRename) {
+            await repo.renameBrand(recordId, name);
+          } else {
+            await repo.createBrand(name, reservedId: recordId);
+          }
         case CatalogNameKind.category:
           if (isRename) {
             await repo.renameCategory(recordId, name);
