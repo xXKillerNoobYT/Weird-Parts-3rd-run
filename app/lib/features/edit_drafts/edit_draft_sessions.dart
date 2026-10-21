@@ -238,6 +238,55 @@ abstract class _EditSession {
   }
 }
 
+class WarehouseLocationEditSession extends _EditSession {
+  WarehouseLocationEditSession._(super.owner, super.record);
+  WarehouseLocationNameInput get initial =>
+      _record.input as WarehouseLocationNameInput;
+  bool get isRename => _record.target['kind'] == 'warehouse-location-rename';
+  String get locationId => _record.target[isRename ? 'id' : 'reserved']!;
+  void replace(WarehouseLocationNameInput input) => _replace(input);
+
+  Future<WarehouseLocationSaved> save() async {
+    final command = isRename
+        ? 'warehouse-location-rename'
+        : 'warehouse-location-create';
+    final result = await _settle(command, () async {
+      final repo = WarehouseRepository(
+        _owner._db,
+        _owner._pin,
+        _owner._deviceId,
+      );
+      if (isRename) {
+        await repo.renameLocation(
+          id: locationId,
+          expectedRevision: int.parse(_record.target['revision']!),
+          name: initial.nameText,
+        );
+      } else {
+        await repo.createLocation(id: locationId, name: initial.nameText);
+      }
+      final location = await (_owner._db.select(
+        _owner._db.warehouseLocations,
+      )..where((t) => t.id.equals(locationId))).getSingle();
+      return {'location': location.id, 'row': _digest(location.toJson())};
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) {
+      throw StateError('Saved warehouse receipt is unavailable');
+    }
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer warehouse edit replaced this receipt');
+    }
+    return _owner._savedWarehouseLocation(
+      raw,
+      command: command,
+      locationId: isRename ? locationId : null,
+    );
+  }
+}
+
 class WarehouseCountEditSession extends _EditSession {
   WarehouseCountEditSession._(super.owner, super.record);
   WarehouseCountInput get initial => _record.input as WarehouseCountInput;

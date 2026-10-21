@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
-import '../../core/new_id.dart';
 import '../../data/app_database.dart';
 import '../catalog/catalog_tree.dart';
 import '../catalog/catalog_tree_picker.dart';
 import '../edit_drafts/edit_drafts.dart';
-import '../catalog/tree_edit_prompts.dart';
 import '../pin/pin_gate.dart';
 import 'warehouse_repository.dart';
 import 'warehouse_count_dialog.dart';
+import 'warehouse_location_dialog.dart';
 
 class WarehousePage extends StatefulWidget {
   const WarehousePage({super.key});
@@ -33,15 +32,21 @@ class _WarehousePageState extends State<WarehousePage> {
   Future<void> _add() async {
     if (!await ensurePinUnlocked(context, AppScope.of(context).pin)) return;
     if (!mounted) return;
-    final name = await promptName(context, title: 'New warehouse');
-    if (name == null) return;
     try {
-      await _repo.createLocation(id: newId(), name: name);
-      if (mounted) {
-        setState(() {
-          _locations = _repo.loadLocations();
-        });
-      }
+      final edits = AppScope.of(context).edits;
+      if (edits == null) throw StateError('Unfinished edits are unavailable');
+      final saved = await showDialog<WarehouseLocationSaved>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => WarehouseLocationDialog(edits: edits),
+      );
+      if (!mounted || saved == null) return;
+      final locations = _repo.loadLocations();
+      locations.ignore();
+      setState(() {
+        _locations = locations;
+      });
+      await _confirmWarehouseSaved(context, saved);
     } catch (e) {
       if (mounted) _showError(context, e);
     }
@@ -134,26 +139,18 @@ class _LocationPageState extends State<_LocationPage> {
   Future<void> _rename() async {
     if (!await ensurePinUnlocked(context, AppScope.of(context).pin)) return;
     if (!mounted) return;
-    final name = await promptName(
-      context,
-      title: 'Rename warehouse',
-      initial: _location.name,
-    );
-    if (name == null) return;
     try {
-      await _repo.renameLocation(
-        id: _location.id,
-        expectedRevision: _location.revision,
-        name: name,
+      final edits = AppScope.of(context).edits;
+      if (edits == null) throw StateError('Unfinished edits are unavailable');
+      final saved = await showDialog<WarehouseLocationSaved>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => WarehouseLocationDialog(edits: edits, location: _location),
       );
-      if (!mounted) return;
-      final changed = name.trim() != _location.name;
-      setState(
-        () => _location = _location.copyWith(
-          name: name.trim(),
-          revision: _location.revision + (changed ? 1 : 0),
-        ),
-      );
+      if (!mounted || saved == null) return;
+      setState(() => _location = saved.location);
+      _reload();
+      await _confirmWarehouseSaved(context, saved);
     } catch (e) {
       if (mounted) _showError(context, e);
     }
@@ -346,6 +343,23 @@ class _LocationPageState extends State<_LocationPage> {
       },
     ),
   );
+}
+
+Future<void> _confirmWarehouseSaved(
+  BuildContext context,
+  WarehouseLocationSaved saved,
+) async {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('Warehouse saved: ${saved.location.name}')),
+  );
+  await WidgetsBinding.instance.endOfFrame;
+  try {
+    await saved.acknowledge();
+  } catch (error) {
+    if (context.mounted) {
+      _showError(context, 'Warehouse saved. Confirmation remains pending: $error');
+    }
+  }
 }
 
 void _showError(BuildContext context, Object error) =>

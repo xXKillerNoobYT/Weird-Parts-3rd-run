@@ -58,6 +58,11 @@ final class NewJobInput {
   final String nameText;
 }
 
+final class WarehouseLocationNameInput {
+  const WarehouseLocationNameInput({required this.nameText});
+  final String nameText;
+}
+
 final class WarehouseCountInput {
   const WarehouseCountInput({
     required this.quantityText,
@@ -153,6 +158,17 @@ final class NewJobCreated extends EditOpening<NewJobEditSession> {
 final class WarehouseCountSaved extends EditOpening<WarehouseCountEditSession> {
   WarehouseCountSaved._({required this.count, required this._acknowledge});
   final WarehouseCount count;
+  final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
+}
+
+final class WarehouseLocationSaved
+    extends EditOpening<WarehouseLocationEditSession> {
+  WarehouseLocationSaved._({
+    required this.location,
+    required this._acknowledge,
+  });
+  final WarehouseLocation location;
   final Future<void> Function() _acknowledge;
   Future<void> acknowledge() => _acknowledge();
 }

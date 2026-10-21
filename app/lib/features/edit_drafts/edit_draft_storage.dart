@@ -75,6 +75,9 @@ Map<String, Object?> _control(String raw) {
         ? {'job', 'name'}
         : command == 'warehouse-count-save'
         ? {'count', 'location', 'part', 'row'}
+        : command == 'warehouse-location-create' ||
+              command == 'warehouse-location-rename'
+        ? {'location', 'row'}
         : command == 'line-save' || command == 'line-remove'
         ? {'line'}
         : command.startsWith('line-promote/')
@@ -98,6 +101,7 @@ Map<String, Object?> _control(String raw) {
 
 Map<String, Object?> _inputJson(Object input) => switch (input) {
   NewJobInput j => {'name': j.nameText},
+  WarehouseLocationNameInput l => {'name': l.nameText},
   WarehouseCountInput c => {
     'quantity': c.quantityText,
     'note': c.noteText,
@@ -133,6 +137,10 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
 };
 Object _parseInput(String kind, Object? value) {
   final m = _map(value);
+  if (kind == 'warehouse-location-new' || kind == 'warehouse-location-rename') {
+    _keys(m, {'name'});
+    return WarehouseLocationNameInput(nameText: _text(m['name']));
+  }
   if (kind == 'warehouse-count') {
     _keys(m, {'quantity', 'note', 'observedAt'});
     final text = _text(m['observedAt']);
@@ -217,6 +225,12 @@ String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
   if (target['kind'] == 'part') return 'part/${segment('id')}';
   if (target['kind'] == 'job-new') return 'job-new';
+  if (target['kind'] == 'warehouse-location-new') {
+    return 'warehouse-location-new';
+  }
+  if (target['kind'] == 'warehouse-location-rename') {
+    return 'warehouse-location-rename/${segment('id')}';
+  }
   if (target['kind'] == 'warehouse-count') {
     return 'warehouse-count/${segment('location')}/${segment('part')}';
   }
@@ -280,6 +294,19 @@ final class _DraftRecord {
     } else if (target['kind'] == 'job-new') {
       if (target.length != 2 || !target.containsKey('reserved')) {
         throw const FormatException('Invalid new Job target');
+      }
+    } else if (target['kind'] == 'warehouse-location-new') {
+      if (target.length != 2 || !target.containsKey('reserved')) {
+        throw const FormatException('Invalid new warehouse target');
+      }
+    } else if (target['kind'] == 'warehouse-location-rename') {
+      final revision = int.tryParse(target['revision'] ?? '');
+      if (target.length != 3 ||
+          !target.containsKey('id') ||
+          revision == null ||
+          revision < 1 ||
+          target['revision'] != revision.toString()) {
+        throw const FormatException('Invalid warehouse rename target');
       }
     } else if (target['kind'] == 'warehouse-count') {
       final expected = {
@@ -403,6 +430,23 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'warehouse-location-new') {
+      final row = await _row('warehouse_locations', target['reserved']!);
+      if (row != null) {
+        throw StateError('Reserved warehouse ID is already in use');
+      }
+      return {'location': _digest(row)};
+    }
+    if (target['kind'] == 'warehouse-location-rename') {
+      final row = await _row('warehouse_locations', target['id']!);
+      if (row == null || row['deleted_at'] != null) {
+        throw StateError('Warehouse location is unavailable');
+      }
+      if (row['revision'].toString() != target['revision']) {
+        throw StateError('Location changed. Reload before renaming.');
+      }
+      return {'location': _digest(row)};
+    }
     if (target['kind'] == 'warehouse-count') {
       final location = await _row('warehouse_locations', target['location']!);
       final part = await _row('parts', target['part']!);
@@ -490,6 +534,8 @@ class EditDrafts {
 
     switch (input) {
       case NewJobInput():
+        break;
+      case WarehouseLocationNameInput():
         break;
       case WarehouseCountInput():
         break;
@@ -580,6 +626,107 @@ class EditDrafts {
         }
       }
     }
+  }
+
+  Future<EditOpening<WarehouseLocationEditSession>>
+  openNewWarehouseLocation() => _open<WarehouseLocationEditSession>(
+    {'kind': 'warehouse-location-new', 'reserved': newId()},
+    () async => const WarehouseLocationNameInput(nameText: ''),
+    (record) => WarehouseLocationEditSession._(this, record),
+    onCommitted: (raw) => _savedWarehouseLocation(
+      raw,
+      command: 'warehouse-location-create',
+      locationId: null,
+    ),
+  );
+
+  Future<EditOpening<WarehouseLocationEditSession>>
+  openWarehouseLocationRename({
+    required String locationId,
+    required int expectedRevision,
+  }) => _open<WarehouseLocationEditSession>(
+    {
+      'kind': 'warehouse-location-rename',
+      'id': locationId,
+      'revision': expectedRevision.toString(),
+    },
+    () async {
+      final location = await (_db.select(
+        _db.warehouseLocations,
+      )..where((t) => t.id.equals(locationId))).getSingleOrNull();
+      if (location == null || location.deletedAt != null) {
+        throw StateError('Warehouse location is unavailable');
+      }
+      return WarehouseLocationNameInput(nameText: location.name);
+    },
+    (record) => WarehouseLocationEditSession._(this, record),
+    onCommitted: (raw) => _savedWarehouseLocation(
+      raw,
+      command: 'warehouse-location-rename',
+      locationId: locationId,
+    ),
+  );
+
+  Future<WarehouseLocationSaved> _savedWarehouseLocation(
+    String raw, {
+    required String command,
+    required String? locationId,
+  }) async {
+    if (_closed || _quiescing) {
+      throw StateError('Warehouse storage is changing');
+    }
+    final control = _control(raw);
+    if (control['phase'] != 'committed' || control['command'] != command) {
+      throw const FormatException('Unsupported saved warehouse receipt');
+    }
+    final result = _strings(control['result']);
+    if (locationId != null && result['location'] != locationId) {
+      throw const FormatException(
+        'Saved warehouse belongs to another location',
+      );
+    }
+    Future<WarehouseLocation> validate() async {
+      if (_digest(_origin()) != _digest(control['origin'])) {
+        throw StateError('Saved warehouse belongs to another installation');
+      }
+      final location = await (_db.select(
+        _db.warehouseLocations,
+      )..where((t) => t.id.equals(result['location']!))).getSingleOrNull();
+      if (location == null ||
+          location.deletedAt != null ||
+          (command == 'warehouse-location-create' &&
+              location.originDeviceId != _deviceId) ||
+          _digest(location.toJson()) != result['row']) {
+        throw StateError('The saved warehouse changed or is unavailable');
+      }
+      return location;
+    }
+
+    final location = await validate();
+    final slot = _slot(
+      command == 'warehouse-location-create'
+          ? {'kind': 'warehouse-location-new'}
+          : {'kind': 'warehouse-location-rename', 'id': location.id},
+    );
+    return WarehouseLocationSaved._(
+      location: location,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing) {
+          throw StateError('Warehouse storage is changing');
+        }
+        await _db.transaction(() async {
+          final key = '$editDraftPrefix$slot/control';
+          final current = await _read(key);
+          if (current == null) return;
+          if (current != raw ||
+              await _read('$editDraftPrefix$slot/input') != null) {
+            throw StateError('A newer warehouse edit replaced this receipt');
+          }
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
   }
 
   Future<EditOpening<WarehouseCountEditSession>> openWarehouseCount({
