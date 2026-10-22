@@ -336,8 +336,12 @@ void main() {
         await server.close(force: true);
       });
       final failedStates = <NearbyViewState>[];
+      final failed = Completer<void>();
       final subscription = nearby.states.listen((state) {
-        if (state.phase == NearbyPhase.failed) failedStates.add(state);
+        if (state.phase == NearbyPhase.failed) {
+          failedStates.add(state);
+          if (!failed.isCompleted) failed.complete();
+        }
       });
       addTearDown(subscription.cancel);
       await nearby.start();
@@ -353,7 +357,7 @@ void main() {
       } else {
         server.fail();
       }
-      await pumpEventQueue();
+      await failed.future.timeout(const Duration(seconds: 2));
 
       expect(nearby.state.phase, NearbyPhase.failed);
       expect(nearby.state.error, contains('Nearby connection'));
@@ -484,6 +488,70 @@ void main() {
       },
     );
   }
+
+  test(
+    'TCP error waits for listener cleanup before reporting failure',
+    () async {
+      final closeReady = Completer<void>();
+      final server = await _HttpServer.bind(closeReady: closeReady);
+      final network = _HttpNetwork(server);
+      final socket = _Socket();
+      final mdns = _Mdns();
+      final discovery = LanNearbyDiscovery(
+        readNetwork: () async => network,
+        bindSocket: (port) async =>
+            port == 41000 ? socket : _Socket(port: port),
+        createMdnsClient: (_) => mdns,
+      );
+      final nearby = _controller(
+        discovery,
+        native: true,
+        readNetwork: () async => network,
+      );
+      addTearDown(() async {
+        if (!closeReady.isCompleted) closeReady.complete();
+        await nearby.dispose();
+        await server.close(force: true);
+      });
+      final failedStates = <NearbyViewState>[];
+      final failed = Completer<void>();
+      final subscription = nearby.states.listen((state) {
+        if (state.phase == NearbyPhase.failed) {
+          failedStates.add(state);
+          if (!failed.isCompleted) failed.complete();
+        }
+      });
+      addTearDown(subscription.cancel);
+      await nearby.start();
+      mdns.ready.complete();
+      await pumpEventQueue();
+      expect(nearby.state.phase, NearbyPhase.looking);
+
+      server.fail();
+      try {
+        await server.closeRequested.future.timeout(const Duration(seconds: 2));
+        expect(nearby.state.phase, NearbyPhase.idle);
+        expect(failedStates, isEmpty);
+        expect(server.closed.isCompleted, isFalse);
+        expect(socket.closed, isTrue);
+        expect(network.closes, 0);
+      } finally {
+        if (!closeReady.isCompleted) closeReady.complete();
+      }
+      await failed.future.timeout(const Duration(seconds: 2));
+
+      expect(nearby.state.phase, NearbyPhase.failed);
+      expect(nearby.state.error, contains('Nearby connection'));
+      expect(failedStates, hasLength(1));
+      expect(server.closed.isCompleted, isTrue);
+      expect(socket.closed, isTrue);
+      expect(network.closes, 1);
+      await expectLater(
+        Socket.connect('127.0.0.1', server.port),
+        throwsA(isA<SocketException>()),
+      );
+    },
+  );
 
   for (final dispose in [false, true]) {
     test(
