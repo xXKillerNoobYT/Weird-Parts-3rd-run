@@ -6,8 +6,26 @@ These project instructions supplement the user's universal operating doctrine. F
 
 - Before editing, read applicable instructions, issue #33 and the current milestone, issue #88's delivery record, open PRs, dependencies and active builder assignments. Check live repository state against recorded evidence. Prefer completing approved work already in progress.
 - Preserve the existing owner's responsibility from implementation through delivery. Delegate bounded review or testing without creating competing writers or taking over another builder's branch. Record any coordinated handoff in the governing GitHub issue.
-- Keep one functional milestone per builder and one coordinated integration path to the intended `main` or release branch. While the backlog needs completion, open a new PR only for a concrete fix or an independent approved priority. Do not start parallel replacements for unfinished work.
+- Keep one functional milestone per builder and one coordinated integration path to the intended `main` or release branch. Continue owning pending PRs alongside that milestone. Open new PRs when the authorized goal or a necessary repair needs them; avoid competing writers, duplicate work and unnecessary stacks.
 - Use a short-lived branch unless a stack is necessary for a real dependency. For each stack, record the bottom-to-top landing order, owner, base, destination and acceptance gates in the governing issue. A merge into a feature branch is intermediate integration, not delivery.
+
+## Continuous PR ownership alongside every goal
+
+- A new goal advances alongside ownership of all pending PRs. Do not require a separate PR-cleanup goal or pause authorized goal work until every older PR is closed. This standing rule supersedes any blanket backlog-first pause.
+- Reconcile the open PR queue at task startup, after each delivery or material dependency change, and during ongoing goal work. Address review findings, failing checks, conflicts and dependencies. Prioritize PRs needed by the current goal and advance independent pending PRs when ready under existing authority.
+- Keep unrelated blocked PRs visible in the current GitHub checklist with their exact blocker, impact, owner and clearing condition. They are not prerequisites for the new goal unless a real dependency requires it. Low functional WIP does not suspend routine PR ownership or independent ready work.
+- Own every PR through its final disposition. Merge eligible reviewed work and close verified duplicate, superseded or already-integrated work only after preserving useful changes and documenting the result. Verify the intended integration branch and application; a feature-branch merge remains intermediate.
+- This rule changes sequencing, not authority or acceptance. Keep review, tests, permissions, branch protections, release requirements and existing builder ownership intact.
+
+## Recorded authority for the existing backlog
+
+The owner explicitly authorized normal completion of this project's already-approved PR backlog in PROMPT 3 on 2026-10-22. This is project authority, not a change to tool-enforced permissions. The original PR set and current dispositions are tracked in [issue #88's current checklist](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/88#issuecomment-6333643401).
+
+- Existing owners may edit project code and tests, repair defects and conflicts, update instructions, commit and push task branches, create necessary repair PRs, mark eligible work ready, obtain independent automated review, and merge eligible work through intended integration branches into `main` without routine per-PR approval questions.
+- Owners may close verified duplicate, superseded or already-integrated PRs after preserving useful changes and recording the reason. Keep one writer per scope, the existing Windows integration and Mac native-acceptance owners, and one coordinated landing path. Feature-branch merges remain intermediate progress.
+- Final-revision tests and CI, independent nonauthor review, applicable native acceptance, branch protections and post-merge verification remain required. Fix failures; do not waive gates or treat an author's own review as independent. Advance the next eligible step after each result.
+- This authority excludes production deployment/publication, purchases or paid services, credential/access-policy changes, disabling safeguards, force-pushing shared/protected branches, destructive data operations, unrelated features and scope expansion. Do not change approval settings automatically.
+- An enforced denial is still a block. If separate runtime approval or a permitted settings change is necessary, present its exact action, scope and effects for the owner to approve. Record real decisions, permission blocks and unresolved risks; never fabricate authority or automate approval controls.
 
 ## Own the change through delivery
 
