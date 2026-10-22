@@ -27,7 +27,7 @@ These project instructions supplement the user's universal operating doctrine. F
 - Treat unexpected focus or input errors as observations to diagnose, not proof the user is using the computer. Reobserve and use supported app-specific controls. Before retrying a failed attempt, state the hypothesis, what changed and what new evidence it will produce.
 - Use isolated synthetic company data only. Preserve real shop data, existing installations, backups, protected device identities and rollback paths. Test grants must not bypass production authorization. Keep catalog-write PIN gating. Require Category > Type > Variant where the Part contract requires it; Suppliers and Brands remain catalog roots and optional Supplier None remains valid.
 - Keep issue #33's admitted contract and physical gates. Whole-shop replacement is not two-way sync or mesh. Verify each supported platform honestly. Preserve explicitly parked work and existing release/deployment/spending requirements.
-- Optimize completed functionality per usage. Stop coding at the user's current account-usage reserve, presently 1% remaining, and save a precise handoff. Report completed delivery separately from planned actions, estimates and outstanding gates.
+- Optimize completed functionality per usage. Use the user's current account-usage reserve from the active task or handoff, verify current usage, and save a precise handoff before that reserve is reached. Keep transient quota values out of these tracked instructions. Report completed delivery separately from planned actions, estimates and outstanding gates.
 
 ## Sources and tools
 
