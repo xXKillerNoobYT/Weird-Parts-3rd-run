@@ -20,6 +20,21 @@ enum NativeTestAction {
   normalExit,
   jobNameUi,
   jobDetailsUi,
+  jobLifecycleUi,
+}
+
+enum NativeJobLifecycleUiStep {
+  inspect,
+  prepareDeleteOffline,
+  deleteOffline,
+  prepareEditNotesOffline,
+  editNotesOffline,
+  inspectConflict,
+  checkpointConflict,
+  prepareKeepEdited,
+  keepEdited,
+  inspectResolved,
+  checkpointResolved,
 }
 
 enum NativeJobDetailsUiStep {
@@ -91,6 +106,7 @@ final class NativeTestCommand {
     this.snapshotStage,
     this.jobNameStep,
     this.jobDetailsStep,
+    this.jobLifecycleStep,
   });
 
   final String epoch, commandId, contentHash;
@@ -102,6 +118,7 @@ final class NativeTestCommand {
   final PrivateSnapshotStage? snapshotStage;
   final NativeJobNameUiStep? jobNameStep;
   final NativeJobDetailsUiStep? jobDetailsStep;
+  final NativeJobLifecycleUiStep? jobLifecycleStep;
 
   static NativeTestCommand parseRequest(String source, TestSession session) {
     try {
@@ -130,9 +147,12 @@ final class NativeTestCommand {
     PrivateSnapshotStage? snapshotStage,
     NativeJobNameUiStep? jobNameStep,
     NativeJobDetailsUiStep? jobDetailsStep,
+    NativeJobLifecycleUiStep? jobLifecycleStep,
   }) {
     if ((jobNameStep != null && action != NativeTestAction.jobNameUi) ||
-        (jobDetailsStep != null && action != NativeTestAction.jobDetailsUi)) {
+        (jobDetailsStep != null && action != NativeTestAction.jobDetailsUi) ||
+        (jobLifecycleStep != null &&
+            action != NativeTestAction.jobLifecycleUi)) {
       _reject(NativeTestCommandError.invalidRequest);
     }
     final arguments = <String, Object>{
@@ -142,6 +162,7 @@ final class NativeTestCommand {
       if (snapshotStage != null) 'stage': snapshotStage.wireName,
       if (jobNameStep != null) 'step': jobNameStep.name,
       if (jobDetailsStep != null) 'step': jobDetailsStep.name,
+      if (jobLifecycleStep != null) 'step': jobLifecycleStep.name,
     };
     final request = <String, Object>{
       'epoch': session.epoch,
@@ -591,6 +612,7 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
   PrivateSnapshotStage? snapshotStage;
   NativeJobNameUiStep? jobNameStep;
   NativeJobDetailsUiStep? jobDetailsStep;
+  NativeJobLifecycleUiStep? jobLifecycleStep;
   final arguments = m['arguments'];
   if (kind == NativeTestAction.observe &&
       arguments is Map<String, dynamic> &&
@@ -624,6 +646,13 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
     );
     if (steps.length != 1) _reject(NativeTestCommandError.invalidRequest);
     jobDetailsStep = steps.single;
+  } else if (kind == NativeTestAction.jobLifecycleUi) {
+    final a = nativeTestMap(arguments, {'step'});
+    final steps = NativeJobLifecycleUiStep.values.where(
+      (s) => s.name == a['step'],
+    );
+    if (steps.length != 1) _reject(NativeTestCommandError.invalidRequest);
+    jobLifecycleStep = steps.single;
   } else {
     nativeTestMap(arguments, {});
   }
@@ -640,5 +669,6 @@ NativeTestCommand _parseCommand(String source, TestSession session) {
     snapshotStage: snapshotStage,
     jobNameStep: jobNameStep,
     jobDetailsStep: jobDetailsStep,
+    jobLifecycleStep: jobLifecycleStep,
   );
 }

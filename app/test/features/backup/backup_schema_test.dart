@@ -25,6 +25,8 @@ void main() {
     'company_job_name_peer_acks',
     'company_job_details',
     'company_job_detail_peer_acks',
+    'company_job_lifecycles',
+    'company_job_lifecycle_peer_acks',
   ]) {
     for (final malformed in ['missing', 'wrong columns']) {
       test(

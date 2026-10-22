@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../tool/native_nearby_test_commands.dart';
 import '../../tool/native_nearby_test_crypto.dart';
 import '../../tool/native_nearby_test_rpc.dart';
+import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
 
 class _Page extends StatefulWidget {
   const _Page();
@@ -56,6 +57,124 @@ const _configured = {'version': 1, 'outcome': 'configured'};
 const _notReady = {'version': 1, 'outcome': 'not-ready'};
 
 void main() {
+  testWidgets(
+    'command admission and terminal replay use cached facts during an actual pump',
+    (tester) async {
+      const statusKey = Key('retained-peer-status');
+      await tester.pumpWidget(
+        const MaterialApp(home: Text('Close', key: statusKey)),
+      );
+      var reads = 0;
+      Set<NativeTestAction> readActions() {
+        reads++;
+        return {
+          NativeTestAction.observe,
+          if (tester.widget<Text>(find.byKey(statusKey)).data == 'Close')
+            NativeTestAction.finish,
+        };
+      }
+
+      final rpc = _rpc(
+        readInfo: () => NativeTestResidentViewInfo(
+          phase: NativeTestPhase.looking,
+          sameNearbyState: true,
+          discovered: false,
+          codePresent: false,
+          allowedActions: readActions(),
+        ),
+      );
+      rpc.refreshInfoInLoop();
+      final fixture = command_test.Fixture();
+      final wire = fixture.request(1, action: NativeTestAction.finish);
+      fixture.cache.submitJson(wire);
+      final command = fixture.cache.takeNext()!;
+      final terminal = fixture.cache.complete(
+        command,
+        const NativeTestCommandResult.effect(),
+      );
+      NativeTestCommandReply? replay;
+      NativeTestCommandReply? admission;
+      Object? failure;
+      var pumpSettled = false;
+      var callbackDuringPump = false;
+      final callback = Zone.current.bindCallback(() {
+        callbackDuringPump = !pumpSettled;
+        try {
+          replay = fixture.cache.submitJson(
+            wire,
+            allowedActions: rpc.allowedActions,
+          );
+          admission = fixture.cache.submitJson(
+            fixture.request(2, action: NativeTestAction.finish),
+            allowedActions: rpc.allowedActions,
+          );
+        } catch (error) {
+          failure = error;
+        }
+      });
+      scheduleMicrotask(callback);
+      await tester.pump();
+      pumpSettled = true;
+      expect(callbackDuringPump, isTrue);
+      expect(failure, isNull);
+      expect(replay?.toJson(), terminal.toJson());
+      expect(admission?.state, NativeTestCommandState.accepted);
+      expect(reads, 1);
+      rpc.close();
+    },
+  );
+
+  test('published command allowlist is immutable and fails closed', () {
+    final source = {NativeTestAction.observe};
+    var reads = 0;
+    final rpc = _rpc(
+      readInfo: () {
+        reads++;
+        return NativeTestResidentViewInfo(
+          phase: NativeTestPhase.looking,
+          sameNearbyState: true,
+          discovered: false,
+          codePresent: false,
+          allowedActions: source,
+        );
+      },
+    );
+    expect(rpc.allowedActions, isEmpty);
+    rpc.refreshInfoInLoop();
+    final published = rpc.allowedActions;
+    source.add(NativeTestAction.finish);
+    expect(published, {NativeTestAction.observe});
+    expect(
+      () => published.add(NativeTestAction.finish),
+      throwsUnsupportedError,
+    );
+    final fixture = command_test.Fixture();
+    final denied = fixture.cache.submitJson(
+      fixture.request(1, action: NativeTestAction.finish),
+      allowedActions: rpc.allowedActions,
+    );
+    expect(denied.error, NativeTestCommandError.wrongPhase);
+    expect(fixture.cache.takeNext(), isNull);
+    rpc.refreshInfoInLoop();
+    source.clear();
+    expect(rpc.allowedActions, {
+      NativeTestAction.observe,
+      NativeTestAction.finish,
+    });
+    expect(published, {NativeTestAction.observe});
+    expect(reads, 2);
+    rpc.close();
+    expect(rpc.allowedActions, isEmpty);
+    rpc.refreshInfoInLoop();
+    expect(reads, 2);
+    final closed = fixture.cache.submitJson(
+      fixture.request(2, action: NativeTestAction.finish),
+      allowedActions: rpc.allowedActions,
+    );
+    expect(closed.error, NativeTestCommandError.wrongPhase);
+    expect(fixture.cache.takeNext(), isNull);
+  });
+
   test(
     'expired queue reports fixed reason and held owner pump progress',
     () async {

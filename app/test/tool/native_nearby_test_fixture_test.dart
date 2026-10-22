@@ -12,6 +12,7 @@ import '../../tool/nearby_lan_validation.dart';
 import '../../tool/nearby_lan_workspace.dart';
 import '../../tool/native_nearby_test_crypto.dart';
 import '../../tool/native_nearby_test_fixture.dart';
+import 'schema10_native_test_fixture.dart';
 
 void main() {
   late Directory temp;
@@ -24,6 +25,78 @@ void main() {
     workspace = null;
     temp.deleteSync(recursive: true);
   });
+
+  for (final history in ['company_job_lifecycles', 'company_authority_facts']) {
+    test(
+      'schema10 projection refuses nonempty $history without changing schema or rows',
+      () async {
+        workspace = ValidationWorkspace.open(
+          run: 'unit',
+          role: ValidationRole.sender,
+          temporaryDirectory: temp,
+        );
+        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        addTearDown(db.close);
+        await seedValidationShop(db, workspace!);
+        final columns =
+            (await db.customSelect('PRAGMA table_info("$history")').get())
+                .map((row) => row.read<String>('name'))
+                .toList();
+        await db.customStatement(
+          'INSERT INTO "$history" (${columns.map((name) => '"$name"').join(',')}) '
+          'VALUES (${columns.map((_) => '?').join(',')})',
+          [
+            for (final name in columns)
+              name == 'outgoing' ? 0 : 'synthetic-history',
+          ],
+        );
+        Future<Map<String, Object?>> snapshot() async {
+          final tables = await db
+              .customSelect(
+                "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+              )
+              .get();
+          return {
+            'version':
+                (await db.customSelect('PRAGMA user_version').getSingle()).data,
+            'rows': {
+              for (final table in tables)
+                table.read<String>('name'):
+                    (await db
+                            .customSelect(
+                              'SELECT * FROM "${table.read<String>('name')}"',
+                            )
+                            .get())
+                        .map((row) => row.data)
+                        .toList(),
+            },
+          };
+        }
+
+        final before = await snapshot();
+        await expectLater(
+          projectSeededSchema10NativeFixture(db),
+          throwsA(isA<TestFailure>()),
+        );
+        expect(await snapshot(), before);
+        expect(
+          (await db.customSelect('PRAGMA user_version').getSingle())
+              .data
+              .values
+              .single,
+          11,
+        );
+        expect(
+          await db
+              .customSelect(
+                "SELECT name FROM sqlite_master WHERE type = 'table'",
+              )
+              .get(),
+          hasLength(34),
+        );
+      },
+    );
+  }
 
   test(
     'resident refuses an absent fixture without creating a root or lock',
@@ -112,9 +185,22 @@ void main() {
       );
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
-      await seedValidationShop(db, workspace!);
+      await seedSchema10NativeFixture(db, workspace!);
+      expect(
+        (await db.customSelect('PRAGMA user_version').getSingle())
+            .data
+            .values
+            .single,
+        10,
+      );
+      expect(
+        await db
+            .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .get(),
+        hasLength(32),
+      );
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
-      expect(baseline.schemaVersion, kAppSchemaVersion);
+      expect(baseline.schemaVersion, 10);
       expect(baseline.domain.length, 30);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
@@ -165,7 +251,7 @@ void main() {
       );
       final file = File(p.join(workspace!.support.path, 'wired_parts.sqlite'));
       final db = AppDatabase.forTesting(NativeDatabase(file));
-      await seedValidationShop(db, workspace!);
+      await seedSchema10NativeFixture(db, workspace!);
       workspace!.markInitialized();
       await db.close();
       if (mutation == 'empty') {
@@ -239,7 +325,7 @@ void main() {
       );
       final file = File(p.join(workspace!.support.path, 'wired_parts.sqlite'));
       final db = AppDatabase.forTesting(NativeDatabase(file));
-      await seedValidationShop(db, workspace!);
+      await seedSchema10NativeFixture(db, workspace!);
       workspace!.markInitialized();
       await db.close();
       final before = file.readAsBytesSync();
@@ -277,9 +363,13 @@ void main() {
           p.join(workspace!.support.path, 'wired_parts.sqlite'),
         );
         final db = AppDatabase.forTesting(NativeDatabase(file));
-        await seedValidationShop(db, workspace!);
+        await seedSchema10NativeFixture(db, workspace!);
         for (final table in db.allTables) {
           final name = table.actualTableName;
+          if (name == 'company_job_lifecycles' ||
+              name == 'company_job_lifecycle_peer_acks') {
+            continue;
+          }
           if ((entry.key < 10 &&
                   {
                     'company_job_details',
@@ -363,7 +453,7 @@ void main() {
       );
       final file = File(p.join(workspace!.support.path, 'wired_parts.sqlite'));
       final db = AppDatabase.forTesting(NativeDatabase(file));
-      await seedValidationShop(db, workspace!);
+      await seedSchema10NativeFixture(db, workspace!);
       final columns =
           (await db.customSelect('PRAGMA table_info("$history")').get())
               .map((row) => row.read<String>('name'))
@@ -423,7 +513,7 @@ void main() {
       );
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
-      await seedValidationShop(db, workspace!);
+      await seedSchema10NativeFixture(db, workspace!);
       if (mutation == 'missing-company-jobs') {
         await db.customStatement('DROP TABLE company_jobs');
       } else if (mutation == 'missing-company-join') {
@@ -481,7 +571,7 @@ void main() {
       );
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
-      await seedValidationShop(db, workspace!);
+      await seedSchema10NativeFixture(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       await db.settingsDao.setSetting(
         'editor_pin_hash',

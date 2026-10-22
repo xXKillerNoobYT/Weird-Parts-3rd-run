@@ -9512,6 +9512,1206 @@ class CompanyJobNamePeerAcksCompanion
   }
 }
 
+class $CompanyJobLifecyclesTable extends CompanyJobLifecycles
+    with TableInfo<$CompanyJobLifecyclesTable, CompanyJobLifecycle> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyJobLifecyclesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _shopIdMeta = const VerificationMeta('shopId');
+  @override
+  late final GeneratedColumn<String> shopId = GeneratedColumn<String>(
+    'shop_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jobIdMeta = const VerificationMeta('jobId');
+  @override
+  late final GeneratedColumn<String> jobId = GeneratedColumn<String>(
+    'job_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originGenerationMeta = const VerificationMeta(
+    'originGeneration',
+  );
+  @override
+  late final GeneratedColumn<String> originGeneration = GeneratedColumn<String>(
+    'origin_generation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationCommitmentMeta =
+      const VerificationMeta('operationCommitment');
+  @override
+  late final GeneratedColumn<String> operationCommitment =
+      GeneratedColumn<String>(
+        'operation_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _commandCommitmentMeta = const VerificationMeta(
+    'commandCommitment',
+  );
+  @override
+  late final GeneratedColumn<String> commandCommitment =
+      GeneratedColumn<String>(
+        'command_commitment',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _operationBytesMeta = const VerificationMeta(
+    'operationBytes',
+  );
+  @override
+  late final GeneratedColumn<String> operationBytes = GeneratedColumn<String>(
+    'operation_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _receiptKeyMeta = const VerificationMeta(
+    'receiptKey',
+  );
+  @override
+  late final GeneratedColumn<String> receiptKey = GeneratedColumn<String>(
+    'receipt_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _receiptBytesMeta = const VerificationMeta(
+    'receiptBytes',
+  );
+  @override
+  late final GeneratedColumn<String> receiptBytes = GeneratedColumn<String>(
+    'receipt_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _auditBytesMeta = const VerificationMeta(
+    'auditBytes',
+  );
+  @override
+  late final GeneratedColumn<String> auditBytes = GeneratedColumn<String>(
+    'audit_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _outgoingMeta = const VerificationMeta(
+    'outgoing',
+  );
+  @override
+  late final GeneratedColumn<bool> outgoing = GeneratedColumn<bool>(
+    'outgoing',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("outgoing" IN (0, 1))',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    shopId,
+    jobId,
+    originGeneration,
+    requestId,
+    operationCommitment,
+    commandCommitment,
+    operationBytes,
+    receiptKey,
+    receiptBytes,
+    auditBytes,
+    outgoing,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_job_lifecycles';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyJobLifecycle> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('shop_id')) {
+      context.handle(
+        _shopIdMeta,
+        shopId.isAcceptableOrUnknown(data['shop_id']!, _shopIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_shopIdMeta);
+    }
+    if (data.containsKey('job_id')) {
+      context.handle(
+        _jobIdMeta,
+        jobId.isAcceptableOrUnknown(data['job_id']!, _jobIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jobIdMeta);
+    }
+    if (data.containsKey('origin_generation')) {
+      context.handle(
+        _originGenerationMeta,
+        originGeneration.isAcceptableOrUnknown(
+          data['origin_generation']!,
+          _originGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originGenerationMeta);
+    }
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('operation_commitment')) {
+      context.handle(
+        _operationCommitmentMeta,
+        operationCommitment.isAcceptableOrUnknown(
+          data['operation_commitment']!,
+          _operationCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationCommitmentMeta);
+    }
+    if (data.containsKey('command_commitment')) {
+      context.handle(
+        _commandCommitmentMeta,
+        commandCommitment.isAcceptableOrUnknown(
+          data['command_commitment']!,
+          _commandCommitmentMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_commandCommitmentMeta);
+    }
+    if (data.containsKey('operation_bytes')) {
+      context.handle(
+        _operationBytesMeta,
+        operationBytes.isAcceptableOrUnknown(
+          data['operation_bytes']!,
+          _operationBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationBytesMeta);
+    }
+    if (data.containsKey('receipt_key')) {
+      context.handle(
+        _receiptKeyMeta,
+        receiptKey.isAcceptableOrUnknown(data['receipt_key']!, _receiptKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptKeyMeta);
+    }
+    if (data.containsKey('receipt_bytes')) {
+      context.handle(
+        _receiptBytesMeta,
+        receiptBytes.isAcceptableOrUnknown(
+          data['receipt_bytes']!,
+          _receiptBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_receiptBytesMeta);
+    }
+    if (data.containsKey('audit_bytes')) {
+      context.handle(
+        _auditBytesMeta,
+        auditBytes.isAcceptableOrUnknown(data['audit_bytes']!, _auditBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_auditBytesMeta);
+    }
+    if (data.containsKey('outgoing')) {
+      context.handle(
+        _outgoingMeta,
+        outgoing.isAcceptableOrUnknown(data['outgoing']!, _outgoingMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_outgoingMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {operationCommitment};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {companyId, originGeneration, requestId},
+  ];
+  @override
+  CompanyJobLifecycle map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyJobLifecycle(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      shopId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shop_id'],
+      )!,
+      jobId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_id'],
+      )!,
+      originGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_generation'],
+      )!,
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      operationCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_commitment'],
+      )!,
+      commandCommitment: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}command_commitment'],
+      )!,
+      operationBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_bytes'],
+      )!,
+      receiptKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_key'],
+      )!,
+      receiptBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_bytes'],
+      )!,
+      auditBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}audit_bytes'],
+      )!,
+      outgoing: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}outgoing'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyJobLifecyclesTable createAlias(String alias) {
+    return $CompanyJobLifecyclesTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyJobLifecycle extends DataClass
+    implements Insertable<CompanyJobLifecycle> {
+  final String companyId;
+  final String shopId;
+  final String jobId;
+  final String originGeneration;
+  final String requestId;
+  final String operationCommitment;
+  final String commandCommitment;
+  final String operationBytes;
+  final String receiptKey;
+  final String receiptBytes;
+  final String auditBytes;
+  final bool outgoing;
+  const CompanyJobLifecycle({
+    required this.companyId,
+    required this.shopId,
+    required this.jobId,
+    required this.originGeneration,
+    required this.requestId,
+    required this.operationCommitment,
+    required this.commandCommitment,
+    required this.operationBytes,
+    required this.receiptKey,
+    required this.receiptBytes,
+    required this.auditBytes,
+    required this.outgoing,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['shop_id'] = Variable<String>(shopId);
+    map['job_id'] = Variable<String>(jobId);
+    map['origin_generation'] = Variable<String>(originGeneration);
+    map['request_id'] = Variable<String>(requestId);
+    map['operation_commitment'] = Variable<String>(operationCommitment);
+    map['command_commitment'] = Variable<String>(commandCommitment);
+    map['operation_bytes'] = Variable<String>(operationBytes);
+    map['receipt_key'] = Variable<String>(receiptKey);
+    map['receipt_bytes'] = Variable<String>(receiptBytes);
+    map['audit_bytes'] = Variable<String>(auditBytes);
+    map['outgoing'] = Variable<bool>(outgoing);
+    return map;
+  }
+
+  CompanyJobLifecyclesCompanion toCompanion(bool nullToAbsent) {
+    return CompanyJobLifecyclesCompanion(
+      companyId: Value(companyId),
+      shopId: Value(shopId),
+      jobId: Value(jobId),
+      originGeneration: Value(originGeneration),
+      requestId: Value(requestId),
+      operationCommitment: Value(operationCommitment),
+      commandCommitment: Value(commandCommitment),
+      operationBytes: Value(operationBytes),
+      receiptKey: Value(receiptKey),
+      receiptBytes: Value(receiptBytes),
+      auditBytes: Value(auditBytes),
+      outgoing: Value(outgoing),
+    );
+  }
+
+  factory CompanyJobLifecycle.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyJobLifecycle(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      shopId: serializer.fromJson<String>(json['shopId']),
+      jobId: serializer.fromJson<String>(json['jobId']),
+      originGeneration: serializer.fromJson<String>(json['originGeneration']),
+      requestId: serializer.fromJson<String>(json['requestId']),
+      operationCommitment: serializer.fromJson<String>(
+        json['operationCommitment'],
+      ),
+      commandCommitment: serializer.fromJson<String>(json['commandCommitment']),
+      operationBytes: serializer.fromJson<String>(json['operationBytes']),
+      receiptKey: serializer.fromJson<String>(json['receiptKey']),
+      receiptBytes: serializer.fromJson<String>(json['receiptBytes']),
+      auditBytes: serializer.fromJson<String>(json['auditBytes']),
+      outgoing: serializer.fromJson<bool>(json['outgoing']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'shopId': serializer.toJson<String>(shopId),
+      'jobId': serializer.toJson<String>(jobId),
+      'originGeneration': serializer.toJson<String>(originGeneration),
+      'requestId': serializer.toJson<String>(requestId),
+      'operationCommitment': serializer.toJson<String>(operationCommitment),
+      'commandCommitment': serializer.toJson<String>(commandCommitment),
+      'operationBytes': serializer.toJson<String>(operationBytes),
+      'receiptKey': serializer.toJson<String>(receiptKey),
+      'receiptBytes': serializer.toJson<String>(receiptBytes),
+      'auditBytes': serializer.toJson<String>(auditBytes),
+      'outgoing': serializer.toJson<bool>(outgoing),
+    };
+  }
+
+  CompanyJobLifecycle copyWith({
+    String? companyId,
+    String? shopId,
+    String? jobId,
+    String? originGeneration,
+    String? requestId,
+    String? operationCommitment,
+    String? commandCommitment,
+    String? operationBytes,
+    String? receiptKey,
+    String? receiptBytes,
+    String? auditBytes,
+    bool? outgoing,
+  }) => CompanyJobLifecycle(
+    companyId: companyId ?? this.companyId,
+    shopId: shopId ?? this.shopId,
+    jobId: jobId ?? this.jobId,
+    originGeneration: originGeneration ?? this.originGeneration,
+    requestId: requestId ?? this.requestId,
+    operationCommitment: operationCommitment ?? this.operationCommitment,
+    commandCommitment: commandCommitment ?? this.commandCommitment,
+    operationBytes: operationBytes ?? this.operationBytes,
+    receiptKey: receiptKey ?? this.receiptKey,
+    receiptBytes: receiptBytes ?? this.receiptBytes,
+    auditBytes: auditBytes ?? this.auditBytes,
+    outgoing: outgoing ?? this.outgoing,
+  );
+  CompanyJobLifecycle copyWithCompanion(CompanyJobLifecyclesCompanion data) {
+    return CompanyJobLifecycle(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      shopId: data.shopId.present ? data.shopId.value : this.shopId,
+      jobId: data.jobId.present ? data.jobId.value : this.jobId,
+      originGeneration: data.originGeneration.present
+          ? data.originGeneration.value
+          : this.originGeneration,
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      operationCommitment: data.operationCommitment.present
+          ? data.operationCommitment.value
+          : this.operationCommitment,
+      commandCommitment: data.commandCommitment.present
+          ? data.commandCommitment.value
+          : this.commandCommitment,
+      operationBytes: data.operationBytes.present
+          ? data.operationBytes.value
+          : this.operationBytes,
+      receiptKey: data.receiptKey.present
+          ? data.receiptKey.value
+          : this.receiptKey,
+      receiptBytes: data.receiptBytes.present
+          ? data.receiptBytes.value
+          : this.receiptBytes,
+      auditBytes: data.auditBytes.present
+          ? data.auditBytes.value
+          : this.auditBytes,
+      outgoing: data.outgoing.present ? data.outgoing.value : this.outgoing,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobLifecycle(')
+          ..write('companyId: $companyId, ')
+          ..write('shopId: $shopId, ')
+          ..write('jobId: $jobId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('commandCommitment: $commandCommitment, ')
+          ..write('operationBytes: $operationBytes, ')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('receiptBytes: $receiptBytes, ')
+          ..write('auditBytes: $auditBytes, ')
+          ..write('outgoing: $outgoing')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    companyId,
+    shopId,
+    jobId,
+    originGeneration,
+    requestId,
+    operationCommitment,
+    commandCommitment,
+    operationBytes,
+    receiptKey,
+    receiptBytes,
+    auditBytes,
+    outgoing,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyJobLifecycle &&
+          other.companyId == this.companyId &&
+          other.shopId == this.shopId &&
+          other.jobId == this.jobId &&
+          other.originGeneration == this.originGeneration &&
+          other.requestId == this.requestId &&
+          other.operationCommitment == this.operationCommitment &&
+          other.commandCommitment == this.commandCommitment &&
+          other.operationBytes == this.operationBytes &&
+          other.receiptKey == this.receiptKey &&
+          other.receiptBytes == this.receiptBytes &&
+          other.auditBytes == this.auditBytes &&
+          other.outgoing == this.outgoing);
+}
+
+class CompanyJobLifecyclesCompanion
+    extends UpdateCompanion<CompanyJobLifecycle> {
+  final Value<String> companyId;
+  final Value<String> shopId;
+  final Value<String> jobId;
+  final Value<String> originGeneration;
+  final Value<String> requestId;
+  final Value<String> operationCommitment;
+  final Value<String> commandCommitment;
+  final Value<String> operationBytes;
+  final Value<String> receiptKey;
+  final Value<String> receiptBytes;
+  final Value<String> auditBytes;
+  final Value<bool> outgoing;
+  final Value<int> rowid;
+  const CompanyJobLifecyclesCompanion({
+    this.companyId = const Value.absent(),
+    this.shopId = const Value.absent(),
+    this.jobId = const Value.absent(),
+    this.originGeneration = const Value.absent(),
+    this.requestId = const Value.absent(),
+    this.operationCommitment = const Value.absent(),
+    this.commandCommitment = const Value.absent(),
+    this.operationBytes = const Value.absent(),
+    this.receiptKey = const Value.absent(),
+    this.receiptBytes = const Value.absent(),
+    this.auditBytes = const Value.absent(),
+    this.outgoing = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyJobLifecyclesCompanion.insert({
+    required String companyId,
+    required String shopId,
+    required String jobId,
+    required String originGeneration,
+    required String requestId,
+    required String operationCommitment,
+    required String commandCommitment,
+    required String operationBytes,
+    required String receiptKey,
+    required String receiptBytes,
+    required String auditBytes,
+    required bool outgoing,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       shopId = Value(shopId),
+       jobId = Value(jobId),
+       originGeneration = Value(originGeneration),
+       requestId = Value(requestId),
+       operationCommitment = Value(operationCommitment),
+       commandCommitment = Value(commandCommitment),
+       operationBytes = Value(operationBytes),
+       receiptKey = Value(receiptKey),
+       receiptBytes = Value(receiptBytes),
+       auditBytes = Value(auditBytes),
+       outgoing = Value(outgoing);
+  static Insertable<CompanyJobLifecycle> custom({
+    Expression<String>? companyId,
+    Expression<String>? shopId,
+    Expression<String>? jobId,
+    Expression<String>? originGeneration,
+    Expression<String>? requestId,
+    Expression<String>? operationCommitment,
+    Expression<String>? commandCommitment,
+    Expression<String>? operationBytes,
+    Expression<String>? receiptKey,
+    Expression<String>? receiptBytes,
+    Expression<String>? auditBytes,
+    Expression<bool>? outgoing,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (shopId != null) 'shop_id': shopId,
+      if (jobId != null) 'job_id': jobId,
+      if (originGeneration != null) 'origin_generation': originGeneration,
+      if (requestId != null) 'request_id': requestId,
+      if (operationCommitment != null)
+        'operation_commitment': operationCommitment,
+      if (commandCommitment != null) 'command_commitment': commandCommitment,
+      if (operationBytes != null) 'operation_bytes': operationBytes,
+      if (receiptKey != null) 'receipt_key': receiptKey,
+      if (receiptBytes != null) 'receipt_bytes': receiptBytes,
+      if (auditBytes != null) 'audit_bytes': auditBytes,
+      if (outgoing != null) 'outgoing': outgoing,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyJobLifecyclesCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? shopId,
+    Value<String>? jobId,
+    Value<String>? originGeneration,
+    Value<String>? requestId,
+    Value<String>? operationCommitment,
+    Value<String>? commandCommitment,
+    Value<String>? operationBytes,
+    Value<String>? receiptKey,
+    Value<String>? receiptBytes,
+    Value<String>? auditBytes,
+    Value<bool>? outgoing,
+    Value<int>? rowid,
+  }) {
+    return CompanyJobLifecyclesCompanion(
+      companyId: companyId ?? this.companyId,
+      shopId: shopId ?? this.shopId,
+      jobId: jobId ?? this.jobId,
+      originGeneration: originGeneration ?? this.originGeneration,
+      requestId: requestId ?? this.requestId,
+      operationCommitment: operationCommitment ?? this.operationCommitment,
+      commandCommitment: commandCommitment ?? this.commandCommitment,
+      operationBytes: operationBytes ?? this.operationBytes,
+      receiptKey: receiptKey ?? this.receiptKey,
+      receiptBytes: receiptBytes ?? this.receiptBytes,
+      auditBytes: auditBytes ?? this.auditBytes,
+      outgoing: outgoing ?? this.outgoing,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (shopId.present) {
+      map['shop_id'] = Variable<String>(shopId.value);
+    }
+    if (jobId.present) {
+      map['job_id'] = Variable<String>(jobId.value);
+    }
+    if (originGeneration.present) {
+      map['origin_generation'] = Variable<String>(originGeneration.value);
+    }
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (operationCommitment.present) {
+      map['operation_commitment'] = Variable<String>(operationCommitment.value);
+    }
+    if (commandCommitment.present) {
+      map['command_commitment'] = Variable<String>(commandCommitment.value);
+    }
+    if (operationBytes.present) {
+      map['operation_bytes'] = Variable<String>(operationBytes.value);
+    }
+    if (receiptKey.present) {
+      map['receipt_key'] = Variable<String>(receiptKey.value);
+    }
+    if (receiptBytes.present) {
+      map['receipt_bytes'] = Variable<String>(receiptBytes.value);
+    }
+    if (auditBytes.present) {
+      map['audit_bytes'] = Variable<String>(auditBytes.value);
+    }
+    if (outgoing.present) {
+      map['outgoing'] = Variable<bool>(outgoing.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobLifecyclesCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('shopId: $shopId, ')
+          ..write('jobId: $jobId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('operationCommitment: $operationCommitment, ')
+          ..write('commandCommitment: $commandCommitment, ')
+          ..write('operationBytes: $operationBytes, ')
+          ..write('receiptKey: $receiptKey, ')
+          ..write('receiptBytes: $receiptBytes, ')
+          ..write('auditBytes: $auditBytes, ')
+          ..write('outgoing: $outgoing, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CompanyJobLifecyclePeerAcksTable extends CompanyJobLifecyclePeerAcks
+    with
+        TableInfo<
+          $CompanyJobLifecyclePeerAcksTable,
+          CompanyJobLifecyclePeerAck
+        > {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyJobLifecyclePeerAcksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originGenerationMeta = const VerificationMeta(
+    'originGeneration',
+  );
+  @override
+  late final GeneratedColumn<String> originGeneration = GeneratedColumn<String>(
+    'origin_generation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _peerDeviceIdMeta = const VerificationMeta(
+    'peerDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> peerDeviceId = GeneratedColumn<String>(
+    'peer_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationDigestMeta = const VerificationMeta(
+    'operationDigest',
+  );
+  @override
+  late final GeneratedColumn<String> operationDigest = GeneratedColumn<String>(
+    'operation_digest',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ackBytesMeta = const VerificationMeta(
+    'ackBytes',
+  );
+  @override
+  late final GeneratedColumn<String> ackBytes = GeneratedColumn<String>(
+    'ack_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+    operationDigest,
+    ackBytes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_job_lifecycle_peer_acks';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyJobLifecyclePeerAck> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('origin_generation')) {
+      context.handle(
+        _originGenerationMeta,
+        originGeneration.isAcceptableOrUnknown(
+          data['origin_generation']!,
+          _originGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originGenerationMeta);
+    }
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('peer_device_id')) {
+      context.handle(
+        _peerDeviceIdMeta,
+        peerDeviceId.isAcceptableOrUnknown(
+          data['peer_device_id']!,
+          _peerDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_peerDeviceIdMeta);
+    }
+    if (data.containsKey('operation_digest')) {
+      context.handle(
+        _operationDigestMeta,
+        operationDigest.isAcceptableOrUnknown(
+          data['operation_digest']!,
+          _operationDigestMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationDigestMeta);
+    }
+    if (data.containsKey('ack_bytes')) {
+      context.handle(
+        _ackBytesMeta,
+        ackBytes.isAcceptableOrUnknown(data['ack_bytes']!, _ackBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ackBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+  };
+  @override
+  CompanyJobLifecyclePeerAck map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyJobLifecyclePeerAck(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      originGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_generation'],
+      )!,
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      peerDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_device_id'],
+      )!,
+      operationDigest: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_digest'],
+      )!,
+      ackBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ack_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyJobLifecyclePeerAcksTable createAlias(String alias) {
+    return $CompanyJobLifecyclePeerAcksTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyJobLifecyclePeerAck extends DataClass
+    implements Insertable<CompanyJobLifecyclePeerAck> {
+  final String companyId;
+  final String originGeneration;
+  final String requestId;
+  final String peerDeviceId;
+  final String operationDigest;
+  final String ackBytes;
+  const CompanyJobLifecyclePeerAck({
+    required this.companyId,
+    required this.originGeneration,
+    required this.requestId,
+    required this.peerDeviceId,
+    required this.operationDigest,
+    required this.ackBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['origin_generation'] = Variable<String>(originGeneration);
+    map['request_id'] = Variable<String>(requestId);
+    map['peer_device_id'] = Variable<String>(peerDeviceId);
+    map['operation_digest'] = Variable<String>(operationDigest);
+    map['ack_bytes'] = Variable<String>(ackBytes);
+    return map;
+  }
+
+  CompanyJobLifecyclePeerAcksCompanion toCompanion(bool nullToAbsent) {
+    return CompanyJobLifecyclePeerAcksCompanion(
+      companyId: Value(companyId),
+      originGeneration: Value(originGeneration),
+      requestId: Value(requestId),
+      peerDeviceId: Value(peerDeviceId),
+      operationDigest: Value(operationDigest),
+      ackBytes: Value(ackBytes),
+    );
+  }
+
+  factory CompanyJobLifecyclePeerAck.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyJobLifecyclePeerAck(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      originGeneration: serializer.fromJson<String>(json['originGeneration']),
+      requestId: serializer.fromJson<String>(json['requestId']),
+      peerDeviceId: serializer.fromJson<String>(json['peerDeviceId']),
+      operationDigest: serializer.fromJson<String>(json['operationDigest']),
+      ackBytes: serializer.fromJson<String>(json['ackBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'originGeneration': serializer.toJson<String>(originGeneration),
+      'requestId': serializer.toJson<String>(requestId),
+      'peerDeviceId': serializer.toJson<String>(peerDeviceId),
+      'operationDigest': serializer.toJson<String>(operationDigest),
+      'ackBytes': serializer.toJson<String>(ackBytes),
+    };
+  }
+
+  CompanyJobLifecyclePeerAck copyWith({
+    String? companyId,
+    String? originGeneration,
+    String? requestId,
+    String? peerDeviceId,
+    String? operationDigest,
+    String? ackBytes,
+  }) => CompanyJobLifecyclePeerAck(
+    companyId: companyId ?? this.companyId,
+    originGeneration: originGeneration ?? this.originGeneration,
+    requestId: requestId ?? this.requestId,
+    peerDeviceId: peerDeviceId ?? this.peerDeviceId,
+    operationDigest: operationDigest ?? this.operationDigest,
+    ackBytes: ackBytes ?? this.ackBytes,
+  );
+  CompanyJobLifecyclePeerAck copyWithCompanion(
+    CompanyJobLifecyclePeerAcksCompanion data,
+  ) {
+    return CompanyJobLifecyclePeerAck(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      originGeneration: data.originGeneration.present
+          ? data.originGeneration.value
+          : this.originGeneration,
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      peerDeviceId: data.peerDeviceId.present
+          ? data.peerDeviceId.value
+          : this.peerDeviceId,
+      operationDigest: data.operationDigest.present
+          ? data.operationDigest.value
+          : this.operationDigest,
+      ackBytes: data.ackBytes.present ? data.ackBytes.value : this.ackBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobLifecyclePeerAck(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('peerDeviceId: $peerDeviceId, ')
+          ..write('operationDigest: $operationDigest, ')
+          ..write('ackBytes: $ackBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+    operationDigest,
+    ackBytes,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyJobLifecyclePeerAck &&
+          other.companyId == this.companyId &&
+          other.originGeneration == this.originGeneration &&
+          other.requestId == this.requestId &&
+          other.peerDeviceId == this.peerDeviceId &&
+          other.operationDigest == this.operationDigest &&
+          other.ackBytes == this.ackBytes);
+}
+
+class CompanyJobLifecyclePeerAcksCompanion
+    extends UpdateCompanion<CompanyJobLifecyclePeerAck> {
+  final Value<String> companyId;
+  final Value<String> originGeneration;
+  final Value<String> requestId;
+  final Value<String> peerDeviceId;
+  final Value<String> operationDigest;
+  final Value<String> ackBytes;
+  final Value<int> rowid;
+  const CompanyJobLifecyclePeerAcksCompanion({
+    this.companyId = const Value.absent(),
+    this.originGeneration = const Value.absent(),
+    this.requestId = const Value.absent(),
+    this.peerDeviceId = const Value.absent(),
+    this.operationDigest = const Value.absent(),
+    this.ackBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyJobLifecyclePeerAcksCompanion.insert({
+    required String companyId,
+    required String originGeneration,
+    required String requestId,
+    required String peerDeviceId,
+    required String operationDigest,
+    required String ackBytes,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       originGeneration = Value(originGeneration),
+       requestId = Value(requestId),
+       peerDeviceId = Value(peerDeviceId),
+       operationDigest = Value(operationDigest),
+       ackBytes = Value(ackBytes);
+  static Insertable<CompanyJobLifecyclePeerAck> custom({
+    Expression<String>? companyId,
+    Expression<String>? originGeneration,
+    Expression<String>? requestId,
+    Expression<String>? peerDeviceId,
+    Expression<String>? operationDigest,
+    Expression<String>? ackBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (originGeneration != null) 'origin_generation': originGeneration,
+      if (requestId != null) 'request_id': requestId,
+      if (peerDeviceId != null) 'peer_device_id': peerDeviceId,
+      if (operationDigest != null) 'operation_digest': operationDigest,
+      if (ackBytes != null) 'ack_bytes': ackBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyJobLifecyclePeerAcksCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? originGeneration,
+    Value<String>? requestId,
+    Value<String>? peerDeviceId,
+    Value<String>? operationDigest,
+    Value<String>? ackBytes,
+    Value<int>? rowid,
+  }) {
+    return CompanyJobLifecyclePeerAcksCompanion(
+      companyId: companyId ?? this.companyId,
+      originGeneration: originGeneration ?? this.originGeneration,
+      requestId: requestId ?? this.requestId,
+      peerDeviceId: peerDeviceId ?? this.peerDeviceId,
+      operationDigest: operationDigest ?? this.operationDigest,
+      ackBytes: ackBytes ?? this.ackBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (originGeneration.present) {
+      map['origin_generation'] = Variable<String>(originGeneration.value);
+    }
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (peerDeviceId.present) {
+      map['peer_device_id'] = Variable<String>(peerDeviceId.value);
+    }
+    if (operationDigest.present) {
+      map['operation_digest'] = Variable<String>(operationDigest.value);
+    }
+    if (ackBytes.present) {
+      map['ack_bytes'] = Variable<String>(ackBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobLifecyclePeerAcksCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('peerDeviceId: $peerDeviceId, ')
+          ..write('operationDigest: $operationDigest, ')
+          ..write('ackBytes: $ackBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $CompanyJobDetailsTable extends CompanyJobDetails
     with TableInfo<$CompanyJobDetailsTable, CompanyJobDetail> {
   @override
@@ -16522,6 +17722,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   );
   late final $CompanyJobNamePeerAcksTable companyJobNamePeerAcks =
       $CompanyJobNamePeerAcksTable(this);
+  late final $CompanyJobLifecyclesTable companyJobLifecycles =
+      $CompanyJobLifecyclesTable(this);
+  late final $CompanyJobLifecyclePeerAcksTable companyJobLifecyclePeerAcks =
+      $CompanyJobLifecyclePeerAcksTable(this);
   late final $CompanyJobDetailsTable companyJobDetails =
       $CompanyJobDetailsTable(this);
   late final $CompanyJobDetailPeerAcksTable companyJobDetailPeerAcks =
@@ -16579,6 +17783,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     companyJobPeerAcks,
     companyJobNames,
     companyJobNamePeerAcks,
+    companyJobLifecycles,
+    companyJobLifecyclePeerAcks,
     companyJobDetails,
     companyJobDetailPeerAcks,
     jobLines,
@@ -21311,6 +22517,613 @@ typedef $$CompanyJobNamePeerAcksTableProcessedTableManager =
       CompanyJobNamePeerAck,
       PrefetchHooks Function()
     >;
+typedef $$CompanyJobLifecyclesTableCreateCompanionBuilder =
+    CompanyJobLifecyclesCompanion Function({
+      required String companyId,
+      required String shopId,
+      required String jobId,
+      required String originGeneration,
+      required String requestId,
+      required String operationCommitment,
+      required String commandCommitment,
+      required String operationBytes,
+      required String receiptKey,
+      required String receiptBytes,
+      required String auditBytes,
+      required bool outgoing,
+      Value<int> rowid,
+    });
+typedef $$CompanyJobLifecyclesTableUpdateCompanionBuilder =
+    CompanyJobLifecyclesCompanion Function({
+      Value<String> companyId,
+      Value<String> shopId,
+      Value<String> jobId,
+      Value<String> originGeneration,
+      Value<String> requestId,
+      Value<String> operationCommitment,
+      Value<String> commandCommitment,
+      Value<String> operationBytes,
+      Value<String> receiptKey,
+      Value<String> receiptBytes,
+      Value<String> auditBytes,
+      Value<bool> outgoing,
+      Value<int> rowid,
+    });
+
+class $$CompanyJobLifecyclesTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyJobLifecyclesTable> {
+  $$CompanyJobLifecyclesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get shopId => $composableBuilder(
+    column: $table.shopId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get outgoing => $composableBuilder(
+    column: $table.outgoing,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyJobLifecyclesTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyJobLifecyclesTable> {
+  $$CompanyJobLifecyclesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get shopId => $composableBuilder(
+    column: $table.shopId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get outgoing => $composableBuilder(
+    column: $table.outgoing,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyJobLifecyclesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyJobLifecyclesTable> {
+  $$CompanyJobLifecyclesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get shopId =>
+      $composableBuilder(column: $table.shopId, builder: (column) => column);
+
+  GeneratedColumn<String> get jobId =>
+      $composableBuilder(column: $table.jobId, builder: (column) => column);
+
+  GeneratedColumn<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get operationCommitment => $composableBuilder(
+    column: $table.operationCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get commandCommitment => $composableBuilder(
+    column: $table.commandCommitment,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get operationBytes => $composableBuilder(
+    column: $table.operationBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptKey => $composableBuilder(
+    column: $table.receiptKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptBytes => $composableBuilder(
+    column: $table.receiptBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get auditBytes => $composableBuilder(
+    column: $table.auditBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get outgoing =>
+      $composableBuilder(column: $table.outgoing, builder: (column) => column);
+}
+
+class $$CompanyJobLifecyclesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyJobLifecyclesTable,
+          CompanyJobLifecycle,
+          $$CompanyJobLifecyclesTableFilterComposer,
+          $$CompanyJobLifecyclesTableOrderingComposer,
+          $$CompanyJobLifecyclesTableAnnotationComposer,
+          $$CompanyJobLifecyclesTableCreateCompanionBuilder,
+          $$CompanyJobLifecyclesTableUpdateCompanionBuilder,
+          (
+            CompanyJobLifecycle,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyJobLifecyclesTable,
+              CompanyJobLifecycle
+            >,
+          ),
+          CompanyJobLifecycle,
+          PrefetchHooks Function()
+        > {
+  $$CompanyJobLifecyclesTableTableManager(
+    _$AppDatabase db,
+    $CompanyJobLifecyclesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyJobLifecyclesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CompanyJobLifecyclesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CompanyJobLifecyclesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> shopId = const Value.absent(),
+                Value<String> jobId = const Value.absent(),
+                Value<String> originGeneration = const Value.absent(),
+                Value<String> requestId = const Value.absent(),
+                Value<String> operationCommitment = const Value.absent(),
+                Value<String> commandCommitment = const Value.absent(),
+                Value<String> operationBytes = const Value.absent(),
+                Value<String> receiptKey = const Value.absent(),
+                Value<String> receiptBytes = const Value.absent(),
+                Value<String> auditBytes = const Value.absent(),
+                Value<bool> outgoing = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobLifecyclesCompanion(
+                companyId: companyId,
+                shopId: shopId,
+                jobId: jobId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                operationCommitment: operationCommitment,
+                commandCommitment: commandCommitment,
+                operationBytes: operationBytes,
+                receiptKey: receiptKey,
+                receiptBytes: receiptBytes,
+                auditBytes: auditBytes,
+                outgoing: outgoing,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String shopId,
+                required String jobId,
+                required String originGeneration,
+                required String requestId,
+                required String operationCommitment,
+                required String commandCommitment,
+                required String operationBytes,
+                required String receiptKey,
+                required String receiptBytes,
+                required String auditBytes,
+                required bool outgoing,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobLifecyclesCompanion.insert(
+                companyId: companyId,
+                shopId: shopId,
+                jobId: jobId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                operationCommitment: operationCommitment,
+                commandCommitment: commandCommitment,
+                operationBytes: operationBytes,
+                receiptKey: receiptKey,
+                receiptBytes: receiptBytes,
+                auditBytes: auditBytes,
+                outgoing: outgoing,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyJobLifecyclesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyJobLifecyclesTable,
+      CompanyJobLifecycle,
+      $$CompanyJobLifecyclesTableFilterComposer,
+      $$CompanyJobLifecyclesTableOrderingComposer,
+      $$CompanyJobLifecyclesTableAnnotationComposer,
+      $$CompanyJobLifecyclesTableCreateCompanionBuilder,
+      $$CompanyJobLifecyclesTableUpdateCompanionBuilder,
+      (
+        CompanyJobLifecycle,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyJobLifecyclesTable,
+          CompanyJobLifecycle
+        >,
+      ),
+      CompanyJobLifecycle,
+      PrefetchHooks Function()
+    >;
+typedef $$CompanyJobLifecyclePeerAcksTableCreateCompanionBuilder =
+    CompanyJobLifecyclePeerAcksCompanion Function({
+      required String companyId,
+      required String originGeneration,
+      required String requestId,
+      required String peerDeviceId,
+      required String operationDigest,
+      required String ackBytes,
+      Value<int> rowid,
+    });
+typedef $$CompanyJobLifecyclePeerAcksTableUpdateCompanionBuilder =
+    CompanyJobLifecyclePeerAcksCompanion Function({
+      Value<String> companyId,
+      Value<String> originGeneration,
+      Value<String> requestId,
+      Value<String> peerDeviceId,
+      Value<String> operationDigest,
+      Value<String> ackBytes,
+      Value<int> rowid,
+    });
+
+class $$CompanyJobLifecyclePeerAcksTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyJobLifecyclePeerAcksTable> {
+  $$CompanyJobLifecyclePeerAcksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationDigest => $composableBuilder(
+    column: $table.operationDigest,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ackBytes => $composableBuilder(
+    column: $table.ackBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyJobLifecyclePeerAcksTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyJobLifecyclePeerAcksTable> {
+  $$CompanyJobLifecyclePeerAcksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationDigest => $composableBuilder(
+    column: $table.operationDigest,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ackBytes => $composableBuilder(
+    column: $table.ackBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyJobLifecyclePeerAcksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyJobLifecyclePeerAcksTable> {
+  $$CompanyJobLifecyclePeerAcksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get operationDigest => $composableBuilder(
+    column: $table.operationDigest,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ackBytes =>
+      $composableBuilder(column: $table.ackBytes, builder: (column) => column);
+}
+
+class $$CompanyJobLifecyclePeerAcksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyJobLifecyclePeerAcksTable,
+          CompanyJobLifecyclePeerAck,
+          $$CompanyJobLifecyclePeerAcksTableFilterComposer,
+          $$CompanyJobLifecyclePeerAcksTableOrderingComposer,
+          $$CompanyJobLifecyclePeerAcksTableAnnotationComposer,
+          $$CompanyJobLifecyclePeerAcksTableCreateCompanionBuilder,
+          $$CompanyJobLifecyclePeerAcksTableUpdateCompanionBuilder,
+          (
+            CompanyJobLifecyclePeerAck,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyJobLifecyclePeerAcksTable,
+              CompanyJobLifecyclePeerAck
+            >,
+          ),
+          CompanyJobLifecyclePeerAck,
+          PrefetchHooks Function()
+        > {
+  $$CompanyJobLifecyclePeerAcksTableTableManager(
+    _$AppDatabase db,
+    $CompanyJobLifecyclePeerAcksTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyJobLifecyclePeerAcksTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CompanyJobLifecyclePeerAcksTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CompanyJobLifecyclePeerAcksTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> originGeneration = const Value.absent(),
+                Value<String> requestId = const Value.absent(),
+                Value<String> peerDeviceId = const Value.absent(),
+                Value<String> operationDigest = const Value.absent(),
+                Value<String> ackBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobLifecyclePeerAcksCompanion(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                peerDeviceId: peerDeviceId,
+                operationDigest: operationDigest,
+                ackBytes: ackBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String originGeneration,
+                required String requestId,
+                required String peerDeviceId,
+                required String operationDigest,
+                required String ackBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobLifecyclePeerAcksCompanion.insert(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                peerDeviceId: peerDeviceId,
+                operationDigest: operationDigest,
+                ackBytes: ackBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyJobLifecyclePeerAcksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyJobLifecyclePeerAcksTable,
+      CompanyJobLifecyclePeerAck,
+      $$CompanyJobLifecyclePeerAcksTableFilterComposer,
+      $$CompanyJobLifecyclePeerAcksTableOrderingComposer,
+      $$CompanyJobLifecyclePeerAcksTableAnnotationComposer,
+      $$CompanyJobLifecyclePeerAcksTableCreateCompanionBuilder,
+      $$CompanyJobLifecyclePeerAcksTableUpdateCompanionBuilder,
+      (
+        CompanyJobLifecyclePeerAck,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyJobLifecyclePeerAcksTable,
+          CompanyJobLifecyclePeerAck
+        >,
+      ),
+      CompanyJobLifecyclePeerAck,
+      PrefetchHooks Function()
+    >;
 typedef $$CompanyJobDetailsTableCreateCompanionBuilder =
     CompanyJobDetailsCompanion Function({
       required String companyId,
@@ -25061,6 +26874,14 @@ class $AppDatabaseManager {
       $$CompanyJobNamePeerAcksTableTableManager(
         _db,
         _db.companyJobNamePeerAcks,
+      );
+  $$CompanyJobLifecyclesTableTableManager get companyJobLifecycles =>
+      $$CompanyJobLifecyclesTableTableManager(_db, _db.companyJobLifecycles);
+  $$CompanyJobLifecyclePeerAcksTableTableManager
+  get companyJobLifecyclePeerAcks =>
+      $$CompanyJobLifecyclePeerAcksTableTableManager(
+        _db,
+        _db.companyJobLifecyclePeerAcks,
       );
   $$CompanyJobDetailsTableTableManager get companyJobDetails =>
       $$CompanyJobDetailsTableTableManager(_db, _db.companyJobDetails);

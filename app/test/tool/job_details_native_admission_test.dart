@@ -232,6 +232,19 @@ void main() {
     final before = snapshot();
     expect(verify, returnsNormally);
     expect(snapshot(), before);
+    current.execute('UPDATE app_settings SET value = ? WHERE key = ?', [
+      '{}',
+      kInstallationBindingKey,
+    ]);
+    final changedBinding = snapshot();
+    expect(verify, throwsA(isA<NativeTestFailure>()));
+    expect(snapshot(), changedBinding);
+    current.execute('UPDATE app_settings SET value = ? WHERE key = ?', [
+      binding,
+      kInstallationBindingKey,
+    ]);
+    expect(verify, returnsNormally);
+    expect(snapshot(), before);
     for (final change in [
       "UPDATE device_profiles SET id = 'changed-profile'",
       "UPDATE device_profiles SET display_name = 'changed name'",
@@ -674,22 +687,19 @@ void main() {
                 'bindingSha256': digest(binding),
               },
             );
-        await checkCold();
-        await f.bDb.customStatement('DELETE FROM device_profiles');
-        final missingProfile = await adapter.detailsNativeSqlHash(f.bDb);
-        await expectLater(checkCold(), throwsA(anything));
-        expect(await adapter.detailsNativeSqlHash(f.bDb), missingProfile);
-        expect(currentDb.select('SELECT * FROM device_profiles'), isEmpty);
-        await f.bDb.customStatement(
-          'INSERT INTO device_profiles VALUES (?, ?, ?)',
-          [profile['id'], profile['display_name'], profile['created_at']],
+        expect(
+          currentDb.select('PRAGMA user_version').single.values.single,
+          11,
         );
-        await f.bDb.settingsDao.setSetting(kInstallationBindingKey, '{}');
-        final changedBinding = await adapter.detailsNativeSqlHash(f.bDb);
-        await expectLater(checkCold(), throwsA(anything));
-        expect(await adapter.detailsNativeSqlHash(f.bDb), changedBinding);
-        await f.bDb.settingsDao.setSetting(kInstallationBindingKey, binding);
-        await checkCold();
+        expect(
+          currentDb.select(
+            "SELECT name FROM sqlite_master WHERE type = 'table'",
+          ),
+          hasLength(34),
+        );
+        final currentSql = await adapter.detailsNativeSqlHash(f.bDb);
+        await expectLater(checkCold(), throwsA(isA<NativeTestFailure>()));
+        expect(await adapter.detailsNativeSqlHash(f.bDb), currentSql);
       } finally {
         currentDb.dispose();
         originalDb.dispose();

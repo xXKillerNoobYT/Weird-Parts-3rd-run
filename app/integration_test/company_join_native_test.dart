@@ -16,6 +16,7 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/company/company_gate.dart';
 import 'package:wired_parts/features/company/company_join_page.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
@@ -44,6 +45,87 @@ const _createdMode = bool.fromEnvironment('COMPANY_CREATED_JOB_NATIVE_MODE');
 const _jobNameMode = bool.fromEnvironment('COMPANY_JOB_NAME_NATIVE_MODE');
 const jobDetailsNativeRun = 'j116-details-v3';
 const _detailsMode = bool.fromEnvironment('COMPANY_JOB_DETAILS_NATIVE_MODE');
+const jobLifecycleNativeRun = 'j63-lifecycle-v5';
+const jobLifecycleNativeProductRevision =
+    'c82451e2081e9cb78ba26412511064c1b1b82e93';
+const _lifecyclePendingKind = 'j63.pending-lifecycle.recovery@1';
+const _lifecyclePendingOrigin = {
+  'revision': 'f271050927948fc7ab4fb66c69de7f356b08a22f',
+  'tree': '40244d81ed83be8ae0b7cefeae436a020df16dd1',
+  'adapterSha256':
+      'eb637c72b48dc98627a313861d2675c0b219efdf6e624f7cc3d1f400ded2e9d2',
+  'productRevision': jobLifecycleNativeProductRevision,
+  'manifestSha256':
+      'fcf88c4200447bf0062e5ebcfec4d743d436e96a555dd9dba5432c122c148b6a',
+};
+const _lifecyclePendingPins = {
+  'owner': {
+    'saved': 'lifecycle-ui-38576-15.json',
+    'savedSha256':
+        '2ed453e7b976b9695c2429296c9938bfbc4c5dd9f729a261edd4df1fd89e3184',
+    'closed':
+        '41acede54c6335f22b26b8fbd0ddc9c0155347adcce9ba3dcfdba8b08a10f237',
+  },
+  'member': {
+    'saved': 'lifecycle-ui-85334-11.json',
+    'savedSha256':
+        '52dd2f3cbda131d350fc9597addb73e5b75523500365994dade390ad8a1c245e',
+    'closed':
+        '7af413297c13f9c02d8c981f2a462d216915721f9fb0dc36a75debadfb87d8ce',
+  },
+};
+const _lifecyclePendingRetiredEpoch =
+    'epoch-OMklLvwoZO2dOdmz2UV4wf2db_gIphOXdIiybOYrtyM';
+const _lifecycleInterruptedConflictKind =
+    'j63.interrupted-lifecycle-conflict.recovery@1';
+const _lifecycleConflictRetiredEpoch =
+    'epoch-qgjk3QFpgmod3nao5vj0wMO1PuU-bSwVZ4VFPTgrKF0';
+const _lifecycleConflictOrigin = {
+  'revision': 'b7a31b3c8fe1c9882921bfce3d3446c6c1db63b4',
+  'tree': '6d72edd53addb337115057b2663886e381b5d056',
+  'adapterSha256':
+      '12af56565e383948483011a1b8da6424265477db2c27f5524a3ed6620fa11ac6',
+  'productRevision': jobLifecycleNativeProductRevision,
+  'manifestSha256':
+      '6f6f65ccd4d702642a1174d2c3cdc1b18fdc1bdad4bd8b10f9952c5a37761e16',
+};
+const _lifecycleConflictPins = {
+  'owner': {
+    'inspection': 'lifecycle-ui-22148-8.json',
+    'inspectionSha256':
+        'ae8a998edc3d6c33dfeba046ce724d7c32a58e5f9887b33bf48363d5ac41f59a',
+    'closed':
+        '9cd6aa6a52a920614be34753a2a1a61f6e79d63d0e0cc42b5a898f92f213ebac',
+    'sql': '9c7a73ab926826a9dcc8c79ecb1126efa5d8a8f9c579b57b63ab0be1c445dddb',
+    'pending':
+        'c346b76ccbc162149240576bb327725aa132baf6b2e08d09d463746baa37edbb',
+  },
+  'member': {
+    'inspection': 'lifecycle-ui-75422-6.json',
+    'inspectionSha256':
+        'a8b5059ca1034b953e575e960b3f6fe940c4059b74fef52f0e7aa14430a86f61',
+    'closed':
+        '938b342c2f585b372d7b49d349af7dae082486e481620e1e3d27f151ae7fc1da',
+    'sql': '71357a7b3a1c9474f431e0de9f3c2fe4478674668172a12995406ed6780e9808',
+    'pending':
+        'ba4eab122599bfb5c1dcacb1bb490d7bf63847ad863bb135560fb83344df0311',
+  },
+};
+const _jobLifecycleMode = bool.fromEnvironment(
+  'COMPANY_JOB_LIFECYCLE_NATIVE_MODE',
+);
+const _lifecycleManifestPath = String.fromEnvironment(
+  'COMPANY_JOB_LIFECYCLE_NATIVE_MANIFEST',
+);
+const _lifecycleManifestSha256 = String.fromEnvironment(
+  'COMPANY_JOB_LIFECYCLE_NATIVE_MANIFEST_SHA256',
+);
+const _lifecycleCheckpointPath = String.fromEnvironment(
+  'COMPANY_JOB_LIFECYCLE_NATIVE_CHECKPOINT',
+);
+const _lifecycleCheckpointSha256 = String.fromEnvironment(
+  'COMPANY_JOB_LIFECYCLE_NATIVE_CHECKPOINT_SHA256',
+);
 const _detailsManifestPath = String.fromEnvironment(
   'COMPANY_JOB_DETAILS_NATIVE_MANIFEST',
 );
@@ -346,6 +428,7 @@ Future<void> saveJobDetailsThroughNativeUi({
   String? notesCandidateOperationId,
   required Future<void> Function(Finder) tap,
   required Future<void> Function(bool Function()) waitUntilReady,
+  Future<void> Function(bool Function())? waitForCompletion,
   required void Function() requireBeforeEffect,
 }) async {
   _require(!text.containsKey(JobDetailField.status));
@@ -409,7 +492,7 @@ Future<void> saveJobDetailsThroughNativeUi({
   );
   requireBeforeEffect();
   await tap(save);
-  await waitUntilReady(
+  await (waitForCompletion ?? waitUntilReady)(
     () =>
         input.evaluate().isEmpty ||
         inside('company-job-details-error').evaluate().isNotEmpty,
@@ -498,20 +581,26 @@ void validateJoinNativeDefines({
   required String adapter,
   bool createdMode = false,
   bool detailsMode = false,
+  bool lifecycleMode = false,
   String productRevision = joinNativeProductRevision,
 }) {
   _require(enabled && {'windows', 'macos'}.contains(platform));
   _require(role == (platform == 'windows' ? 'owner' : 'member'));
   _require(!detailsMode || createdMode);
+  _require(!lifecycleMode || (createdMode && !detailsMode));
   _require(
     run ==
-        (detailsMode
+        (lifecycleMode
+            ? jobLifecycleNativeRun
+            : detailsMode
             ? jobDetailsNativeRun
             : createdMode
             ? createdJobNativeRun
             : joinNativeRun),
   );
-  if (createdMode) {
+  if (lifecycleMode) {
+    _require(productRevision == jobLifecycleNativeProductRevision);
+  } else if (createdMode) {
     _require(
       productRevision == revision &&
           productRevision != joinNativeProductRevision &&
@@ -526,6 +615,7 @@ void validateJoinNativeDefines({
       nativeRole,
       createdMode: createdMode,
       detailsMode: detailsMode,
+      lifecycleMode: lifecycleMode,
     );
   }
   _require(RegExp(r'^[a-f0-9]{40}$').hasMatch(revision));
@@ -539,18 +629,24 @@ String joinNativeNamespace(
   String role, {
   bool createdMode = false,
   bool detailsMode = false,
+  bool lifecycleMode = false,
 }) {
   _require(!detailsMode || createdMode);
+  _require(!lifecycleMode || (createdMode && !detailsMode));
   _require(
     run ==
-            (detailsMode
+            (lifecycleMode
+                ? jobLifecycleNativeRun
+                : detailsMode
                 ? jobDetailsNativeRun
                 : createdMode
                 ? createdJobNativeRun
                 : joinNativeRun) &&
         {'owner', 'member'}.contains(role),
   );
-  final family = detailsMode
+  final family = lifecycleMode
+      ? 'life'
+      : detailsMode
       ? 'details'
       : createdMode
       ? 'created'
@@ -705,6 +801,7 @@ enum JoinNativeRootStage {
   interruptedDetailsPending,
   interruptedDetailsMixed,
   interruptedDetailsNotes,
+  lifecycleCheckpoint,
 }
 
 final class JoinNativeRootAdmission {
@@ -717,6 +814,7 @@ final class JoinNativeRootAdmission {
     this.detailsPendingRecovery,
     this.detailsMixedRecovery,
     this.detailsNotesRecovery,
+    this.lifecycleCheckpoint,
   });
 
   final JoinNativeRootStage stage;
@@ -727,6 +825,7 @@ final class JoinNativeRootAdmission {
   final Map<String, dynamic>? detailsPendingRecovery;
   final Map<String, dynamic>? detailsMixedRecovery;
   final Map<String, dynamic>? detailsNotesRecovery;
+  final Map<String, dynamic>? lifecycleCheckpoint;
 }
 
 Map<String, dynamic> _recoveryObject(Object? value, Set<String> keys) {
@@ -736,6 +835,118 @@ Map<String, dynamic> _recoveryObject(Object? value, Set<String> keys) {
         value.keys.toSet().containsAll(keys),
   );
   return value as Map<String, dynamic>;
+}
+
+void validateJobLifecycleNativeSourceManifest({
+  required File manifest,
+  required String manifestSha256,
+  required String revision,
+  required String tree,
+  required String adapter,
+  required String productRevision,
+}) {
+  _require(_sha256Pattern.hasMatch(manifestSha256));
+  _require(
+    p.isAbsolute(manifest.path) &&
+        p.equals(
+          p.normalize(manifest.parent.path),
+          manifest.parent.resolveSymbolicLinksSync(),
+        ),
+  );
+  final value = _readOwnedJson(manifest, expectedSha256: manifestSha256);
+  _recoveryObject(value, {
+    'format',
+    'kind',
+    'run',
+    'revision',
+    'tree',
+    'adapterSha256',
+    'productRevision',
+    'sourceLfSha256',
+  });
+  _require(
+    value['format'] == 1 &&
+        value['kind'] == 'j63.lifecycle.source@1' &&
+        value['run'] == jobLifecycleNativeRun &&
+        value['revision'] == revision &&
+        value['tree'] == tree &&
+        value['adapterSha256'] == adapter &&
+        value['productRevision'] == productRevision &&
+        productRevision == jobLifecycleNativeProductRevision,
+  );
+  final hashes = value['sourceLfSha256'];
+  _require(hashes is Map && hashes.isNotEmpty && hashes.length <= 512);
+  final sources = (hashes as Map).cast<String, dynamic>();
+  _require(
+    sources.keys.toSet().containsAll({
+      'app/lib/data/app_database.dart',
+      'app/lib/data/app_database.g.dart',
+      'app/lib/features/company/company_join.dart',
+      'app/lib/features/company/company_protocol.dart',
+      'app/lib/features/company/company_membership.dart',
+      'app/lib/features/company/company_created_job_sync.dart',
+      'app/lib/features/company/company_job_details_section.dart',
+      'app/lib/features/installation/installation_security.dart',
+      'app/lib/features/job_line_commands/job_details.dart',
+      'app/lib/features/job_line_commands/job_lifecycle.dart',
+      'app/lib/features/company/company_jobs_panel.dart',
+      'app/tool/native_nearby_test_commands.dart',
+      'app/tool/native_nearby_test_fixture.dart',
+      'app/integration_test/company_join_native_test.dart',
+      'app/pubspec.yaml',
+      'app/pubspec.lock',
+    }),
+  );
+  final bundle = Directory(p.join(p.dirname(manifest.path), 'source'));
+  _require(
+    FileSystemEntity.typeSync(bundle.path, followLinks: false) ==
+        FileSystemEntityType.directory,
+  );
+  final present = <String>{};
+  for (final entity in bundle.listSync(recursive: true, followLinks: false)) {
+    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+    _require(
+      type == FileSystemEntityType.directory ||
+          type == FileSystemEntityType.file,
+    );
+    if (type == FileSystemEntityType.file) {
+      present.add(
+        p.relative(entity.path, from: bundle.path).replaceAll('\\', '/'),
+      );
+    }
+  }
+  _require(
+    present.length == sources.length && present.containsAll(sources.keys),
+  );
+  for (final entry in sources.entries) {
+    final path = entry.key;
+    _require(
+      !p.isAbsolute(path) &&
+          !path.contains('\\') &&
+          !path
+              .split('/')
+              .any((part) => part.isEmpty || part == '.' || part == '..'),
+    );
+    _require(
+      (path.startsWith('app/lib/') ||
+                  path.startsWith('app/tool/') ||
+                  path ==
+                      'app/integration_test/company_join_native_test.dart') &&
+              path.endsWith('.dart') ||
+          path == 'app/pubspec.yaml' ||
+          path == 'app/pubspec.lock',
+    );
+    _require(
+      entry.value is String && _sha256Pattern.hasMatch(entry.value as String),
+    );
+    final file = File(p.join(bundle.path, path));
+    _require(file.lengthSync() <= 16 * 1024 * 1024);
+    final bytes = utf8.encode(file.readAsStringSync().replaceAll('\r\n', '\n'));
+    _require(sha256.convert(bytes).toString() == entry.value);
+  }
+  _require(
+    sources['app/integration_test/company_join_native_test.dart'] == adapter,
+  );
 }
 
 void validateJobDetailsNativeSourceManifest({
@@ -1507,6 +1718,7 @@ Future<Map<String, Object?>> _verifyDetailsNativeHeaders({
   required String originalReceipt,
   required Set<String> incomingOperations,
   CompanyJobDetail? pendingDetail,
+  CompanyJobLifecycle? pendingLifecycle,
 }) async {
   _require(
     base != null &&
@@ -1593,7 +1805,11 @@ Future<Map<String, Object?>> _verifyDetailsNativeHeaders({
   if (pending != null) {
     final intent = CompanyCommandIntent.decode(pending);
     _require(
-      (pendingDetail == null
+      (pendingLifecycle != null
+              ? intent.family == CompanyCommandFamily.jobLifecycle &&
+                    intent.operationCommitment ==
+                        pendingLifecycle.operationCommitment
+              : pendingDetail == null
               ? intent.family == CompanyCommandFamily.jobCreateIncoming &&
                     incomingOperations.contains(intent.operationCommitment)
               : intent.family ==
@@ -1632,6 +1848,19 @@ Future<Map<String, Object?>> _verifyDetailsNativeHeaders({
           : CompanyCommandFamily.jobDetailsIncoming,
     );
   }
+  if (pendingLifecycle != null) {
+    await verifyJobLifecycleReceipt(
+      pendingLifecycle.receiptBytes,
+      InstallationIdentity(
+        InstallationId(native['id'] as String),
+        InstallationGeneration(native['generation'] as String),
+        native['key'] as String,
+        Uint8List.fromList(public),
+      ),
+      native['store'] as String,
+      CompanyCommandFamily.jobLifecycle,
+    );
+  }
   return {
     'baseProtectedRevision': base.revision,
     'baseProtectedSha256': sha256.convert(base.bytes).toString(),
@@ -1640,6 +1869,127 @@ Future<Map<String, Object?>> _verifyDetailsNativeHeaders({
     'pendingIncomingCreation': pendingDetail == null && pending != null,
     if (pendingDetail != null) 'pendingLocalDetails': pending != null,
     'hashesAreIndependentAnchor': false,
+  };
+}
+
+Future<Map<String, Object?>> verifyLifecyclePendingNativeHeaders({
+  required AppDatabase db,
+  required ProtectedInstallationState? base,
+  required ProtectedInstallationState? custody,
+  required String binding,
+  required String databasePath,
+  required Map<String, Object?> originalIdentity,
+  required String originalReceipt,
+  required Set<String> incomingOperations,
+  required String role,
+}) async {
+  _require(role == 'owner' || role == 'member');
+  if (role == 'member') {
+    return verifyDetailsPendingNativeHeaders(
+      db: db,
+      base: base,
+      custody: custody,
+      binding: binding,
+      databasePath: databasePath,
+      originalIdentity: originalIdentity,
+      originalReceipt: originalReceipt,
+      incomingOperations: incomingOperations,
+    );
+  }
+  final life = (await db.select(db.companyJobLifecycles).get()).single;
+  _require(life.outgoing && base != null);
+  final native = jsonDecode(utf8.decode(base!.bytes)) as Map;
+  if (native['pendingCommand'] != null) {
+    final intent = CompanyCommandIntent.decode(native['pendingCommand']);
+    _require(
+      intent.family == CompanyCommandFamily.jobLifecycle &&
+          intent.companyId == life.companyId &&
+          intent.lineId == life.jobId &&
+          intent.receiptKey == life.receiptKey &&
+          intent.commandCommitment == life.commandCommitment &&
+          intent.operationCommitment == life.operationCommitment &&
+          intent.originGeneration == life.originGeneration &&
+          intent.requestId == life.requestId &&
+          intent.beforeWitness != null &&
+          intent.afterWitness != null,
+    );
+    await validateJobLifecycleCommit(db, intent);
+  }
+  return _verifyDetailsNativeHeaders(
+    base: base,
+    custody: custody,
+    binding: binding,
+    databasePath: databasePath,
+    originalIdentity: originalIdentity,
+    originalReceipt: originalReceipt,
+    incomingOperations: incomingOperations,
+    pendingLifecycle: life,
+  );
+}
+
+Future<Map<String, Object?>> verifyLifecycleConflictNativeHeaders({
+  required AppDatabase db,
+  required ProtectedInstallationState? base,
+  required ProtectedInstallationState? custody,
+  required String binding,
+  required String databasePath,
+  required Map<String, Object?> originalIdentity,
+  required String originalReceipt,
+  required String role,
+}) async {
+  _require((role == 'owner' || role == 'member') && base != null);
+  final native = jsonDecode(utf8.decode(base!.bytes)) as Map;
+  _require(native['pendingCommand'] == null);
+  final creates = await db.select(db.companyJobs).get();
+  final details = await db.select(db.companyJobDetails).get();
+  final lives = await db.select(db.companyJobLifecycles).get();
+  _require(
+    creates.length == 2 &&
+        creates.where((r) => r.outgoing).length == 1 &&
+        creates.singleWhere((r) => r.outgoing).receiptBytes ==
+            originalReceipt &&
+        details.length == 1 &&
+        lives.length == 1 &&
+        details.single.outgoing == (role == 'member') &&
+        lives.single.outgoing == (role == 'owner'),
+  );
+  final observation = await _verifyDetailsNativeHeaders(
+    base: base,
+    custody: custody,
+    binding: binding,
+    databasePath: databasePath,
+    originalIdentity: originalIdentity,
+    originalReceipt: originalReceipt,
+    incomingOperations: creates
+        .where((r) => !r.outgoing)
+        .map((r) => r.operationCommitment)
+        .toSet(),
+    pendingDetail: details.single,
+  );
+  final identity = InstallationIdentity(
+    InstallationId(native['id'] as String),
+    InstallationGeneration(native['generation'] as String),
+    native['key'] as String,
+    Uint8List.fromList(base64Decode(native['public'] as String)),
+  );
+  await verifyIncomingCreateJobReceipt(
+    creates.singleWhere((r) => !r.outgoing).receiptBytes,
+    identity,
+    native['store'] as String,
+  );
+  await verifyJobLifecycleReceipt(
+    lives.single.receiptBytes,
+    identity,
+    native['store'] as String,
+    lives.single.outgoing
+        ? CompanyCommandFamily.jobLifecycle
+        : CompanyCommandFamily.jobLifecycleIncoming,
+  );
+  return {
+    ...observation,
+    'creationSealsVerified': 2,
+    'detailsSealsVerified': 1,
+    'lifecycleSealsVerified': 1,
   };
 }
 
@@ -3518,6 +3868,1374 @@ void validateJobDetailsNativeMixedRepeat(List<Map<String, Object?>> terminals) {
   _require(start is int && end is int && end >= start && end - start <= 300000);
 }
 
+enum JobLifecycleNativeStage { baseline, conflict, resolved }
+
+NativeJobLifecycleUiStep? jobLifecycleNativePreparedEffect(
+  NativeJobLifecycleUiStep step,
+) => switch (step) {
+  NativeJobLifecycleUiStep.prepareDeleteOffline =>
+    NativeJobLifecycleUiStep.deleteOffline,
+  NativeJobLifecycleUiStep.prepareEditNotesOffline =>
+    NativeJobLifecycleUiStep.editNotesOffline,
+  NativeJobLifecycleUiStep.prepareKeepEdited =>
+    NativeJobLifecycleUiStep.keepEdited,
+  _ => null,
+};
+
+bool jobLifecycleNativeEffectStep(NativeJobLifecycleUiStep step) => {
+  NativeJobLifecycleUiStep.deleteOffline,
+  NativeJobLifecycleUiStep.editNotesOffline,
+  NativeJobLifecycleUiStep.keepEdited,
+}.contains(step);
+
+enum JobLifecycleNativeUiPhase {
+  idle,
+  navigation,
+  signIn,
+  verification,
+  prepared,
+  effectGuard,
+  effectOpen,
+  effectConfirm,
+  effectSave,
+  observing,
+  readback,
+  returning,
+}
+
+final class PreparedJobLifecycleNativeUi {
+  PreparedJobLifecycleNativeUi({
+    required this.step,
+    required this.jobId,
+    required this.ownerSession,
+    required this.page,
+    required this.pageEpoch,
+    required this.lifecycleEpoch,
+    required this.stateSha256,
+    required this.preparationSequence,
+    required this.controlEpoch,
+    required Map<String, Object?> initial,
+    required Map<String, dynamic> baseline,
+  }) : _initial = _canonical(initial),
+       _baseline = _canonical(baseline) {
+    _require(jobLifecycleNativeEffectStep(step));
+    _require(jobId.isNotEmpty && _sha256Pattern.hasMatch(stateSha256));
+    _require(
+      initial['selectedJob'] == jobId &&
+          baseline['selectedJob'] == jobId &&
+          initial['creationDigest'] == baseline['creationDigest'],
+    );
+  }
+  final NativeJobLifecycleUiStep step;
+  final String jobId, stateSha256, controlEpoch;
+  final OwnerSession ownerSession;
+  final State page;
+  final int pageEpoch, lifecycleEpoch, preparationSequence;
+  final String _initial, _baseline;
+  JobLifecycleNativeStage get stage =>
+      step == NativeJobLifecycleUiStep.keepEdited
+      ? JobLifecycleNativeStage.conflict
+      : JobLifecycleNativeStage.baseline;
+  Map<String, Object?> get initial =>
+      (jsonDecode(_initial) as Map).cast<String, Object?>();
+  Map<String, dynamic> get baseline =>
+      (jsonDecode(_baseline) as Map).cast<String, dynamic>();
+
+  bool accepts(NativeTestCommand command) =>
+      command.action == NativeTestAction.jobLifecycleUi &&
+      command.jobLifecycleStep == step &&
+      command.epoch == controlEpoch &&
+      command.sequence > preparationSequence;
+
+  bool isCurrent({
+    required OwnerSession? session,
+    required State? currentPage,
+    required int currentPageEpoch,
+    required int currentLifecycleEpoch,
+    required bool lifecycleCurrent,
+  }) =>
+      lifecycleCurrent &&
+      ownerSession.isValid &&
+      identical(session, ownerSession) &&
+      page.mounted &&
+      identical(page, currentPage) &&
+      pageEpoch == currentPageEpoch &&
+      lifecycleEpoch == currentLifecycleEpoch;
+
+  void requireCurrent({
+    required NativeJobLifecycleUiStep effectStep,
+    required OwnerSession? session,
+    required State? currentPage,
+    required int currentPageEpoch,
+    required int currentLifecycleEpoch,
+    required bool lifecycleCurrent,
+    required String currentStateSha256,
+  }) {
+    _require(
+      step == effectStep &&
+          stateSha256 == currentStateSha256 &&
+          isCurrent(
+            session: session,
+            currentPage: currentPage,
+            currentPageEpoch: currentPageEpoch,
+            currentLifecycleEpoch: currentLifecycleEpoch,
+            lifecycleCurrent: lifecycleCurrent,
+          ),
+    );
+  }
+}
+
+String verifyJobLifecycleNativePreparationRawState(
+  Map<String, Object?> verified,
+  Map<String, Object?> raw,
+) {
+  for (final key in const [
+    'sqlSha256',
+    'baseProtectedRevision',
+    'baseProtectedSha256',
+    'custodyProtectedRevision',
+    'custodyProtectedSha256',
+  ]) {
+    _require(
+      verified[key] is String &&
+          raw[key] is String &&
+          verified[key] == raw[key],
+    );
+  }
+  _require(
+    verified['identity'] is Map &&
+        raw['identity'] is Map &&
+        _canonical(verified['identity']) == _canonical(raw['identity']),
+  );
+  return _hash(raw);
+}
+
+void validateJobLifecycleNativeRepeat(
+  List<Map<String, Object?>> terminals, {
+  required JobLifecycleNativeStage stage,
+  required bool owner,
+}) {
+  _require(terminals.length >= 2);
+  final previous = terminals[terminals.length - 2], current = terminals.last;
+  final pair = previous['pairIdSha256'];
+  final remaining = current['pairRemainingMillis'];
+  _require(
+    pair is String &&
+        _sha256Pattern.hasMatch(pair) &&
+        current['pairIdSha256'] == pair &&
+        remaining is int &&
+        remaining > 0 &&
+        previous['pairRemainingMillis'] is int &&
+        (previous['pairRemainingMillis'] as int) <= 300000 &&
+        remaining <= (previous['pairRemainingMillis'] as int),
+  );
+  if (stage != JobLifecycleNativeStage.resolved) {
+    validateJobDetailsNativeMixedRepeat(terminals);
+    return;
+  }
+  _require(terminals.length >= 2);
+  final first = terminals[terminals.length - 2], repeat = terminals.last;
+  final start = first['elapsedMillis'], end = repeat['elapsedMillis'];
+  _require(
+    first['complete'] == true &&
+        first['sent'] == (owner ? 1 : 0) &&
+        first['received'] == (owner ? 0 : 1) &&
+        repeat['complete'] == true &&
+        repeat['sent'] == 0 &&
+        repeat['received'] == 0 &&
+        first['pageEpoch'] == repeat['pageEpoch'] &&
+        start is int &&
+        end is int &&
+        end >= start &&
+        end - start <= 300000,
+  );
+}
+
+void validateJobLifecycleNativeEvidence(
+  Map<String, Object?> evidence,
+  JobLifecycleNativeStage stage,
+) {
+  final lifecycleCount = switch (stage) {
+    JobLifecycleNativeStage.baseline => 0,
+    JobLifecycleNativeStage.conflict => 1,
+    JobLifecycleNativeStage.resolved => 2,
+  };
+  final detailsCount = stage == JobLifecycleNativeStage.baseline ? 0 : 1;
+  _require(
+    evidence['schema'] == 11 &&
+        (evidence['counts'] as Map).length == 34 &&
+        evidence['integrityValid'] == true &&
+        evidence['referencesValid'] == true &&
+        evidence['receiptCountVerified'] == 2 &&
+        evidence['ackCount'] == 2 &&
+        evidence['originalLocalRecordUnchanged'] == true &&
+        evidence['nameOperationCount'] == 0 &&
+        evidence['nameReceiptCountVerified'] == 0 &&
+        evidence['nameAckCount'] == 0 &&
+        evidence['detailsOperationCount'] == detailsCount &&
+        evidence['detailsReceiptCountVerified'] == detailsCount &&
+        evidence['detailsAckCount'] == detailsCount &&
+        evidence['lifecycleOperationCount'] == lifecycleCount &&
+        evidence['lifecycleReceiptCountVerified'] == lifecycleCount &&
+        evidence['lifecycleAckCount'] == lifecycleCount &&
+        evidence['nativeCustodyActive'] == true &&
+        evidence['lifecycleGenesisProfileVerified'] == true &&
+        evidence['ackVerification'] == 'confirmedPeerCounts',
+  );
+  for (final family in ['', 'name', 'details', 'lifecycle']) {
+    final key = family.isEmpty
+        ? 'receiptVerification'
+        : '${family}ReceiptVerification';
+    _require(evidence[key] == 'typed-public-verifier');
+  }
+  final counts = evidence['counts'] as Map;
+  for (final entry in {
+    'jobs': 2,
+    'company_jobs': 2,
+    'company_job_peer_acks': 2,
+    'company_job_names': 0,
+    'company_job_name_peer_acks': 0,
+    'company_job_details': detailsCount,
+    'company_job_detail_peer_acks': detailsCount,
+    'company_job_lifecycles': lifecycleCount,
+    'company_job_lifecycle_peer_acks': lifecycleCount,
+  }.entries) {
+    _require(counts[entry.key] == entry.value);
+  }
+  final views = (evidence['lifecycleViews'] as List).cast<Map>();
+  _require(views.length == 2 && views.map((v) => v['job']).toSet().length == 2);
+  final selected = views
+      .where((v) => v['job'] == evidence['selectedJob'])
+      .toList();
+  _require(
+    selected.length == 1 &&
+        selected.single['creationDigest'] == evidence['creationDigest'],
+  );
+  final primary = selected.single;
+  final state = switch (stage) {
+    JobLifecycleNativeStage.baseline => 'live',
+    JobLifecycleNativeStage.conflict => 'deleteConflict',
+    JobLifecycleNativeStage.resolved => 'live',
+  };
+  _require(
+    primary['state'] == state &&
+        views.where((v) => v != primary).single['state'] == 'live',
+  );
+  final confirmed = evidence['confirmedPeerCounts'] as Map;
+  _require(
+    confirmed.length == 2 &&
+        confirmed.keys.toSet().containsAll(views.map((v) => v['job'])) &&
+        confirmed.values.every((n) => n == 1),
+  );
+  final metadata = (evidence['lifecycleMetadataRecords'] as List).cast<Map>();
+  _require(metadata.length == detailsCount);
+  if (detailsCount == 1) {
+    _require(
+      metadata.single['contract'] == 'job.details.patch@2' &&
+          metadata.single['job'] == evidence['selectedJob'] &&
+          _canonical(metadata.single['lifecycle']) == '[]' &&
+          primary['notes'] ==
+              'Synthetic member lifecycle notes $jobLifecycleNativeRun' &&
+          primary['notesConflict'] == false,
+    );
+  }
+  final records = (evidence['lifecycleRecords'] as List).cast<Map>();
+  _require(
+    records.length == lifecycleCount &&
+        records.every(
+          (r) =>
+              r['job'] == evidence['selectedJob'] &&
+              r['contract'] == 'job.lifecycle.set@1',
+        ),
+  );
+  if (lifecycleCount > 0) {
+    final deleted = records.where((r) => r['choice'] == 'deleted').toList();
+    _require(
+      deleted.length == 1 &&
+          deleted.single['resolve'] == false &&
+          _canonical(deleted.single['parents']) == '[]' &&
+          metadata.single['originalDevice'] != deleted.single['originalDevice'],
+    );
+    final alternatives = (primary['alternatives'] as List).cast<Map>();
+    if (stage == JobLifecycleNativeStage.conflict) {
+      _require(
+        alternatives.length == 2 &&
+            alternatives.map((v) => v['device']).toSet().length == 2 &&
+            alternatives.map((v) => v['operation']).toSet().containsAll([
+              deleted.single['operation'],
+              metadata.single['operation'],
+            ]),
+      );
+    } else {
+      final keep = records.where((r) => r['choice'] == 'kept').single;
+      _require(
+        keep['resolve'] == true &&
+            _canonical(keep['parents']) ==
+                _canonical(
+                  [
+                    'd/${metadata.single['operation']}',
+                    'l/${deleted.single['operation']}',
+                  ]..sort(),
+                ) &&
+            alternatives.length == 1 &&
+            alternatives.single['operation'] == keep['operation'],
+      );
+    }
+  }
+}
+
+void verifyJobLifecycleNativeReadback(
+  Map<String, dynamic> checkpoint,
+  Map<String, Object?> actual,
+) {
+  if (checkpoint['lifecycleStage'] == 'pending') {
+    validateJobLifecycleNativePendingEvidence(
+      actual,
+      checkpoint['role'] as String,
+    );
+  } else {
+    final stage = JobLifecycleNativeStage.values.byName(
+      checkpoint['lifecycleStage'] as String,
+    );
+    validateJobLifecycleNativeEvidence(actual, stage);
+  }
+  final expected = checkpoint['lifecycleEvidence'] as Map;
+  if (checkpoint['lifecycleStage'] == 'pending' ||
+      checkpoint['interruptedConflictRecovery'] != null) {
+    final sql = checkpoint['lifecycleStage'] == 'pending'
+        ? expected['sqlSha256']
+        : checkpoint['lockedSqlSha256'];
+    _require(
+      sql is String &&
+          actual['sqlSha256'] is String &&
+          _sha256Pattern.hasMatch(sql) &&
+          _sha256Pattern.hasMatch(actual['sqlSha256'] as String) &&
+          actual['sqlSha256'] == sql,
+    );
+  }
+  for (final key in [
+    'identity',
+    'counts',
+    'schema',
+    'selectedJob',
+    'creationDigest',
+    'sharedCreations',
+    'jobHistorySha256',
+    'receiptSha256',
+    'ackCount',
+    'ackSha256',
+    'nameRecordsSha256',
+    'nameAckSha256',
+    'nameViews',
+    'detailsRecordsSha256',
+    'detailsAckSha256',
+    'detailsViews',
+    'lifecycleRecords',
+    'lifecycleRecordsSha256',
+    'lifecycleAckSha256',
+    'lifecycleViews',
+    'lifecycleMetadataRecords',
+    'confirmedPeerCounts',
+  ]) {
+    _require(
+      expected.containsKey(key) &&
+          actual.containsKey(key) &&
+          _canonical(expected[key]) == _canonical(actual[key]),
+    );
+  }
+}
+
+void validateJobLifecycleNativePendingEvidence(
+  Map<String, Object?> evidence,
+  String role,
+) {
+  _require(role == 'owner' || role == 'member');
+  final life = role == 'owner' ? 1 : 0;
+  final detail = 1 - life;
+  final counts = evidence['counts'] as Map;
+  _require(counts.length == 34);
+  for (final entry in {
+    'schema': 11,
+    'integrityValid': true,
+    'referencesValid': true,
+    'receiptCountVerified': 2,
+    'ackCount': 2,
+    'originalLocalRecordUnchanged': true,
+    'nameOperationCount': 0,
+    'nameReceiptCountVerified': 0,
+    'nameAckCount': 0,
+    'detailsOperationCount': detail,
+    'detailsReceiptCountVerified': detail,
+    'detailsAckCount': 0,
+    'lifecycleOperationCount': life,
+    'lifecycleReceiptCountVerified': life,
+    'lifecycleAckCount': 0,
+    'nativeCustodyActive': true,
+    'lifecycleGenesisProfileVerified': true,
+    'ackVerification': 'confirmedPeerCounts',
+  }.entries) {
+    _require(evidence[entry.key] == entry.value);
+  }
+  for (final family in ['', 'name', 'details', 'lifecycle']) {
+    _require(
+      evidence[family.isEmpty
+              ? 'receiptVerification'
+              : '${family}ReceiptVerification'] ==
+          'typed-public-verifier',
+    );
+  }
+  for (final entry in {
+    'jobs': 2,
+    'company_jobs': 2,
+    'company_job_peer_acks': 2,
+    'company_job_names': 0,
+    'company_job_name_peer_acks': 0,
+    'company_job_details': detail,
+    'company_job_detail_peer_acks': 0,
+    'company_job_lifecycles': life,
+    'company_job_lifecycle_peer_acks': 0,
+  }.entries) {
+    _require(counts[entry.key] == entry.value);
+  }
+  final views = (evidence['lifecycleViews'] as List).cast<Map>();
+  final confirmed = evidence['confirmedPeerCounts'] as Map;
+  _require(
+    views.length == 2 &&
+        confirmed.length == 2 &&
+        views.map((v) => v['job']).toSet().length == 2 &&
+        confirmed.keys.toSet().containsAll(views.map((v) => v['job'])) &&
+        confirmed[evidence['selectedJob']] == 0 &&
+        confirmed.entries
+                .where((e) => e.key != evidence['selectedJob'])
+                .single
+                .value ==
+            1,
+  );
+  final primary = views.singleWhere((v) => v['job'] == evidence['selectedJob']);
+  _require(
+    primary['creationDigest'] == evidence['creationDigest'] &&
+        primary['state'] == (life == 1 ? 'deleted' : 'live') &&
+        views.where((v) => v != primary).single['state'] == 'live',
+  );
+  final metadata = (evidence['lifecycleMetadataRecords'] as List).cast<Map>();
+  final records = (evidence['lifecycleRecords'] as List).cast<Map>();
+  _require(metadata.length == detail && records.length == life);
+  final device = (evidence['identity'] as Map)['device'];
+  if (life == 1) {
+    final record = records.single;
+    _require(
+      record['job'] == evidence['selectedJob'] &&
+          record['contract'] == 'job.lifecycle.set@1' &&
+          record['choice'] == 'deleted' &&
+          record['resolve'] == false &&
+          _canonical(record['parents']) == '[]' &&
+          record['originalDevice'] == device,
+    );
+  } else {
+    final record = metadata.single;
+    _require(
+      record['job'] == evidence['selectedJob'] &&
+          record['contract'] == 'job.details.patch@2' &&
+          _canonical(record['lifecycle']) == '[]' &&
+          record['originalDevice'] == device &&
+          primary['notes'] ==
+              'Synthetic member lifecycle notes $jobLifecycleNativeRun' &&
+          primary['notesConflict'] == false,
+    );
+  }
+}
+
+void validateLifecyclePendingSourceLineage(Map previous, Map current) {
+  _require(
+    previous.length == 96 &&
+        current.length == 96 &&
+        previous.keys.toSet().containsAll(current.keys),
+  );
+  for (final key in previous.keys) {
+    if (key != 'app/integration_test/company_join_native_test.dart') {
+      _require(
+        previous[key] == current[key] ||
+            (key == 'app/tool/native_nearby_test_fixture.dart' &&
+                previous[key] ==
+                    '8c1b5c94e7043a5208f6b5e35b6c68acae94b23dbafaa15358adbdd7a093b21f' &&
+                current[key] ==
+                    'd35601a1a609c58ecceef15b9009f312bb0e8738fe592df2343d05a43c3c8f4e'),
+      );
+    }
+  }
+}
+
+void verifyLifecyclePendingProtectedState({
+  required ProtectedInstallationState base,
+  required ProtectedInstallationState custody,
+  required Map<String, dynamic> expected,
+}) {
+  verifyJobDetailsCheckpointProtectedState(
+    base: base,
+    custody: custody,
+    expected: expected,
+  );
+  _require(custody.revision == expected['custodyProtectedRevision']);
+}
+
+void validateLifecyclePendingEpoch(String next, Map<String, dynamic>? pending) {
+  if (pending != null) _require(next != pending['retiredEpoch']);
+}
+
+void validateLifecycleInterruptedConflictEpoch(
+  String next,
+  Map<String, dynamic>? recovery,
+) {
+  if (recovery != null) {
+    _require(
+      next != _lifecyclePendingRetiredEpoch &&
+          next != _lifecycleConflictRetiredEpoch,
+    );
+  }
+}
+
+Map<String, dynamic> _readLifecycleInterruptedConflictRecovery(
+  Directory root, {
+  required String path,
+  required String digest,
+  required String role,
+  required String revision,
+  required String tree,
+  required String adapter,
+  required String manifestSha256,
+  required bool coldAdmission,
+}) {
+  _require(
+    p.isAbsolute(path) &&
+        p.normalize(path) == path &&
+        !p.isWithin(root.path, path) &&
+        path != root.path &&
+        File(path).resolveSymbolicLinksSync() == path &&
+        _sha256Pattern.hasMatch(digest),
+  );
+  final value = _readOwnedJson(File(path), expectedSha256: digest);
+  _recoveryObject(value, {
+    'format',
+    'kind',
+    'run',
+    'role',
+    'root',
+    'namespace',
+    'origin',
+    'recovery',
+    'originManifestPath',
+    'recoveryManifestPath',
+    'closedReceiptSha256',
+    'closedSqlSha256',
+    'coldArchive',
+    'files',
+    'inspectionFile',
+    'inspectionSha256',
+    'pendingLifecycleRecovery',
+    'retiredEpochs',
+    if (value.containsKey('archiveCopy')) 'archiveCopy',
+  });
+  final pins = _lifecycleConflictPins[role] ?? rejectNativeTest('invalid-role');
+  _require(
+    value['format'] == 1 &&
+        value['kind'] == _lifecycleInterruptedConflictKind &&
+        value['run'] == jobLifecycleNativeRun &&
+        value['role'] == role &&
+        value['root'] == root.path &&
+        root.resolveSymbolicLinksSync() == root.path &&
+        value['namespace'] ==
+            joinNativeNamespace(
+              jobLifecycleNativeRun,
+              role,
+              createdMode: true,
+              lifecycleMode: true,
+            ) &&
+        value['closedReceiptSha256'] == pins['closed'] &&
+        value['closedSqlSha256'] == pins['sql'] &&
+        value['inspectionFile'] == pins['inspection'] &&
+        value['inspectionSha256'] == pins['inspectionSha256'] &&
+        _canonical(value['retiredEpochs']) ==
+            _canonical([
+              _lifecyclePendingRetiredEpoch,
+              _lifecycleConflictRetiredEpoch,
+            ]) &&
+        _canonical(value['origin']) == _canonical(_lifecycleConflictOrigin) &&
+        _canonical(value['recovery']) ==
+            _canonical({
+              'revision': revision,
+              'tree': tree,
+              'adapterSha256': adapter,
+              'productRevision': jobLifecycleNativeProductRevision,
+              'manifestSha256': manifestSha256,
+            }),
+  );
+  final originManifest = File(value['originManifestPath'] as String);
+  final currentManifest = File(value['recoveryManifestPath'] as String);
+  for (final (file, source) in [
+    (originManifest, _lifecycleConflictOrigin),
+    (currentManifest, (value['recovery'] as Map).cast<String, String>()),
+  ]) {
+    validateJobLifecycleNativeSourceManifest(
+      manifest: file,
+      manifestSha256: source['manifestSha256']!,
+      revision: source['revision']!,
+      tree: source['tree']!,
+      adapter: source['adapterSha256']!,
+      productRevision: source['productRevision']!,
+    );
+  }
+  validateLifecyclePendingSourceLineage(
+    _readOwnedJson(originManifest)['sourceLfSha256'] as Map,
+    _readOwnedJson(currentManifest)['sourceLfSha256'] as Map,
+  );
+  final reference = _recoveryObject(value['pendingLifecycleRecovery'], {
+    'path',
+    'sha256',
+  });
+  final pendingPath = reference['path'] as String;
+  _require(pendingPath != path && reference['sha256'] == pins['pending']);
+  final pendingValue = _readOwnedJson(
+    File(pendingPath),
+    expectedSha256: pins['pending'],
+  );
+  _require(
+    _canonical(pendingValue['recovery']) ==
+        _canonical(_lifecycleConflictOrigin),
+  );
+  final pending = _readLifecyclePendingRecovery(
+    root,
+    path: pendingPath,
+    digest: pins['pending']!,
+    role: role,
+    revision: _lifecycleConflictOrigin['revision']!,
+    tree: _lifecycleConflictOrigin['tree']!,
+    adapter: _lifecycleConflictOrigin['adapterSha256']!,
+    manifestSha256: _lifecycleConflictOrigin['manifestSha256']!,
+    coldAdmission: false,
+  );
+  final archivePath = value['coldArchive'] as String;
+  _require(
+    p.isAbsolute(archivePath) &&
+        p.normalize(archivePath) == archivePath &&
+        archivePath != root.path &&
+        !p.isWithin(root.path, archivePath) &&
+        !p.isWithin(archivePath, root.path),
+  );
+  var archive = Directory(archivePath);
+  if (value['archiveCopy'] != null) {
+    final copy = _recoveryObject(value['archiveCopy'], {
+      'path',
+      'closedReceiptSha256',
+    });
+    _require(
+      role == 'member' &&
+          copy['path'] == '${root.path}-lifecycle-conflict-archive' &&
+          copy['closedReceiptSha256'] == pins['closed'] &&
+          copy['path'] != archivePath,
+    );
+    archive = Directory(copy['path'] as String);
+  }
+  final files = value['files'] as List;
+  _require(files.length == (role == 'owner' ? 29 : 32));
+  verifyDetailsPendingInventory(archive, files);
+  if (coldAdmission) verifyDetailsPendingInventory(root, files);
+  _require(
+    _canonical(
+          _readOwnedJson(File(p.join(archive.path, 'validation-owner.json'))),
+        ) ==
+        _canonical({
+          'format': 1,
+          'run': 'company-$jobLifecycleNativeRun',
+          'role': role == 'owner' ? 'sender' : 'receiver',
+          'root': root.path,
+          'initialized': true,
+        }),
+  );
+  final saved = _readOwnedJson(
+    File(p.join(archive.path, pins['inspection']!)),
+    expectedSha256: pins['inspectionSha256'],
+  );
+  verifyJoinNativeEvidenceProvenance(
+    saved,
+    revision: revision,
+    tree: tree,
+    adapter: adapter,
+    productRevision: jobLifecycleNativeProductRevision,
+    recoveryManifest: value,
+  );
+  final original = pending['savedEvidence'] as Map;
+  _recoveryIdentity(saved['identity']);
+  _require(
+    saved['run'] == jobLifecycleNativeRun &&
+        saved['role'] == role &&
+        saved['platform'] == (role == 'owner' ? 'windows' : 'macos') &&
+        saved['root'] == root.path &&
+        saved['namespace'] == value['namespace'] &&
+        saved['jobLifecycleMode'] == true &&
+        saved['lifecycleManifestSha256'] ==
+            _lifecycleConflictOrigin['manifestSha256'] &&
+        saved['step'] == 'inspectConflict' &&
+        saved['passed'] == false &&
+        saved['savedThroughProductionUi'] == false &&
+        saved['productionJobsPanelRendered'] == true &&
+        saved['companyControllerStoppedDuringUi'] == true &&
+        saved['sqlSha256'] == pins['sql'] &&
+        saved['selectedJob'] == original['selectedJob'] &&
+        saved['creationDigest'] == original['creationDigest'] &&
+        saved['jobHistorySha256'] == original['jobHistorySha256'] &&
+        _canonical(saved['identity']) == _canonical(original['identity']) &&
+        _canonical(saved['sharedCreations']) ==
+            _canonical(original['sharedCreations']),
+  );
+  validateJobLifecycleNativeEvidence(
+    saved.cast<String, Object?>(),
+    JobLifecycleNativeStage.conflict,
+  );
+  final terminals = (saved['lifecycleTerminals'] as List)
+      .map((row) => (row as Map).cast<String, Object?>())
+      .toList();
+  _require(terminals.length == 2);
+  validateJobLifecycleNativeRepeat(
+    terminals,
+    stage: JobLifecycleNativeStage.conflict,
+    owner: role == 'owner',
+  );
+  final db = raw.sqlite3.open(
+    p.join(archive.path, 'support', kSqliteFileName),
+    mode: raw.OpenMode.readOnly,
+  );
+  try {
+    _require(
+      db.select('PRAGMA user_version').single.values.single == 11 &&
+          db.select('PRAGMA integrity_check').single.values.single == 'ok' &&
+          db.select('PRAGMA foreign_key_check').isEmpty,
+    );
+    final tables = db
+        .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .map((row) => row['name'] as String)
+        .toList();
+    final counts = saved['counts'] as Map;
+    _require(
+      tables.length == 34 &&
+          counts.length == 34 &&
+          tables.toSet().containsAll(counts.keys),
+    );
+    for (final table in tables) {
+      _require(
+        db.select('SELECT count(*) AS n FROM "$table"').single['n'] ==
+            counts[table],
+      );
+    }
+    _require(
+      _hash({
+            for (final table in tables)
+              table:
+                  db
+                      .select('SELECT * FROM "$table"')
+                      .map((row) => _canonical(Map<String, Object?>.from(row)))
+                      .toList()
+                    ..sort(),
+          }) ==
+          pins['sql'],
+    );
+  } finally {
+    db.dispose();
+  }
+  return {
+    ...value,
+    'savedEvidence': saved,
+    'pendingOrigin': pending,
+    'manifestPath': path,
+    'manifestSha256': digest,
+  };
+}
+
+Map<String, dynamic> _readLifecyclePendingRecovery(
+  Directory root, {
+  required String path,
+  required String digest,
+  required String role,
+  required String revision,
+  required String tree,
+  required String adapter,
+  required String manifestSha256,
+  required bool coldAdmission,
+}) {
+  _require(
+    p.isAbsolute(path) &&
+        p.normalize(path) == path &&
+        !p.isWithin(root.path, path) &&
+        path != root.path &&
+        File(path).resolveSymbolicLinksSync() == path &&
+        _sha256Pattern.hasMatch(digest),
+  );
+  final value = _readOwnedJson(File(path), expectedSha256: digest);
+  _recoveryObject(value, {
+    'format',
+    'kind',
+    'run',
+    'role',
+    'root',
+    'namespace',
+    'origin',
+    'recovery',
+    'originManifestPath',
+    'recoveryManifestPath',
+    'closedReceiptSha256',
+    'coldArchive',
+    'files',
+    'savedFile',
+    'baselineFile',
+    'retiredEpoch',
+    if (value.containsKey('archiveCopy')) 'archiveCopy',
+  });
+  final pins = _lifecyclePendingPins[role] ?? rejectNativeTest('invalid-role');
+  _require(
+    value['format'] == 1 &&
+        value['kind'] == _lifecyclePendingKind &&
+        value['run'] == jobLifecycleNativeRun &&
+        value['role'] == role &&
+        value['root'] == root.path &&
+        root.resolveSymbolicLinksSync() == root.path &&
+        value['namespace'] ==
+            joinNativeNamespace(
+              jobLifecycleNativeRun,
+              role,
+              createdMode: true,
+              lifecycleMode: true,
+            ) &&
+        value['retiredEpoch'] == _lifecyclePendingRetiredEpoch &&
+        value['closedReceiptSha256'] == pins['closed'] &&
+        value['savedFile'] == pins['saved'] &&
+        value['baselineFile'] == 'lifecycle-shared-baseline-$role.json' &&
+        _canonical(value['origin']) == _canonical(_lifecyclePendingOrigin) &&
+        _canonical(value['recovery']) ==
+            _canonical({
+              'revision': revision,
+              'tree': tree,
+              'adapterSha256': adapter,
+              'productRevision': jobLifecycleNativeProductRevision,
+              'manifestSha256': manifestSha256,
+            }),
+  );
+  final original = File(value['originManifestPath'] as String);
+  final current = File(value['recoveryManifestPath'] as String);
+  for (final (file, source) in [
+    (original, _lifecyclePendingOrigin),
+    (current, (value['recovery'] as Map).cast<String, String>()),
+  ]) {
+    validateJobLifecycleNativeSourceManifest(
+      manifest: file,
+      manifestSha256: source['manifestSha256']!,
+      revision: source['revision']!,
+      tree: source['tree']!,
+      adapter: source['adapterSha256']!,
+      productRevision: source['productRevision']!,
+    );
+  }
+  validateLifecyclePendingSourceLineage(
+    _readOwnedJson(original)['sourceLfSha256'] as Map,
+    _readOwnedJson(current)['sourceLfSha256'] as Map,
+  );
+  final archivePath = value['coldArchive'] as String;
+  _require(
+    p.isAbsolute(archivePath) &&
+        p.normalize(archivePath) == archivePath &&
+        archivePath != root.path &&
+        !p.isWithin(root.path, archivePath) &&
+        !p.isWithin(archivePath, root.path),
+  );
+  var archive = Directory(archivePath);
+  if (value['archiveCopy'] != null) {
+    final copy = _recoveryObject(value['archiveCopy'], {
+      'path',
+      'closedReceiptSha256',
+    });
+    _require(
+      role == 'member' &&
+          copy['path'] == '${root.path}-lifecycle-archive' &&
+          copy['closedReceiptSha256'] == pins['closed'] &&
+          copy['path'] != archivePath,
+    );
+    archive = Directory(copy['path'] as String);
+  }
+  final files = value['files'] as List;
+  verifyDetailsPendingInventory(archive, files);
+  if (coldAdmission) verifyDetailsPendingInventory(root, files);
+  Map<String, dynamic> member(String name, {String? pin}) {
+    final entry = files.cast<Map>().singleWhere((f) => f['path'] == name);
+    _require(pin == null || entry['sha256'] == pin);
+    return _readOwnedJson(
+      File(p.join(archive.path, name)),
+      expectedSha256: entry['sha256'] as String,
+      expectedBytes: entry['bytes'] as int,
+    );
+  }
+
+  final saved = member(pins['saved']!, pin: pins['savedSha256']);
+  final baseline = member(value['baselineFile'] as String);
+  final local = member('created-local-job.json');
+  for (final record in [saved, baseline, local]) {
+    verifyJoinNativeEvidenceProvenance(
+      record,
+      revision: revision,
+      tree: tree,
+      adapter: adapter,
+      productRevision: jobLifecycleNativeProductRevision,
+      recoveryManifest: value,
+    );
+    _require(
+      record['run'] == jobLifecycleNativeRun &&
+          record['role'] == role &&
+          record['root'] == root.path &&
+          record['namespace'] == value['namespace'] &&
+          record['jobLifecycleMode'] == true &&
+          record['lifecycleManifestSha256'] ==
+              _lifecyclePendingOrigin['manifestSha256'],
+    );
+  }
+  _require(
+    saved['step'] == (role == 'owner' ? 'deleteOffline' : 'editNotesOffline') &&
+        saved['savedThroughProductionUi'] == true &&
+        saved['companyControllerStoppedDuringUi'] == true &&
+        saved['passed'] == false &&
+        saved['selectedJob'] == baseline['selectedJob'] &&
+        saved['creationDigest'] == baseline['creationDigest'] &&
+        saved['jobHistorySha256'] == baseline['creationHistorySha256'],
+  );
+  validateJobLifecycleNativePendingEvidence(
+    saved.cast<String, Object?>(),
+    role,
+  );
+  return {
+    ...value,
+    'savedEvidence': saved,
+    'localCreation': local,
+    'baselineSha256': _hash(baseline),
+    'manifestPath': path,
+    'manifestSha256': digest,
+  };
+}
+
+JoinNativeRootAdmission validateJobLifecycleNativeRootAdmission(
+  Directory root, {
+  required String role,
+  required String revision,
+  required String tree,
+  required String adapter,
+  required String manifestSha256,
+  String checkpointPath = '',
+  String checkpointSha256 = '',
+}) {
+  final namespace = joinNativeNamespace(
+    jobLifecycleNativeRun,
+    role,
+    createdMode: true,
+    lifecycleMode: true,
+  );
+  final type = FileSystemEntity.typeSync(root.path, followLinks: false);
+  if (type == FileSystemEntityType.notFound) {
+    _require(checkpointPath.isEmpty && checkpointSha256.isEmpty);
+    return const JoinNativeRootAdmission(JoinNativeRootStage.fresh);
+  }
+  if (checkpointPath.isNotEmpty &&
+      _readOwnedJson(
+            File(checkpointPath),
+            expectedSha256: checkpointSha256,
+          )['kind'] ==
+          _lifecycleInterruptedConflictKind) {
+    final recovery = _readLifecycleInterruptedConflictRecovery(
+      root,
+      path: checkpointPath,
+      digest: checkpointSha256,
+      role: role,
+      revision: revision,
+      tree: tree,
+      adapter: adapter,
+      manifestSha256: manifestSha256,
+      coldAdmission: true,
+    );
+    final saved = recovery['savedEvidence'] as Map;
+    return JoinNativeRootAdmission(
+      JoinNativeRootStage.lifecycleCheckpoint,
+      lifecycleCheckpoint: {
+        'lifecycleStage': 'conflict',
+        'role': role,
+        'identity': saved['identity'],
+        'lifecycleEvidence': saved,
+        'lockedSqlSha256': recovery['closedSqlSha256'],
+        'pendingRecovery': recovery['pendingOrigin'],
+        'interruptedConflictRecovery': recovery,
+        'interruptedConflictResume': true,
+      },
+    );
+  }
+  if (checkpointPath.isNotEmpty &&
+      _readOwnedJson(
+            File(checkpointPath),
+            expectedSha256: checkpointSha256,
+          )['kind'] ==
+          _lifecyclePendingKind) {
+    final pending = _readLifecyclePendingRecovery(
+      root,
+      path: checkpointPath,
+      digest: checkpointSha256,
+      role: role,
+      revision: revision,
+      tree: tree,
+      adapter: adapter,
+      manifestSha256: manifestSha256,
+      coldAdmission: true,
+    );
+    final saved = pending['savedEvidence'] as Map<String, dynamic>;
+    final marker = _readOwnedJson(
+      File(p.join(root.path, 'validation-owner.json')),
+    );
+    _require(
+      _canonical(marker) ==
+          _canonical({
+            'format': 1,
+            'run': 'company-$jobLifecycleNativeRun',
+            'role': role == 'owner' ? 'sender' : 'receiver',
+            'root': root.path,
+            'initialized': true,
+          }),
+    );
+    final sqlite = File(p.join(root.path, 'support', kSqliteFileName));
+    final db = raw.sqlite3.open(sqlite.path, mode: raw.OpenMode.readOnly);
+    try {
+      _require(
+        db.select('PRAGMA user_version').single.values.single == 11 &&
+            db.select('PRAGMA integrity_check').single.values.single == 'ok' &&
+            db.select('PRAGMA foreign_key_check').isEmpty,
+      );
+      final tables = db
+          .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .map((r) => r['name'] as String)
+          .toList();
+      final counts = saved['counts'] as Map;
+      _require(
+        tables.length == 34 &&
+            counts.length == 34 &&
+            tables.toSet().containsAll(counts.keys),
+      );
+      for (final table in tables) {
+        _require(
+          db.select('SELECT count(*) AS n FROM "$table"').single['n'] ==
+              counts[table],
+        );
+      }
+      _require(
+        _hash({
+              for (final table in tables)
+                table:
+                    db
+                        .select('SELECT * FROM "$table"')
+                        .map((r) => _canonical(Map<String, Object?>.from(r)))
+                        .toList()
+                      ..sort(),
+            }) ==
+            saved['sqlSha256'],
+      );
+    } finally {
+      db.dispose();
+    }
+    return JoinNativeRootAdmission(
+      JoinNativeRootStage.lifecycleCheckpoint,
+      lifecycleCheckpoint: {
+        'lifecycleStage': 'pending',
+        'role': role,
+        'identity': saved['identity'],
+        'lifecycleEvidence': saved,
+        'lockedSqlSha256': saved['sqlSha256'],
+        'pendingRecovery': pending,
+      },
+    );
+  }
+  _require(
+    type == FileSystemEntityType.directory &&
+        p.dirname(checkpointPath) == root.path &&
+        RegExp(r'^join-lifecycle-checkpoint-\d+-\d+\.json$')
+            .hasMatch(p.basename(checkpointPath)) &&
+        _sha256Pattern.hasMatch(checkpointSha256),
+  );
+  for (final entity in root.listSync(recursive: true, followLinks: false)) {
+    _require(
+      FileSystemEntity.typeSync(entity.path, followLinks: false) !=
+          FileSystemEntityType.link,
+    );
+  }
+  final marker = _readOwnedJson(
+    File(p.join(root.path, 'validation-owner.json')),
+  );
+  _require(
+    _canonical(marker) ==
+        _canonical({
+          'format': 1,
+          'run': 'company-$jobLifecycleNativeRun',
+          'role': role == 'owner' ? 'sender' : 'receiver',
+          'root': root.path,
+          'initialized': true,
+        }),
+  );
+  final checkpoint = _readOwnedJson(
+    File(checkpointPath),
+    expectedSha256: checkpointSha256,
+  );
+  _require(
+    checkpoint['format'] == 1 &&
+        checkpoint['run'] == jobLifecycleNativeRun &&
+        checkpoint['role'] == role &&
+        checkpoint['platform'] == (role == 'owner' ? 'windows' : 'macos') &&
+        checkpoint['root'] == root.path &&
+        checkpoint['namespace'] == namespace &&
+        checkpoint['jobLifecycleMode'] == true &&
+        !checkpoint.containsKey('pendingRecovery') &&
+        !checkpoint.containsKey('interruptedConflictResume') &&
+        !checkpoint.containsKey('interruptedConflictRecovery') &&
+        !(checkpoint.containsKey('pendingLifecycleRecovery') &&
+            checkpoint.containsKey('interruptedLifecycleConflictRecovery')) &&
+        checkpoint['lifecycleManifestSha256'] == manifestSha256 &&
+        checkpoint['schema'] == 11 &&
+        checkpoint['locked'] == true &&
+        checkpoint['nearbyControllerRunning'] == false &&
+        checkpoint['passed'] == false &&
+        {'conflict', 'resolved'}.contains(checkpoint['lifecycleStage']),
+  );
+  verifyJoinNativeEvidenceProvenance(
+    checkpoint,
+    revision: revision,
+    tree: tree,
+    adapter: adapter,
+    productRevision: jobLifecycleNativeProductRevision,
+  );
+  final evidence = (checkpoint['lifecycleEvidence'] as Map)
+      .cast<String, Object?>();
+  _recoveryIdentity(evidence['identity']);
+  validateJobLifecycleNativeEvidence(
+    evidence,
+    JobLifecycleNativeStage.values.byName(
+      checkpoint['lifecycleStage'] as String,
+    ),
+  );
+  validateJobLifecycleNativeRepeat(
+    (checkpoint['lifecycleTerminals'] as List)
+        .map((t) => (t as Map).cast<String, Object?>())
+        .toList(),
+    stage: JobLifecycleNativeStage.values.byName(
+      checkpoint['lifecycleStage'] as String,
+    ),
+    owner: role == 'owner',
+  );
+  Map<String, dynamic>? pendingOrigin;
+  Map<String, dynamic>? interruptedOrigin;
+  if (checkpoint['pendingLifecycleRecovery'] != null) {
+    final reference = _recoveryObject(checkpoint['pendingLifecycleRecovery'], {
+      'path',
+      'sha256',
+    });
+    _require(reference['path'] != checkpointPath);
+    pendingOrigin = _readLifecyclePendingRecovery(
+      root,
+      path: reference['path'] as String,
+      digest: reference['sha256'] as String,
+      role: role,
+      revision: revision,
+      tree: tree,
+      adapter: adapter,
+      manifestSha256: manifestSha256,
+      coldAdmission: false,
+    );
+  }
+  if (checkpoint['interruptedLifecycleConflictRecovery'] != null) {
+    final reference = _recoveryObject(
+      checkpoint['interruptedLifecycleConflictRecovery'],
+      {'path', 'sha256'},
+    );
+    final referencePath = reference['path'] as String;
+    _require(referencePath != checkpointPath);
+    final referenceValue = _readOwnedJson(
+      File(referencePath),
+      expectedSha256: reference['sha256'] as String,
+    );
+    final source = (referenceValue['recovery'] as Map).cast<String, String>();
+    interruptedOrigin = _readLifecycleInterruptedConflictRecovery(
+      root,
+      path: referencePath,
+      digest: reference['sha256'] as String,
+      role: role,
+      revision: source['revision']!,
+      tree: source['tree']!,
+      adapter: source['adapterSha256']!,
+      manifestSha256: source['manifestSha256']!,
+      coldAdmission: false,
+    );
+    pendingOrigin = interruptedOrigin['pendingOrigin'] as Map<String, dynamic>;
+  }
+  final baselineFile = File(
+    p.join(root.path, 'lifecycle-shared-baseline-$role.json'),
+  );
+  _require(_hash(_readOwnedJson(baselineFile)) == checkpoint['baselineSha256']);
+  final sqlite = File(p.join(root.path, 'support', kSqliteFileName));
+  _require(
+    FileSystemEntity.typeSync(sqlite.path, followLinks: false) ==
+        FileSystemEntityType.file,
+  );
+  final db = raw.sqlite3.open(sqlite.path, mode: raw.OpenMode.readOnly);
+  try {
+    _require(
+      db.select('PRAGMA user_version').single.values.single == 11 &&
+          db.select('PRAGMA integrity_check').single.values.single == 'ok' &&
+          db.select('PRAGMA foreign_key_check').isEmpty,
+    );
+    final tables = db
+        .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .map((r) => r['name'] as String)
+        .toList();
+    _require(
+      tables.length == 34 &&
+          tables.toSet().containsAll((evidence['counts'] as Map).keys),
+    );
+    _require(
+      _hash({
+            for (final table in tables)
+              table:
+                  db
+                      .select('SELECT * FROM "$table"')
+                      .map((r) => _canonical(Map<String, Object?>.from(r)))
+                      .toList()
+                    ..sort(),
+          }) ==
+          checkpoint['lockedSqlSha256'],
+    );
+  } finally {
+    db.dispose();
+  }
+  return JoinNativeRootAdmission(
+    JoinNativeRootStage.lifecycleCheckpoint,
+    lifecycleCheckpoint: {
+      ...checkpoint,
+      'pendingRecovery': ?pendingOrigin,
+      'interruptedConflictRecovery': ?interruptedOrigin,
+    },
+  );
+}
+
+Future<void> saveJobLifecycleThroughNativeUi({
+  required WidgetTester tester,
+  required String jobId,
+  required JobLifecycleChoice choice,
+  required Future<void> Function(Finder) tap,
+  required Future<void> Function(bool Function()) waitUntilReady,
+  Future<void> Function(bool Function())? waitForCompletion,
+  required void Function() requireBeforeEffect,
+}) async {
+  final target = find.byKey(
+    Key(
+      'company-job-${choice == JobLifecycleChoice.deleted ? 'delete' : 'keep'}-$jobId',
+    ),
+  );
+  await waitUntilReady(
+    () =>
+        target.evaluate().length == 1 &&
+        tester.widget<TextButton>(target).onPressed != null,
+  );
+  requireBeforeEffect();
+  await tap(target);
+  if (choice == JobLifecycleChoice.deleted) {
+    final confirm = find.widgetWithText(FilledButton, 'Delete Job');
+    await waitUntilReady(
+      () =>
+          find.text('Delete Job?').evaluate().length == 1 &&
+          confirm.evaluate().length == 1,
+    );
+    requireBeforeEffect();
+    await tap(confirm);
+  }
+  await (waitForCompletion ?? waitUntilReady)(
+    () =>
+        find.byKey(const Key('company-job-error')).evaluate().isEmpty &&
+        find
+            .byKey(const Key('company-job-retry-lifecycle'))
+            .evaluate()
+            .isEmpty &&
+        (choice == JobLifecycleChoice.deleted
+            ? find
+                      .descendant(
+                        of: find.byKey(const Key('company-jobs-list')),
+                        matching: find.byKey(Key('company-job-$jobId')),
+                      )
+                      .evaluate()
+                      .isEmpty &&
+                  find
+                          .byKey(const Key('company-deleted-jobs'))
+                          .evaluate()
+                          .length ==
+                      1
+            : find
+                      .byKey(Key('company-job-delete-conflict-$jobId'))
+                      .evaluate()
+                      .isEmpty &&
+                  find.byKey(Key('company-job-$jobId')).evaluate().length ==
+                      1 &&
+                  tester
+                          .widget<TextButton>(
+                            find.byKey(Key('company-job-delete-$jobId')),
+                          )
+                          .onPressed !=
+                      null),
+  );
+}
+
+void assertJobLifecycleNativeViewUi(
+  WidgetTester tester,
+  List<CompanyJobView> jobs,
+) {
+  final list = find.byKey(const Key('company-jobs-list'));
+  _require(list.evaluate().length == 1);
+  for (final job in jobs) {
+    final id = job.baseJob.id;
+    final tile = find.descendant(
+      of: list,
+      matching: find.byKey(Key('company-job-$id')),
+    );
+    if (job.lifecycle.state == CompanyJobLifecycleState.deleted) {
+      _require(
+        tile.evaluate().isEmpty &&
+            find.byKey(const Key('company-deleted-jobs')).evaluate().length ==
+                1,
+      );
+      continue;
+    }
+    assertJobDetailsNativeViewUi(tester, [job]);
+    final conflict = find.byKey(Key('company-job-delete-conflict-$id'));
+    _require(
+      conflict.evaluate().length ==
+          (job.lifecycle.state == CompanyJobLifecycleState.deleteConflict
+              ? 1
+              : 0),
+    );
+    if (job.lifecycle.state != CompanyJobLifecycleState.deleteConflict) {
+      continue;
+    }
+    _require(find.byKey(Key('company-job-keep-$id')).evaluate().length == 1);
+    for (final candidate in job.lifecycle.alternatives) {
+      final attribution =
+          'User: ${candidate.originalUserId}\nDevice: ${candidate.originalDeviceId}\nOperation: ${candidate.operationId}';
+      _require(
+        find.text(attribution).evaluate().length == 1 &&
+            find
+                    .text(
+                      '${candidate.reference.family.name}: ${candidate.value}',
+                    )
+                    .evaluate()
+                    .length ==
+                1,
+      );
+    }
+  }
+}
+
 void _recoveryIdentity(Object? value) {
   final identity = _recoveryObject(value, {
     'installation',
@@ -4435,6 +6153,7 @@ final class _JoinNative with WidgetsBindingObserver {
     this.detailsPendingRecovery,
     this.detailsMixedRecovery,
     this.detailsNotesRecovery,
+    this.lifecycleCheckpoint,
   );
   final WidgetTester tester;
   final ValidationWorkspace workspace;
@@ -4449,6 +6168,20 @@ final class _JoinNative with WidgetsBindingObserver {
   final Map<String, dynamic>? detailsPendingRecovery;
   final Map<String, dynamic>? detailsMixedRecovery;
   final Map<String, dynamic>? detailsNotesRecovery;
+  final Map<String, dynamic>? lifecycleCheckpoint;
+  bool jobLifecycleReadbackVerified = false;
+  Map<String, dynamic>? get lifecyclePendingOrigin =>
+      lifecycleCheckpoint?['pendingRecovery'] as Map<String, dynamic>?;
+  Map<String, dynamic>? get lifecycleInterruptedConflictOrigin =>
+      lifecycleCheckpoint?['interruptedConflictRecovery']
+          as Map<String, dynamic>?;
+  bool get lifecycleInterruptedConflictResume =>
+      lifecycleCheckpoint?['interruptedConflictResume'] == true;
+  bool get lifecyclePendingResume =>
+      lifecycleCheckpoint?['lifecycleStage'] == 'pending';
+  String get lifecycleBaselineManifest => lifecyclePendingOrigin == null
+      ? _lifecycleManifestSha256
+      : _lifecyclePendingOrigin['manifestSha256']!;
   bool get baselineResume =>
       detailsBaselineRecovery != null &&
       detailsCheckpoint == null &&
@@ -4476,6 +6209,10 @@ final class _JoinNative with WidgetsBindingObserver {
   MatchGrantVerifier? verifier;
   _SavedPair? savedPair;
   NativeTestResidentRpc? _rpc;
+  PreparedJobLifecycleNativeUi? preparedLifecycleUi;
+  State? lifecycleUiHome;
+  int lifecycleUiPageEpoch = 0;
+  JobLifecycleNativeUiPhase lifecycleUiPhase = JobLifecycleNativeUiPhase.idle;
   bool finished = false, closed = false, exitRequested = false;
   bool conflictReadbackVerified = false;
   bool interruptedReadbackVerified = false;
@@ -4515,6 +6252,7 @@ final class _JoinNative with WidgetsBindingObserver {
     _roleName,
     createdMode: _createdMode,
     detailsMode: _detailsMode,
+    lifecycleMode: _jobLifecycleMode,
   );
   String get productRevision =>
       _createdMode ? _createdProductRevision : joinNativeProductRevision;
@@ -4602,6 +6340,10 @@ final class _JoinNative with WidgetsBindingObserver {
     'productRevision': productRevision,
     if (_createdMode) 'mode': 'created-jobs',
     if (_jobNameMode) 'jobNameMode': true,
+    if (_jobLifecycleMode) ...{
+      'jobLifecycleMode': true,
+      'lifecycleManifestSha256': _lifecycleManifestSha256,
+    },
     if (_detailsMode) ...{
       'jobDetailsMode': true,
       'detailsManifestSha256': _detailsManifestSha256,
@@ -4736,8 +6478,10 @@ final class _JoinNative with WidgetsBindingObserver {
     }
   }
 
-  Future<void> tap(Finder finder) async {
+  Future<void> tap(Finder finder, {bool Function()? isStillCurrent}) async {
+    bool current() => effectCurrent() && (isStillCurrent?.call() ?? true);
     requireBeforeEffect();
+    _require(current());
     await tester.scrollUntilVisible(
       finder,
       180,
@@ -4746,8 +6490,9 @@ final class _JoinNative with WidgetsBindingObserver {
     await tester.pump();
     _require(finder.evaluate().length == 1);
     requireBeforeEffect();
+    _require(current());
     await tester.runAsync(
-      () => guardedNativeTap(tester, finder, isStillCurrent: effectCurrent),
+      () => guardedNativeTap(tester, finder, isStillCurrent: current),
     );
     await tester.pump();
   }
@@ -4760,6 +6505,11 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> mountGate({
     Future<void> Function(bool Function())? waitUntilReady,
   }) async {
+    if (_jobLifecycleMode) {
+      preparedLifecycleUi = null;
+      lifecycleUiHome = null;
+      lifecycleUiPageEpoch++;
+    }
     await tester.pumpWidget(
       WiredPartsApp(
         key: ValueKey('join-native-gate-${clock.elapsedMicroseconds}'),
@@ -4786,11 +6536,15 @@ final class _JoinNative with WidgetsBindingObserver {
     );
   }
 
-  Future<void> signInUi() async {
+  Future<void> signInUi({
+    Future<void> Function(bool Function())? waitForCompletion,
+  }) async {
     _require(find.text('Company locked').evaluate().length == 1);
     await enter('company-signin-pin', _pin);
     await tap(find.byKey(const Key('company-signin')));
-    await waitForJoinNativeSignInReady(waitUntilReady: wait);
+    await waitForJoinNativeSignInReady(
+      waitUntilReady: waitForCompletion ?? wait,
+    );
   }
 
   Future<void> signOutUi() async {
@@ -4827,7 +6581,7 @@ final class _JoinNative with WidgetsBindingObserver {
   }
 
   Future<void> assertCreatedJobsUi(int expected) async {
-    if (_jobNameMode || _detailsMode) {
+    if (_jobNameMode || _detailsMode || _jobLifecycleMode) {
       final jobs = await CompanyJobCommands(enrollment: enrollment)
           .listJobViews(ownerSession: adapterSession!);
       _require(jobs.length == expected);
@@ -4836,6 +6590,10 @@ final class _JoinNative with WidgetsBindingObserver {
             find.byKey(const Key('company-jobs-list')).evaluate().length == 1 &&
             find.text('Loading company Jobs...').evaluate().isEmpty,
       );
+      if (_jobLifecycleMode) {
+        assertJobLifecycleNativeViewUi(tester, jobs);
+        return;
+      }
       assertJobNameNativeViewUi(tester, jobs);
       if (_detailsMode) assertJobDetailsNativeViewUi(tester, jobs);
       return;
@@ -4872,6 +6630,647 @@ final class _JoinNative with WidgetsBindingObserver {
   String get _sequentialName => 'Synthetic sequential name $_run';
   String _concurrentName(bool byOwner) =>
       'Synthetic ${byOwner ? 'owner' : 'member'} concurrent name $_run';
+
+  Future<Map<String, Object?>> lifecycleHistoryEvidence() async {
+    final rows = await db.select(db.companyJobLifecycles).get();
+    final acks = await db.select(db.companyJobLifecyclePeerAcks).get();
+    final held = adapterSession;
+    List<CompanyJobView>? views;
+    var verified = 0;
+    var profileVerified = false;
+    if (held != null && held.isValid) {
+      final commands = CompanyJobCommands(enrollment: enrollment);
+      final admitted = await commands.lifecycleSyncHoldings(ownerSession: held);
+      _require(
+        _hash(admitted.map((r) => _canonical(r.toJson())).toList()..sort()) ==
+            _hash(rows.map((r) => _canonical(r.toJson())).toList()..sort()),
+      );
+      verified = admitted.length;
+      views = await commands.listJobViews(ownerSession: held);
+      for (final view in views) {
+        _require(await commands.lifecycleUnavailableReason(view, held) == null);
+      }
+      profileVerified = true;
+    }
+    final baselineFile = File(
+      p.join(workspace.root.path, 'lifecycle-shared-baseline-$_roleName.json'),
+    );
+    final baseline = baselineFile.existsSync()
+        ? _readOwnedJson(baselineFile)
+        : null;
+    if (baseline != null) {
+      verifyJoinNativeEvidenceProvenance(
+        baseline,
+        revision: _revision,
+        tree: _tree,
+        adapter: _adapter,
+        productRevision: productRevision,
+        recoveryManifest: lifecyclePendingOrigin,
+      );
+      _require(
+        baseline['root'] == workspace.root.path &&
+            baseline['role'] == _roleName &&
+            baseline['namespace'] == namespace &&
+            baseline['run'] == _run &&
+            baseline['jobLifecycleMode'] == true &&
+            baseline['lifecycleManifestSha256'] == lifecycleBaselineManifest &&
+            baseline['creationHistorySha256'] == await jobHash(),
+      );
+    }
+    return {
+      'lifecycleOperationCount': rows.length,
+      'lifecycleReceiptCountVerified': verified,
+      'lifecycleReceiptVerification': held?.isValid == true
+          ? 'typed-public-verifier'
+          : 'locked-not-performed',
+      'lifecycleGenesisProfileVerified': profileVerified,
+      'lifecycleRecordsSha256': _hash(
+        rows.map((r) => _canonical(r.toJson())).toList()..sort(),
+      ),
+      'lifecycleAckCount': acks.length,
+      'lifecycleAckSha256': _hash(
+        acks.map((r) => _canonical(r.toJson())).toList()..sort(),
+      ),
+      'lifecycleRecords':
+          rows.map((r) {
+            final body = (jsonDecode(r.operationBytes) as Map)['body'] as Map;
+            return {
+              'job': r.jobId,
+              'operation': r.operationCommitment,
+              'contract': body['contract'],
+              'choice': body['choice'],
+              'resolve': body['resolve'],
+              'parents': body['parents'],
+              'originalUser': body['user'],
+              'originalDevice': body['device'],
+              'operationSha256': _hashBytes(r.operationBytes),
+              'receiptSha256': _hashBytes(r.receiptBytes),
+              'auditSha256': _hashBytes(r.auditBytes),
+              'outgoing': r.outgoing,
+            };
+          }).toList()..sort(
+            (a, b) =>
+                (a['operation'] as String).compareTo(b['operation'] as String),
+          ),
+      'lifecycleMetadataRecords':
+          (await db.select(db.companyJobDetails).get()).map((r) {
+            final body = (jsonDecode(r.operationBytes) as Map)['body'] as Map;
+            return {
+              'job': r.jobId,
+              'operation': r.operationCommitment,
+              'contract': body['contract'],
+              'lifecycle': body['lifecycle'],
+              'originalUser': body['user'],
+              'originalDevice': body['device'],
+            };
+          }).toList()..sort(
+            (a, b) =>
+                (a['operation'] as String).compareTo(b['operation'] as String),
+          ),
+      if (baseline != null) ...{
+        'selectedJob': baseline['selectedJob'],
+        'creationDigest': baseline['creationDigest'],
+        'sharedCreations': baseline['sharedCreations'],
+      },
+      if (views != null)
+        'lifecycleViews':
+            views
+                .map(
+                  (v) => {
+                    'job': v.baseJob.id,
+                    'creationDigest': v.creationDigest,
+                    'state': v.lifecycle.state.name,
+                    'heads': v.lifecycle.context.tagged,
+                    'lifecycleHeads': v.lifecycle.lifecycleHeads,
+                    'notes': v.details.notes.value,
+                    'notesConflict': v.details.notes.hasConflict,
+                    'alternatives': v.lifecycle.alternatives
+                        .map(
+                          (c) => {
+                            'family': c.reference.family.name,
+                            'operation': c.operationId,
+                            'parents': c.parents.map((p) => p.tagged).toList(),
+                            'user': c.originalUserId,
+                            'device': c.originalDeviceId,
+                            'value': _nativeDetailWire(c.value),
+                            'choice': c.choice?.name,
+                          },
+                        )
+                        .toList(),
+                  },
+                )
+                .toList()
+              ..sort(
+                (a, b) => (a['job'] as String).compareTo(b['job'] as String),
+              ),
+    };
+  }
+
+  State? get currentLifecycleUiPage {
+    final page = find.byType(CompanyBootstrapGate);
+    return page.evaluate().length == 1 ? tester.state(page) : null;
+  }
+
+  bool get lifecycleUiHomeMounted =>
+      lifecycleCurrent() &&
+      lifecycleUiHome?.mounted == true &&
+      !view.running &&
+      identical(lifecycleUiHome, currentLifecycleUiPage);
+
+  bool preparedLifecycleUiCurrent(PreparedJobLifecycleNativeUi prepared) =>
+      prepared.isCurrent(
+        session: adapterSession,
+        currentPage: currentLifecycleUiPage,
+        currentPageEpoch: lifecycleUiPageEpoch,
+        currentLifecycleEpoch: lifecycleEvent,
+        lifecycleCurrent: lifecycleCurrent(),
+      );
+
+  Future<Map<String, Object?>> lifecycleUiRawState() async {
+    final base = await _nativeStore.readState(namespace);
+    final custody = await _nativeStore.readState(
+      companyCustodyNamespace(namespace),
+    );
+    final held = adapterSession;
+    _require(base != null && custody != null && held != null && held.isValid);
+    return {
+      'sqlSha256': await sqlHash(),
+      'namespace': namespace,
+      'baseProtectedRevision': base!.revision,
+      'baseProtectedSha256': sha256.convert(base.bytes).toString(),
+      'custodyProtectedRevision': custody!.revision,
+      'custodyProtectedSha256': sha256.convert(custody.bytes).toString(),
+      'identity': {
+        'installation': security.identity!.id.value,
+        'generation': security.identity!.generation.value,
+        'storeGeneration': security.receivingStoreGeneration!.value,
+        'publicKeySha256': sha256
+            .convert(security.identity!.publicKey)
+            .toString(),
+        'company': held!.identity.companyId,
+        'shop': held.identity.shopId,
+        'user': held.identity.userId,
+        'device': held.identity.deviceId,
+      },
+    };
+  }
+
+  Future<void> requirePreparedLifecycleUi(
+    PreparedJobLifecycleNativeUi prepared,
+    NativeJobLifecycleUiStep step,
+  ) async {
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.effectGuard;
+    requireBeforeEffect();
+    _require(preparedLifecycleUiCurrent(prepared));
+    final state = _hash(await lifecycleUiRawState());
+    requireBeforeEffect();
+    prepared.requireCurrent(
+      effectStep: step,
+      session: adapterSession,
+      currentPage: currentLifecycleUiPage,
+      currentPageEpoch: lifecycleUiPageEpoch,
+      currentLifecycleEpoch: lifecycleEvent,
+      lifecycleCurrent: lifecycleCurrent(),
+      currentStateSha256: state,
+    );
+  }
+
+  Future<NativeTestCommandResult> exerciseJobLifecycleUi(
+    NativeJobLifecycleUiStep step,
+  ) async {
+    final requestedStep = step;
+    if (lifecyclePendingOrigin != null) {
+      _require(
+        !{
+          NativeJobLifecycleUiStep.prepareDeleteOffline,
+          NativeJobLifecycleUiStep.deleteOffline,
+          NativeJobLifecycleUiStep.prepareEditNotesOffline,
+          NativeJobLifecycleUiStep.editNotesOffline,
+        }.contains(step),
+      );
+    }
+    final preparedEffect = jobLifecycleNativePreparedEffect(step);
+    final preparing = preparedEffect != null;
+    step = preparedEffect ?? step;
+    _require(
+      _jobLifecycleMode &&
+          _createdMode &&
+          !_detailsMode &&
+          !_jobNameMode &&
+          reconnect &&
+          !finished &&
+          createdStage == _CreatedJobStage.retainedPeer,
+    );
+    requireSnapshotSafe();
+    final checkpointStage = switch (step) {
+      NativeJobLifecycleUiStep.checkpointConflict =>
+        JobLifecycleNativeStage.conflict,
+      NativeJobLifecycleUiStep.checkpointResolved =>
+        JobLifecycleNativeStage.resolved,
+      _ => null,
+    };
+    if (step == NativeJobLifecycleUiStep.inspect || checkpointStage != null) {
+      _require(syncUiState == CreatedJobNativeUiState.complete);
+      validateJobLifecycleNativeRepeat(
+        detailsTerminals,
+        stage: checkpointStage ?? JobLifecycleNativeStage.baseline,
+        owner: owner,
+      );
+    }
+    if (step == NativeJobLifecycleUiStep.keepEdited) {
+      _require(
+        owner &&
+            restart &&
+            jobLifecycleReadbackVerified &&
+            lifecycleCheckpoint!['lifecycleStage'] == 'conflict',
+      );
+    }
+    _require(step != NativeJobLifecycleUiStep.deleteOffline || owner);
+    _require(step != NativeJobLifecycleUiStep.editNotesOffline || !owner);
+    if (!preparing && jobLifecycleNativeEffectStep(step)) {
+      final prepared = preparedLifecycleUi;
+      preparedLifecycleUi = null;
+      _require(prepared != null && prepared.accepts(activeCommand!));
+      await requirePreparedLifecycleUi(prepared!, step);
+      return completeLifecycleUiStep(
+        step,
+        prepared.jobId,
+        prepared.initial,
+        prepared.baseline,
+        prepared: prepared,
+      );
+    }
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.navigation;
+    requireBeforeEffect();
+    await controller!.dispose();
+    _require(!view.running);
+    await enrollment.signOut();
+    adapterSession = null;
+    await mountGate();
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.signIn;
+    await signInUi(
+      waitForCompletion: preparing ? waitForPassiveCompletion : null,
+    );
+    if (preparing) requireBeforeEffect();
+    adapterSession = await tester.runAsync(() => enrollment.signIn(_pin));
+    final heldSession = adapterSession!;
+    final heldPage = tester.state(find.byType(CompanyBootstrapGate));
+    final heldPageEpoch = lifecycleUiPageEpoch;
+    final heldLifecycleEpoch = lifecycleEvent;
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.verification;
+    final verification = readLifecycleUiPreparation(step);
+    final data = preparing
+        ? await verification.timeout(const Duration(minutes: 3))
+        : await verification;
+    _require(
+      lifecycleCurrent() &&
+          identical(adapterSession, heldSession) &&
+          heldSession.isValid &&
+          heldPage.mounted &&
+          identical(
+            tester.state(find.byType(CompanyBootstrapGate)),
+            heldPage,
+          ) &&
+          lifecycleUiPageEpoch == heldPageEpoch &&
+          lifecycleEvent == heldLifecycleEpoch,
+    );
+    if (preparing) {
+      final raw = await lifecycleUiRawState();
+      final state = verifyJobLifecycleNativePreparationRawState(
+        data.initial,
+        raw,
+      );
+      _require(
+        lifecycleCurrent() &&
+            identical(adapterSession, heldSession) &&
+            heldSession.isValid &&
+            heldPage.mounted &&
+            identical(currentLifecycleUiPage, heldPage) &&
+            lifecycleUiPageEpoch == heldPageEpoch &&
+            lifecycleEvent == heldLifecycleEpoch,
+      );
+      lifecycleUiHome = heldPage;
+      preparedLifecycleUi = PreparedJobLifecycleNativeUi(
+        step: step,
+        jobId: data.jobId,
+        ownerSession: heldSession,
+        page: heldPage,
+        pageEpoch: heldPageEpoch,
+        lifecycleEpoch: heldLifecycleEpoch,
+        stateSha256: state,
+        preparationSequence: activeCommand!.sequence,
+        controlEpoch: activeCommand!.epoch,
+        initial: data.initial,
+        baseline: data.baseline,
+      );
+      lifecycleUiPhase = JobLifecycleNativeUiPhase.prepared;
+      writeOnce('lifecycle-prepared-$pid-${activeCommand!.sequence}.json', {
+        ...data.initial,
+        'step': requestedStep.name,
+        'preparedEffect': step.name,
+        'preparationSequence': activeCommand!.sequence,
+        'preparedStateSha256': state,
+        'preparedPageEpoch': heldPageEpoch,
+        'preparedLifecycleEpoch': heldLifecycleEpoch,
+        'companyControllerStoppedDuringUi': !view.running,
+        'savedThroughProductionUi': false,
+        'passed': false,
+      });
+      return const NativeTestCommandResult.effect();
+    }
+    return completeLifecycleUiStep(
+      step,
+      data.jobId,
+      data.initial,
+      data.baseline,
+    );
+  }
+
+  Future<
+    ({
+      String jobId,
+      Map<String, dynamic> baseline,
+      Map<String, Object?> initial,
+    })
+  >
+  readLifecycleUiPreparation(NativeJobLifecycleUiStep step) async {
+    final commands = CompanyJobCommands(enrollment: enrollment);
+    final before = await commands.listJobViews(ownerSession: adapterSession!);
+    _require(before.length == 2);
+    assertJobLifecycleNativeViewUi(tester, before);
+    final creations = await commands.syncHoldings(
+      ownerSession: adapterSession!,
+    );
+    _require(creations.length == 2);
+    final peers = await CompanyPeerAuthentication(enrollment: enrollment)
+        .retainedPeers(session: adapterSession!);
+    _require(
+      peers.length == 1 &&
+          peers.single.deviceId != adapterSession!.identity.deviceId,
+    );
+    final ownerDevice = owner
+        ? adapterSession!.identity.deviceId
+        : peers.single.deviceId;
+    final primaryRecords = creations
+        .where(
+          (r) =>
+              ((jsonDecode(r.operationBytes) as Map)['body']
+                  as Map)['device'] ==
+              ownerDevice,
+        )
+        .toList();
+    _require(primaryRecords.length == 1);
+    final primary = primaryRecords.single;
+    if (owner) {
+      final original = _readOwnedJson(
+        File(p.join(workspace.root.path, 'created-local-job.json')),
+      );
+      _require(_canonical(original['record']) == _canonical(primary.toJson()));
+    }
+    final selected = before.singleWhere((v) => v.baseJob.id == primary.jobId);
+    final sharedCreations =
+        creations.map((r) {
+            final body = (jsonDecode(r.operationBytes) as Map)['body'] as Map;
+            return {
+              'job': r.jobId,
+              'creationDigest': _hashBytes(r.operationBytes),
+              'originalUser': body['user'],
+              'originalDevice': body['device'],
+            };
+          }).toList()
+          ..sort((a, b) => (a['job'] as String).compareTo(b['job'] as String));
+    final baselineFile = File(
+      p.join(workspace.root.path, 'lifecycle-shared-baseline-$_roleName.json'),
+    );
+    if (!baselineFile.existsSync()) {
+      _require(
+        step == NativeJobLifecycleUiStep.inspect &&
+            (await commands.lifecycleSyncHoldings(
+              ownerSession: adapterSession!,
+            )).isEmpty &&
+            (await commands.detailsSyncHoldings(ownerSession: adapterSession!))
+                .isEmpty,
+      );
+      writeOnce(p.basename(baselineFile.path), {
+        'selectedJob': selected.baseJob.id,
+        'creationDigest': selected.creationDigest,
+        'sharedCreations': sharedCreations,
+        'creationHistorySha256': await jobHash(),
+        'identity': await identity(),
+        'ownerDevice': ownerDevice,
+      });
+    }
+    final baseline = _readOwnedJson(baselineFile);
+    _require(
+      baseline['selectedJob'] == selected.baseJob.id &&
+          baseline['creationDigest'] == selected.creationDigest &&
+          baseline['ownerDevice'] == ownerDevice &&
+          _canonical(baseline['sharedCreations']) ==
+              _canonical(sharedCreations),
+    );
+    final initial = await snapshot();
+    final expectedStage = switch (step) {
+      NativeJobLifecycleUiStep.inspect ||
+      NativeJobLifecycleUiStep.prepareDeleteOffline ||
+      NativeJobLifecycleUiStep.prepareEditNotesOffline ||
+      NativeJobLifecycleUiStep.deleteOffline ||
+      NativeJobLifecycleUiStep.editNotesOffline =>
+        JobLifecycleNativeStage.baseline,
+      NativeJobLifecycleUiStep.inspectConflict ||
+      NativeJobLifecycleUiStep.checkpointConflict ||
+      NativeJobLifecycleUiStep.prepareKeepEdited ||
+      NativeJobLifecycleUiStep.keepEdited => JobLifecycleNativeStage.conflict,
+      NativeJobLifecycleUiStep.inspectResolved ||
+      NativeJobLifecycleUiStep.checkpointResolved =>
+        JobLifecycleNativeStage.resolved,
+    };
+    validateJobLifecycleNativeEvidence(initial, expectedStage);
+    return (jobId: selected.baseJob.id, baseline: baseline, initial: initial);
+  }
+
+  Future<NativeTestCommandResult> completeLifecycleUiStep(
+    NativeJobLifecycleUiStep step,
+    String jobId,
+    Map<String, Object?> initial,
+    Map<String, dynamic> baseline, {
+    PreparedJobLifecycleNativeUi? prepared,
+  }) async {
+    final commands = CompanyJobCommands(enrollment: enrollment);
+    final checkpointStage = switch (step) {
+      NativeJobLifecycleUiStep.checkpointConflict =>
+        JobLifecycleNativeStage.conflict,
+      NativeJobLifecycleUiStep.checkpointResolved =>
+        JobLifecycleNativeStage.resolved,
+      _ => null,
+    };
+    final deleting = step == NativeJobLifecycleUiStep.deleteOffline;
+    final keeping = step == NativeJobLifecycleUiStep.keepEdited;
+    final editing = step == NativeJobLifecycleUiStep.editNotesOffline;
+    var effectTaps = 0;
+    Future<void> preparedTap(Finder target) async {
+      _require(prepared != null);
+      await requirePreparedLifecycleUi(prepared!, step);
+      lifecycleUiPhase = effectTaps++ == 0
+          ? JobLifecycleNativeUiPhase.effectOpen
+          : deleting
+          ? JobLifecycleNativeUiPhase.effectConfirm
+          : JobLifecycleNativeUiPhase.effectSave;
+      await tap(
+        target,
+        isStillCurrent: () =>
+            preparedLifecycleUiCurrent(prepared) && !view.running,
+      );
+    }
+
+    void preparedEffectGuard() {
+      lifecycleUiPhase = JobLifecycleNativeUiPhase.effectGuard;
+      requireBeforeEffect();
+      _require(prepared != null && preparedLifecycleUiCurrent(prepared));
+    }
+
+    Future<void> observeEffect(bool Function() ready) async {
+      lifecycleUiPhase = JobLifecycleNativeUiPhase.observing;
+      await waitForPassiveCompletion(ready);
+    }
+
+    if (deleting || keeping) {
+      await saveJobLifecycleThroughNativeUi(
+        tester: tester,
+        jobId: jobId,
+        choice: deleting ? JobLifecycleChoice.deleted : JobLifecycleChoice.kept,
+        tap: preparedTap,
+        waitUntilReady: wait,
+        waitForCompletion: observeEffect,
+        requireBeforeEffect: preparedEffectGuard,
+      );
+    } else if (editing) {
+      await saveJobDetailsThroughNativeUi(
+        tester: tester,
+        jobId: jobId,
+        text: {JobDetailField.notes: 'Synthetic member lifecycle notes $_run'},
+        tap: preparedTap,
+        waitUntilReady: wait,
+        waitForCompletion: observeEffect,
+        requireBeforeEffect: preparedEffectGuard,
+      );
+    }
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.readback;
+    final readback = () async {
+      final views = await commands.listJobViews(ownerSession: adapterSession!);
+      assertJobLifecycleNativeViewUi(tester, views);
+      return (views: views, evidence: await snapshot());
+    }();
+    final observed = prepared == null
+        ? await readback
+        : await readback.timeout(const Duration(minutes: 3));
+    if (prepared != null) {
+      _require(preparedLifecycleUiCurrent(prepared));
+    }
+    final after = observed.views;
+    final evidence = observed.evidence;
+    _require(
+      evidence['jobHistorySha256'] == initial['jobHistorySha256'] &&
+          evidence['nameRecordsSha256'] == initial['nameRecordsSha256'],
+    );
+    if (deleting || keeping || editing) {
+      _require(
+        evidence['lifecycleOperationCount'] ==
+                (initial['lifecycleOperationCount'] as int) +
+                    (editing ? 0 : 1) &&
+            evidence['lifecycleReceiptCountVerified'] ==
+                evidence['lifecycleOperationCount'] &&
+            evidence['detailsOperationCount'] ==
+                (initial['detailsOperationCount'] as int) + (editing ? 1 : 0) &&
+            evidence['detailsReceiptCountVerified'] ==
+                evidence['detailsOperationCount'] &&
+            evidence['lifecycleAckCount'] == initial['lifecycleAckCount'] &&
+            evidence['detailsAckCount'] == initial['detailsAckCount'],
+      );
+      final next = after.singleWhere((v) => v.baseJob.id == jobId);
+      _require(
+        next.lifecycle.state ==
+            (deleting
+                ? CompanyJobLifecycleState.deleted
+                : CompanyJobLifecycleState.live),
+      );
+      if (editing) {
+        _require(
+          next.details.notes.value == 'Synthetic member lifecycle notes $_run',
+        );
+      }
+    }
+    writeOnce('lifecycle-ui-$pid-${activeCommand!.sequence}.json', {
+      ...evidence,
+      'step': step.name,
+      'savedThroughProductionUi': deleting || keeping || editing,
+      'productionJobsPanelRendered': true,
+      'companyControllerStoppedDuringUi': !view.running,
+      'lifecycleTerminals': detailsTerminals,
+      if (prepared != null) 'preparationSequence': prepared.preparationSequence,
+      'passed': false,
+    });
+    if (checkpointStage != null) {
+      validateJobLifecycleNativeEvidence(evidence, checkpointStage);
+      await enrollment.signOut();
+      adapterSession = null;
+      await completeJobDetailsNativeUiReturn(
+        isStillCurrent: lifecycleCurrent,
+        mountPage: (ready) => mountGate(waitUntilReady: ready),
+        waitForCompletion: waitForPassiveCompletion,
+      );
+      _require(find.text('Company locked').evaluate().length == 1);
+      final locked = await snapshot();
+      _require(
+        locked['locked'] == true &&
+            locked['lifecycleRecordsSha256'] ==
+                evidence['lifecycleRecordsSha256'],
+      );
+      verifyJobDetailsCheckpointProtectedState(
+        base: (await _nativeStore.readState(namespace))!,
+        custody: (await _nativeStore.readState(
+          companyCustodyNamespace(namespace),
+        ))!,
+        expected: evidence.cast<String, dynamic>(),
+      );
+      writeOnce(
+        'join-lifecycle-checkpoint-$pid-${activeCommand!.sequence}.json',
+        {
+          'passed': false,
+          'schema': 11,
+          'lifecycleStage': checkpointStage.name,
+          'locked': true,
+          'nearbyControllerRunning': view.running,
+          'identity': evidence['identity'],
+          'lifecycleEvidence': evidence,
+          'lifecycleTerminals': detailsTerminals,
+          'lockedSqlSha256': locked['sqlSha256'],
+          'baselineSha256': _hash(baseline),
+          'productionJobsPanelRendered': true,
+          'coldReadbackRequired': true,
+          if (lifecycleInterruptedConflictOrigin != null)
+            'interruptedLifecycleConflictRecovery': {
+              'path': lifecycleInterruptedConflictOrigin!['manifestPath'],
+              'sha256': lifecycleInterruptedConflictOrigin!['manifestSha256'],
+            }
+          else if (lifecyclePendingOrigin != null)
+            'pendingLifecycleRecovery': {
+              'path': lifecyclePendingOrigin!['manifestPath'],
+              'sha256': lifecyclePendingOrigin!['manifestSha256'],
+            },
+        },
+      );
+      finished = true;
+      return const NativeTestCommandResult.effect();
+    }
+    lifecycleUiPhase = JobLifecycleNativeUiPhase.returning;
+    await completeJobDetailsNativeUiReturn(
+      isStillCurrent: lifecycleCurrent,
+      mountPage: (ready) => mountJoinPage(waitUntilReady: ready),
+      waitForCompletion: waitForPassiveCompletion,
+    );
+    _require(savedPair == null && syncUiState == CreatedJobNativeUiState.idle);
+    return const NativeTestCommandResult.effect();
+  }
 
   Future<Map<String, Object?>> nameHistoryEvidence() async {
     final rows = await db.select(db.companyJobNames).get();
@@ -5643,6 +8042,10 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> mountJoinPage({
     Future<void> Function(bool Function())? waitUntilReady,
   }) async {
+    if (_jobLifecycleMode) {
+      preparedLifecycleUi = null;
+      lifecycleUiHome = null;
+    }
     final waitForReady = waitUntilReady ?? wait;
     stage = 'join-page';
     savedPair = null;
@@ -5655,11 +8058,23 @@ final class _JoinNative with WidgetsBindingObserver {
       reconnect: reconnect,
       onJobSyncDiagnostic: _createdMode
           ? (diagnostic) {
-              if (_detailsMode && diagnostic.result != null) {
+              if ((_detailsMode || _jobLifecycleMode) &&
+                  diagnostic.result != null) {
                 _require(
                   detailsTerminals.length < createdJobNativeDiagnosticLimit,
                 );
                 detailsTerminals.add({
+                  if (_jobLifecycleMode) ...{
+                    'pairIdSha256': diagnostic.result!.complete
+                        ? _hashBytes(controller!.pairedJoinSession!.keys.id)
+                        : null,
+                    'pairRemainingMillis':
+                        controller!
+                            .pairedJoinSession
+                            ?.timeUntilExpiry
+                            .inMilliseconds ??
+                        0,
+                  },
                   'elapsedMillis': clock.elapsedMilliseconds,
                   'pageEpoch': pageEpoch,
                   'complete': diagnostic.result!.complete,
@@ -5758,14 +8173,18 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> initialize() async {
     _require(
       db.schemaVersion ==
-          (_detailsMode
+          (_jobLifecycleMode
+              ? 11
+              : _detailsMode
               ? 10
               : _createdMode
               ? 9
               : 7),
     );
     if (restart) {
-      final prior = _detailsMode
+      final prior = _jobLifecycleMode
+          ? lifecycleCheckpoint!
+          : _detailsMode
           ? (detailsCheckpoint ??
                 detailsNotesRecovery?['evidence'] as Map? ??
                 detailsMixedRecovery?['evidence'] as Map? ??
@@ -5802,7 +8221,9 @@ final class _JoinNative with WidgetsBindingObserver {
       _require(find.text('Company locked').evaluate().length == 1);
       _require(find.byKey(const Key('company-enroll-open')).evaluate().isEmpty);
       initialIdentity = await identity();
-      final prior = _detailsMode
+      final prior = _jobLifecycleMode
+          ? lifecycleCheckpoint!
+          : _detailsMode
           ? (detailsCheckpoint ??
                 detailsNotesRecovery?['evidence'] as Map? ??
                 detailsMixedRecovery?['evidence'] as Map? ??
@@ -5816,7 +8237,7 @@ final class _JoinNative with WidgetsBindingObserver {
               File(p.join(workspace.root.path, 'join-exercise.json')),
             );
       _require(_canonical(initialIdentity) == _canonical(prior['identity']));
-      if (_detailsMode) {
+      if (_detailsMode || _jobLifecycleMode) {
         _require(
           await sqlHash() ==
               (baselineResume || pendingResume || mixedResume || notesResume
@@ -5831,6 +8252,8 @@ final class _JoinNative with WidgetsBindingObserver {
                 as Map)['jobHistorySha256']
           : baselineResume
           ? await jobHash()
+          : _jobLifecycleMode
+          ? (prior['lifecycleEvidence'] as Map)['jobHistorySha256']
           : _detailsMode
           ? (prior['detailsEvidence'] as Map)['jobHistorySha256']
           : conflictResume
@@ -5865,6 +8288,39 @@ final class _JoinNative with WidgetsBindingObserver {
     if (_createdMode && restart) {
       _require(controller == null);
       await assertCreatedJobsUi(2);
+      if (_jobLifecycleMode) {
+        final actual = await snapshot();
+        verifyJobLifecycleNativeReadback(lifecycleCheckpoint!, actual);
+        jobLifecycleReadbackVerified = true;
+        writeOnce(
+          lifecyclePendingResume
+              ? 'join-lifecycle-pending-cold-readback-$pid.json'
+              : lifecycleInterruptedConflictResume
+              ? 'join-lifecycle-interrupted-conflict-cold-readback-$pid.json'
+              : 'join-lifecycle-cold-readback-$pid.json',
+          {
+            ...actual,
+            'lifecycleStage': lifecycleCheckpoint!['lifecycleStage'],
+            'beforeNearbyControllerCreated': controller == null,
+            'protectedBytesVerifiedBeforeSignIn': true,
+            'productionJobsPanelRendered': true,
+            if (lifecyclePendingResume) ...{
+              'pendingLifecycleRecoverySha256':
+                  lifecyclePendingOrigin!['manifestSha256'],
+              'preKernelIdentityPathAndTypedSealsVerified': true,
+              'freshEpochAndPairRequired': true,
+            },
+            if (lifecycleInterruptedConflictResume) ...{
+              'interruptedLifecycleConflictRecoverySha256':
+                  lifecycleInterruptedConflictOrigin!['manifestSha256'],
+              'preKernelIdentityPathAndTypedSealsVerified': true,
+              'freshEpochAndPairRequired': true,
+              'genuineCheckpoint': false,
+            },
+            'passed': false,
+          },
+        );
+      }
       if (_detailsMode) {
         final actual = await snapshot();
         if (notesResume) {
@@ -6023,6 +8479,26 @@ final class _JoinNative with WidgetsBindingObserver {
         sameNearbyState: pageMounted,
         discovered: view.peers.length == 1,
         codePresent: view.verifyCode != null,
+        allowedActions: {
+          NativeTestAction.observe,
+          NativeTestAction.pair,
+          NativeTestAction.matchWithGrant,
+          NativeTestAction.send,
+          NativeTestAction.accept,
+          NativeTestAction.snapshot,
+          if (!_jobLifecycleMode ||
+              createdStage != _CreatedJobStage.retainedPeer ||
+              (createdStage == _CreatedJobStage.retainedPeer &&
+                  (incomingSyncPending ||
+                      syncUiState == CreatedJobNativeUiState.incomplete ||
+                      syncUiState == CreatedJobNativeUiState.error)))
+            NativeTestAction.finish,
+          if (_jobNameMode && _createdMode) NativeTestAction.jobNameUi,
+          if (_detailsMode && _createdMode) NativeTestAction.jobDetailsUi,
+          if (_jobLifecycleMode && _createdMode)
+            NativeTestAction.jobLifecycleUi,
+          if (!_createdMode) NativeTestAction.normalExit,
+        },
       ),
     );
     rpc.refreshInfoInLoop();
@@ -6068,20 +8544,7 @@ final class _JoinNative with WidgetsBindingObserver {
             : cache
                       ?.submitJson(
                         values['data']!,
-                        allowedActions: {
-                          NativeTestAction.observe,
-                          NativeTestAction.pair,
-                          NativeTestAction.matchWithGrant,
-                          NativeTestAction.send,
-                          NativeTestAction.accept,
-                          NativeTestAction.snapshot,
-                          NativeTestAction.finish,
-                          if (_jobNameMode && _createdMode)
-                            NativeTestAction.jobNameUi,
-                          if (_detailsMode && _createdMode)
-                            NativeTestAction.jobDetailsUi,
-                          if (!_createdMode) NativeTestAction.normalExit,
-                        },
+                        allowedActions: rpc.allowedActions,
                       )
                       .toJson() ??
                   {'version': 1, 'outcome': 'not-configured'},
@@ -6190,7 +8653,9 @@ final class _JoinNative with WidgetsBindingObserver {
       originalJobHash = await jobHash();
       writeOnce('created-before-retained-pair-$pid.json', await snapshot());
       createdStage = _CreatedJobStage.retainedPeer;
-      await mountJoinPage();
+      await mountJoinPage(
+        waitUntilReady: _jobLifecycleMode ? waitForPassiveCompletion : null,
+      );
       writeOnce('created-retained-ready-$pid.json', {
         'encounterAlias': controller!.deviceId,
         'originalJobHistorySha256': originalJobHash,
@@ -6198,7 +8663,7 @@ final class _JoinNative with WidgetsBindingObserver {
       });
       return const NativeTestCommandResult.effect();
     }
-    _require(!_detailsMode);
+    _require(!_detailsMode && !_jobLifecycleMode);
     if (_jobNameMode) {
       _require(
         mayFinalizeCreatedJobNameStage(
@@ -6316,7 +8781,13 @@ final class _JoinNative with WidgetsBindingObserver {
     if (!finished) {
       _require(
         pageMounted ||
-            (_createdMode && createdStage == _CreatedJobStage.cancelling),
+            (_createdMode && createdStage == _CreatedJobStage.cancelling) ||
+            (_jobLifecycleMode &&
+                command.action == NativeTestAction.jobLifecycleUi &&
+                lifecycleUiHomeMounted &&
+                (jobLifecycleNativePreparedEffect(command.jobLifecycleStep!) !=
+                        null ||
+                    jobLifecycleNativeEffectStep(command.jobLifecycleStep!))),
       );
     }
     if (_createdMode && createdStage == _CreatedJobStage.cancelling) {
@@ -6485,7 +8956,7 @@ final class _JoinNative with WidgetsBindingObserver {
           _require(
             mayStartCreatedJobNativeSync(
               owner: owner,
-              jobNameMode: _jobNameMode || _detailsMode,
+              jobNameMode: _jobNameMode || _detailsMode || _jobLifecycleMode,
               syncEnabled: buttonEnabled('company-jobs-sync-now'),
             ),
           );
@@ -6551,7 +9022,9 @@ final class _JoinNative with WidgetsBindingObserver {
             assetsDigest: _hash([]),
             sharedSettingsDigest: _hash([]),
             profileDigest: _hash(workspace.deviceId),
-            schemaVersion: _detailsMode
+            schemaVersion: _jobLifecycleMode
+                ? 11
+                : _detailsMode
                 ? 10
                 : _createdMode
                 ? 9
@@ -6629,6 +9102,8 @@ final class _JoinNative with WidgetsBindingObserver {
         return exerciseJobNameUi(command.jobNameStep!);
       case NativeTestAction.jobDetailsUi:
         return exerciseJobDetailsUi(command.jobDetailsStep!);
+      case NativeTestAction.jobLifecycleUi:
+        return exerciseJobLifecycleUi(command.jobLifecycleStep!);
     }
   }
 
@@ -6646,7 +9121,9 @@ final class _JoinNative with WidgetsBindingObserver {
     }
     _require(
       counts.length ==
-          (_detailsMode
+          (_jobLifecycleMode
+              ? 34
+              : _detailsMode
               ? 32
               : _createdMode
               ? 30
@@ -6658,7 +9135,9 @@ final class _JoinNative with WidgetsBindingObserver {
         .single;
     _require(
       schema ==
-          (_detailsMode
+          (_jobLifecycleMode
+              ? 11
+              : _detailsMode
               ? 10
               : _createdMode
               ? 9
@@ -6710,7 +9189,9 @@ final class _JoinNative with WidgetsBindingObserver {
         'interruptionStarts': interruptionStarts,
         'interruptionDrains': interruptionDrains,
         'sqlSha256': await sqlHash(),
-        'snapshotSemantics': _detailsMode
+        'snapshotSemantics': _jobLifecycleMode
+            ? 'Typed create/details/lifecycle receipts, attributed causal graph and exact four-family retained-peer ACK verification; native process evidence only'
+            : _detailsMode
             ? 'Scoped creation/name bytes, typed details receipts, per-field attributed alternatives and three distinct family ACKs; native process readback only'
             : _jobNameMode
             ? 'Scoped original creation bytes plus signed name edits, causal heads, attributed conflicts, local receipts and peer ACKs; no mesh, deletion, asset or general-copy assertion'
@@ -6780,10 +9261,15 @@ final class _JoinNative with WidgetsBindingObserver {
                 ownerSession,
               );
         }
-        if (_jobNameMode || _detailsMode) {
+        if (_jobNameMode || _detailsMode || _jobLifecycleMode) {
           evidence.addAll(await nameHistoryEvidence());
         }
-        if (_detailsMode) evidence.addAll(await detailsHistoryEvidence());
+        if (_detailsMode || _jobLifecycleMode) {
+          evidence.addAll(await detailsHistoryEvidence());
+        }
+        if (_jobLifecycleMode) {
+          evidence.addAll(await lifecycleHistoryEvidence());
+        }
         final originalFile = File(
           p.join(workspace.root.path, 'created-local-job.json'),
         );
@@ -6795,7 +9281,10 @@ final class _JoinNative with WidgetsBindingObserver {
             tree: _tree,
             adapter: _adapter,
             productRevision: productRevision,
-            recoveryManifest: recoveryManifest ?? detailsBaselineRecovery,
+            recoveryManifest:
+                recoveryManifest ??
+                detailsBaselineRecovery ??
+                lifecyclePendingOrigin,
           );
           _require(
             original['mode'] == 'created-jobs' &&
@@ -6902,6 +9391,11 @@ final class _JoinNative with WidgetsBindingObserver {
         if (detailsNotesRecovery != null) {
           _require(next.epoch != detailsNotesRecovery!['retiredEpoch']);
         }
+        validateLifecyclePendingEpoch(next.epoch, lifecyclePendingOrigin);
+        validateLifecycleInterruptedConflictEpoch(
+          next.epoch,
+          lifecycleInterruptedConflictOrigin,
+        );
         session = next;
         cache = NativeTestCommandCache(
           session: next,
@@ -6913,6 +9407,10 @@ final class _JoinNative with WidgetsBindingObserver {
       final command = cache?.takeNext();
       NativeTestCommandResult? result;
       if (command != null) {
+        if (preparedLifecycleUi != null &&
+            !preparedLifecycleUi!.accepts(command)) {
+          preparedLifecycleUi = null;
+        }
         activeCommand = command;
         stage = 'command-${command.action.name}';
         try {
@@ -6924,6 +9422,27 @@ final class _JoinNative with WidgetsBindingObserver {
             effect: NativeTestEffect.completed,
           );
         } catch (_) {
+          if (_jobLifecycleMode &&
+              command.action == NativeTestAction.jobLifecycleUi) {
+            preparedLifecycleUi = null;
+            try {
+              writeOnce(
+                'lifecycle-command-failure-$pid-${command.sequence}.json',
+                {
+                  'passed': false,
+                  'step': command.jobLifecycleStep!.name,
+                  'phase': lifecycleUiPhase.name,
+                  'elapsedMillis': clock.elapsedMilliseconds,
+                  'deadlineMillis': command.deadlineMillis,
+                  'errorCode': 'lifecycle-ui-failed',
+                  'deadlineExpired':
+                      clock.elapsedMilliseconds >= command.deadlineMillis,
+                },
+              );
+            } catch (_) {
+              // Diagnostic failure cannot change command-cache failure semantics.
+            }
+          }
           cache!.fail(
             command,
             NativeTestCommandError.harnessFailed,
@@ -6932,7 +9451,11 @@ final class _JoinNative with WidgetsBindingObserver {
         }
       }
       activeCommand = null;
-      if (!finished && !pageMounted) {
+      if (preparedLifecycleUi != null &&
+          !preparedLifecycleUiCurrent(preparedLifecycleUi!)) {
+        preparedLifecycleUi = null;
+      }
+      if (!finished && !pageMounted && preparedLifecycleUi == null) {
         await enrollment.signOut();
         adapterSession = null;
       }
@@ -6954,6 +9477,8 @@ final class _JoinNative with WidgetsBindingObserver {
   Future<void> close() async {
     if (closed) return;
     closed = true;
+    preparedLifecycleUi = null;
+    lifecycleUiHome = null;
     _rpc?.close();
     await controller?.dispose();
     await enrollment.signOut();
@@ -6964,6 +9489,8 @@ final class _JoinNative with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final event = ++lifecycleEvent;
+    preparedLifecycleUi = null;
+    lifecycleUiHome = null;
     Map<String, Object?>? before;
     try {
       before = _lifecycleDetails(state);
@@ -6998,6 +9525,21 @@ void main() {
   _writeStartupStage('j116-startup-main-defines');
   _require(!_jobNameMode || _createdMode);
   _require(
+    !_jobLifecycleMode ||
+        (_createdMode &&
+            !_jobNameMode &&
+            !_detailsMode &&
+            _recoveryManifestPath.isEmpty &&
+            _recoveryManifestSha256.isEmpty),
+  );
+  _require(
+    _jobLifecycleMode ||
+        (_lifecycleManifestPath.isEmpty &&
+            _lifecycleManifestSha256.isEmpty &&
+            _lifecycleCheckpointPath.isEmpty &&
+            _lifecycleCheckpointSha256.isEmpty),
+  );
+  _require(
     !_detailsMode ||
         (_createdMode &&
             !_jobNameMode &&
@@ -7030,18 +9572,31 @@ void main() {
     adapter: _adapter,
     createdMode: _createdMode,
     detailsMode: _detailsMode,
+    lifecycleMode: _jobLifecycleMode,
     productRevision: _createdMode
         ? _createdProductRevision
         : joinNativeProductRevision,
   );
   _require(
     kAppSchemaVersion ==
-        (_detailsMode
+        (_jobLifecycleMode
+            ? 11
+            : _detailsMode
             ? 10
             : _createdMode
             ? 9
             : 7),
   );
+  if (_jobLifecycleMode) {
+    validateJobLifecycleNativeSourceManifest(
+      manifest: File(_lifecycleManifestPath),
+      manifestSha256: _lifecycleManifestSha256,
+      revision: _revision,
+      tree: _tree,
+      adapter: _adapter,
+      productRevision: _createdProductRevision,
+    );
+  }
   if (_detailsMode) {
     _writeStartupStage('j116-startup-main-source-manifest');
     validateJobDetailsNativeSourceManifest(
@@ -7078,7 +9633,18 @@ void main() {
         ),
       );
       _writeStartupStage('j116-startup-root-admission');
-      final admission = _detailsMode
+      final admission = _jobLifecycleMode
+          ? validateJobLifecycleNativeRootAdmission(
+              root,
+              role: _roleName,
+              revision: _revision,
+              tree: _tree,
+              adapter: _adapter,
+              manifestSha256: _lifecycleManifestSha256,
+              checkpointPath: _lifecycleCheckpointPath,
+              checkpointSha256: _lifecycleCheckpointSha256,
+            )
+          : _detailsMode
           ? validateJobDetailsNativeRootAdmission(
               root,
               run: _run,
@@ -7118,6 +9684,18 @@ void main() {
               recoveryManifestSha256: _recoveryManifestSha256,
             );
       _writeStartupStage('j116-startup-root-admitted');
+      final lifecyclePendingResume =
+          _jobLifecycleMode &&
+          admission.lifecycleCheckpoint?['lifecycleStage'] == 'pending';
+      final lifecycleInterruptedConflictResume =
+          _jobLifecycleMode &&
+          admission.lifecycleCheckpoint?['interruptedConflictResume'] == true;
+      if (lifecyclePendingResume) {
+        _writeStartupStage('j63-startup-pending-root-admitted');
+      }
+      if (lifecycleInterruptedConflictResume) {
+        _writeStartupStage('j63-startup-interrupted-conflict-root-admitted');
+      }
       final restart = admission.stage != JoinNativeRootStage.fresh;
       final conflictCheckpoint =
           admission.stage == JoinNativeRootStage.unresolvedConflict
@@ -7139,6 +9717,7 @@ void main() {
         _roleName,
         createdMode: _createdMode,
         detailsMode: _detailsMode,
+        lifecycleMode: _jobLifecycleMode,
       );
       if (!restart) {
         _require(!workspace.initialized);
@@ -7150,7 +9729,8 @@ void main() {
                   null,
         );
       }
-      if (admission.recoveryManifest != null || (_detailsMode && restart)) {
+      if (admission.recoveryManifest != null ||
+          ((_detailsMode || _jobLifecycleMode) && restart)) {
         _writeStartupStage('j116-startup-native-custody-read');
         await verifyJoinNativeRecoveryCustody(_nativeStore, namespace);
         _writeStartupStage('j116-startup-native-custody-verified');
@@ -7167,8 +9747,31 @@ void main() {
           expected: expected.cast<String, dynamic>(),
         );
       }
+      if (_jobLifecycleMode && admission.lifecycleCheckpoint != null) {
+        final expected =
+            (admission.lifecycleCheckpoint!['lifecycleEvidence'] as Map)
+                .cast<String, dynamic>();
+        final base = (await _nativeStore.readState(namespace))!;
+        final custody = (await _nativeStore.readState(
+          companyCustodyNamespace(namespace),
+        ))!;
+        verifyJobDetailsCheckpointProtectedState(
+          base: base,
+          custody: custody,
+          expected: expected,
+        );
+        _require(custody.revision == expected['custodyProtectedRevision']);
+        if (lifecyclePendingResume) {
+          verifyLifecyclePendingProtectedState(
+            base: base,
+            custody: custody,
+            expected: expected,
+          );
+          _writeStartupStage('j63-startup-pending-protected-pair-verified');
+        }
+      }
       final db = openedDb = AppDatabase.forTesting(
-        _detailsMode && restart
+        (_detailsMode || _jobLifecycleMode) && restart
             ? NativeDatabase.opened(
                 raw.sqlite3.open(
                   p.join(workspace.support.path, kSqliteFileName),
@@ -7183,9 +9786,120 @@ void main() {
         store: _nativeStore,
         namespace: namespace,
       );
-      if (admission.recoveryManifest != null || (_detailsMode && restart)) {
+      if (admission.recoveryManifest != null ||
+          ((_detailsMode || _jobLifecycleMode) && restart)) {
         _writeStartupStage('j116-startup-database-binding');
         await verifyJoinNativeRecoveryBinding(db);
+      }
+      if (lifecycleInterruptedConflictResume) {
+        final checkpoint = admission.lifecycleCheckpoint!;
+        final recovery = checkpoint['interruptedConflictRecovery'] as Map;
+        final pending = recovery['pendingOrigin'] as Map;
+        final expected = (checkpoint['lifecycleEvidence'] as Map)
+            .cast<String, dynamic>();
+        final observation = await verifyLifecycleConflictNativeHeaders(
+          db: db,
+          base: await _nativeStore.readState(namespace),
+          custody: await _nativeStore.readState(
+            companyCustodyNamespace(namespace),
+          ),
+          binding: (await db.settingsDao.getSetting(kInstallationBindingKey))!,
+          databasePath: p.join(workspace.support.path, kSqliteFileName),
+          originalIdentity: (expected['identity'] as Map)
+              .cast<String, Object?>(),
+          originalReceipt:
+              ((pending['localCreation'] as Map)['record']
+                      as Map)['receiptBytes']
+                  as String,
+          role: _roleName,
+        );
+        _require(
+          await detailsNativeSqlHash(db) == checkpoint['lockedSqlSha256'],
+        );
+        verifyLifecyclePendingProtectedState(
+          base: (await _nativeStore.readState(namespace))!,
+          custody: (await _nativeStore.readState(
+            companyCustodyNamespace(namespace),
+          ))!,
+          expected: expected,
+        );
+        _writeStartupStage(
+          'j63-startup-interrupted-conflict-native-headers-verified',
+        );
+        final file = File(
+          p.join(
+            root.path,
+            'join-lifecycle-interrupted-conflict-pre-kernel-$pid.json',
+          ),
+        );
+        file.createSync(exclusive: true);
+        file.writeAsStringSync(
+          jsonEncode({
+            'format': 1,
+            'run': _run,
+            'role': _roleName,
+            'interruptedLifecycleConflictRecoverySha256':
+                recovery['manifestSha256'],
+            'beforeProductionReconcile': true,
+            'beforeNormalPin': true,
+            'genuineCheckpoint': false,
+            ...observation,
+          }),
+          flush: true,
+        );
+      }
+      if (lifecyclePendingResume) {
+        final pending =
+            admission.lifecycleCheckpoint!['pendingRecovery'] as Map;
+        final expected = (pending['savedEvidence'] as Map)
+            .cast<String, Object?>();
+        final binding = (await db.settingsDao.getSetting(
+          kInstallationBindingKey,
+        ))!;
+        final local = (pending['localCreation'] as Map)['record'] as Map;
+        final observation = await verifyLifecyclePendingNativeHeaders(
+          db: db,
+          base: await _nativeStore.readState(namespace),
+          custody: await _nativeStore.readState(
+            companyCustodyNamespace(namespace),
+          ),
+          binding: binding,
+          databasePath: p.join(workspace.support.path, kSqliteFileName),
+          originalIdentity: (expected['identity'] as Map)
+              .cast<String, Object?>(),
+          originalReceipt: local['receiptBytes'] as String,
+          incomingOperations: (await db.select(db.companyJobs).get())
+              .where((r) => !r.outgoing)
+              .map((r) => r.operationCommitment)
+              .toSet(),
+          role: _roleName,
+        );
+        // Public seal verification must not advance the retained database.
+        _require(await detailsNativeSqlHash(db) == expected['sqlSha256']);
+        verifyLifecyclePendingProtectedState(
+          base: (await _nativeStore.readState(namespace))!,
+          custody: (await _nativeStore.readState(
+            companyCustodyNamespace(namespace),
+          ))!,
+          expected: expected.cast<String, dynamic>(),
+        );
+        _writeStartupStage('j63-startup-pending-native-headers-verified');
+        final file = File(
+          p.join(root.path, 'join-lifecycle-pending-pre-kernel-$pid.json'),
+        );
+        file.createSync(exclusive: true);
+        file.writeAsStringSync(
+          jsonEncode({
+            'format': 1,
+            'run': _run,
+            'role': _roleName,
+            'pendingLifecycleRecoverySha256': pending['manifestSha256'],
+            'beforeProductionReconcile': true,
+            'beforeNormalPin': true,
+            ...observation,
+          }),
+          flush: true,
+        );
       }
       if (admission.stage == JoinNativeRootStage.interruptedDetailsBaseline ||
           admission.stage == JoinNativeRootStage.interruptedDetailsPending ||
@@ -7301,6 +10015,7 @@ void main() {
         admission.detailsPendingRecovery,
         admission.detailsMixedRecovery,
         admission.detailsNotesRecovery,
+        admission.lifecycleCheckpoint,
       );
       resident.stage = 'awaiting-startup-resumed';
       final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();

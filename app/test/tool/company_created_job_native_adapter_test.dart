@@ -17,6 +17,7 @@ import 'package:wired_parts/features/nearby/nearby_controller.dart';
 
 import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_commands.dart';
+import '../../tool/native_nearby_test_crypto.dart' show NativeTestFailure;
 import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
 import '../features/company/company_join_test.dart'
     show JoinFixture, JoinTestDiscovery, activateFixtureB;
@@ -1410,7 +1411,7 @@ void main() {
     },
   );
   testWidgets(
-    'pushed page State capture waits for route build and preserves pop completion',
+    'pushed page State capture completes after the action deadline and preserves pop completion',
     (tester) async {
       await tester.pumpWidget(const MaterialApp(home: Scaffold()));
       final navigator = Navigator.of(tester.element(find.byType(Scaffold)));
@@ -1431,16 +1432,39 @@ void main() {
       await tester.pump();
       expect(page, findsNothing);
       var readinessPumps = 0;
+      var elapsed = 19059;
+      Future<void> readiness(
+        bool Function() ready, {
+        bool beforeEffect = false,
+      }) => adapter.waitForJoinNativeCompletion(
+        ready: ready,
+        elapsedMillis: () => elapsed,
+        commandDeadlineMillis: 15000,
+        enforceCommandDeadline: beforeEffect,
+        pump: () async {
+          readinessPumps++;
+          elapsed += 50;
+          await tester.pump(const Duration(milliseconds: 50));
+        },
+      );
+      await expectLater(
+        adapter.captureJoinNativePageState(
+          tester: tester,
+          page: page,
+          waitUntilReady: (ready) => readiness(ready, beforeEffect: true),
+        ),
+        throwsA(isA<NativeTestFailure>()),
+      );
+      expect(readinessPumps, 0);
+      expect(page, findsNothing);
+      expect(
+        () => adapter.validateJoinNativeDeadline(elapsed, 15000),
+        throwsA(isA<NativeTestFailure>()),
+      );
       final captured = await adapter.captureJoinNativePageState(
         tester: tester,
         page: page,
-        waitUntilReady: (ready) async {
-          while (!ready() && readinessPumps < 10) {
-            readinessPumps++;
-            await tester.pump(const Duration(milliseconds: 50));
-          }
-          expect(ready(), isTrue);
-        },
+        waitUntilReady: readiness,
       );
       expect(readinessPumps, greaterThan(0));
       expect(captured, same(tester.state<FormState>(page)));

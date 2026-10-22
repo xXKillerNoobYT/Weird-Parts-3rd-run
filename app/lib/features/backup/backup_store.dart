@@ -61,6 +61,7 @@ void requireLegacyBusinessFile(File file) {
         if (schema >= 8) ...companySyncTableColumns,
         if (schema >= 9) ...companyNameTableColumns,
         if (schema >= 10) ...companyDetailsTableColumns,
+        if (schema >= 11) ...companyLifecycleTableColumns,
       };
       for (final table in expected.keys) {
         final columns = db.select('PRAGMA table_info("$table")');
@@ -467,8 +468,16 @@ class BackupStore {
       copy = null;
       return await file.readAsBytes();
     } finally {
-      await copy?.close();
-      await staging.delete(recursive: true);
+      try {
+        await copy?.close();
+      } catch (_) {
+        // Preserve the snapshot failure and still attempt temporary cleanup.
+      }
+      try {
+        await staging.delete(recursive: true);
+      } catch (_) {
+        // Plaintext staging may remain, but must not replace the export result.
+      }
     }
   }
 

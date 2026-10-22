@@ -647,6 +647,8 @@ String safeNameFailure(
 
 CompanyJobName framingNameRecord(int i, int parentCount) {
   final body = {
+    'v': 1,
+    'contract': 'job.name.set@1',
     'device': '10000000-0000-4000-8000-000000000000',
     'installation': '20000000-0000-4000-8000-000000000000',
     'creation': 'a' * 64,

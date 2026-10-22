@@ -124,7 +124,8 @@ final class HeldPeerCreateContext {
     if (!db.hasCallerTransaction ||
         (intent.family != CompanyCommandFamily.jobCreateIncoming &&
             intent.family != CompanyCommandFamily.jobNameIncoming &&
-            intent.family != CompanyCommandFamily.jobDetailsIncoming) ||
+            intent.family != CompanyCommandFamily.jobDetailsIncoming &&
+            intent.family != CompanyCommandFamily.jobLifecycleIncoming) ||
         !identical(peer._owner._exchange, peer._held)) {
       throw const CompanyBootstrapRefusal('No held peer create command');
     }

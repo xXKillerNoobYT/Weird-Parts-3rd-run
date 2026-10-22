@@ -53,7 +53,11 @@ final class PatchJobDetails {
     required this.patch,
     required Map<JobDetailField, List<String>> observedHeads,
     Set<JobDetailField> resolvingFields = const {},
-  }) : observedHeads = Map.unmodifiable({
+    List<String>? observedLifecycleHeads,
+  }) : observedLifecycleHeads = observedLifecycleHeads == null
+           ? null
+           : List.unmodifiable([...observedLifecycleHeads]..sort()),
+       observedHeads = Map.unmodifiable({
          for (final e in observedHeads.entries)
            e.key: List<String>.unmodifiable([...e.value]..sort()),
        }),
@@ -81,16 +85,31 @@ final class PatchJobDetails {
     if (parentUnion.length > 32) {
       throw const JobLineRefusal('Details parent union capacity reached');
     }
+    if (observedLifecycleHeads != null) {
+      final refs = [
+        ...parentUnion.map(
+          (id) => JobOperationRef(JobOperationFamily.details, id),
+        ),
+        ...observedLifecycleHeads.map(
+          (id) => JobOperationRef(JobOperationFamily.lifecycle, id),
+        ),
+      ];
+      JobCausalContext(refs);
+    }
   }
   final String companyId, shopId, jobId, requestId, creationDigest;
   final JobDetailsPatch patch;
+  final List<String>? observedLifecycleHeads;
   final Map<JobDetailField, List<String>> observedHeads;
   final Set<JobDetailField> resolvingFields;
   List<String> get parentUnion =>
       observedHeads.values.expand((v) => v).toSet().toList()..sort();
   Map<String, Object?> _json() => {
-    'v': 1,
-    'contract': 'job.details.patch@1',
+    'v': observedLifecycleHeads == null ? 1 : 2,
+    'contract': observedLifecycleHeads == null
+        ? 'job.details.patch@1'
+        : 'job.details.patch@2',
+    if (observedLifecycleHeads != null) 'lifecycle': observedLifecycleHeads,
     'company': companyId,
     'shop': shopId,
     'job': jobId,
@@ -314,6 +333,7 @@ PatchJobDetails _detailsCommand(Map<String, Object?> body) {
     ),
     observedHeads: parents,
     resolvingFields: rawResolve.cast<String>().map(field).toSet(),
+    observedLifecycleHeads: (body['lifecycle'] as List?)?.cast<String>(),
   );
 }
 
@@ -377,6 +397,7 @@ final class _DetailsOperation {
       'creation',
       'units',
       'resolve',
+      if (body['v'] == 2) 'lifecycle',
       'generation',
       'installation',
       'device',
@@ -385,8 +406,10 @@ final class _DetailsOperation {
       'facts',
     });
     if (_canonical(value) != text ||
-        body['v'] != 1 ||
-        body['contract'] != 'job.details.patch@1' ||
+        !((body['v'] == 1 && body['contract'] == 'job.details.patch@1') ||
+            (body['v'] == 2 &&
+                body['contract'] == 'job.details.patch@2' &&
+                body['lifecycle'] is List)) ||
         body['units'] is! Map ||
         body['resolve'] is! List) {
       throw const JobLineRefusal(
@@ -525,6 +548,14 @@ Future<void> _validateDetailsDependencies(
     }
     parents[parent] = op;
   }
+  await _validateMetadataLifecycle(
+    db,
+    command.companyId,
+    command.shopId,
+    command.jobId,
+    command.creationDigest,
+    command.observedLifecycleHeads,
+  );
   for (final entry in command.observedHeads.entries) {
     for (final parent in entry.value) {
       if (!parents[parent]!.command.patch._values().containsKey(entry.key)) {
@@ -786,6 +817,15 @@ extension CompanyJobDetailsCommands on CompanyJobCommands {
             await _verifyDetailsRecord(existing);
             return existing.receiptBytes;
           }
+          await _validateMetadataLifecycle(
+            _db,
+            command.companyId,
+            command.shopId,
+            command.jobId,
+            command.creationDigest,
+            command.observedLifecycleHeads,
+            local: true,
+          );
           await _verifyDetailsDependencies(command);
           await _validateNewDetailsResolution(command);
           await _detailsCapacity(command);
@@ -819,6 +859,15 @@ extension CompanyJobDetailsCommands on CompanyJobCommands {
           final bytes = await _saveDetails(row, session, intent!);
           intent = await _installation.sealCompanyCommand(_db, intent!);
           await beforeCommit?.call();
+          await _validateMetadataLifecycle(
+            _db,
+            command.companyId,
+            command.shopId,
+            command.jobId,
+            command.creationDigest,
+            command.observedLifecycleHeads,
+            local: true,
+          );
           await _installation.validateHeldCompanyCommand(
             _db,
             intent!,
@@ -884,9 +933,15 @@ extension CompanyJobDetailsCommands on CompanyJobCommands {
               ..where((t) => t.companyId.equals(company))
               ..limit(513))
             .get();
-    if (names.length + details.length >= 512 ||
+    final lifecycle =
+        await (_db.select(_db.companyJobLifecycles)
+              ..where((t) => t.companyId.equals(company))
+              ..limit(513))
+            .get();
+    if (names.length + details.length + lifecycle.length >= 512 ||
         names.where((r) => r.jobId == job).length +
-                details.where((r) => r.jobId == job).length >=
+                details.where((r) => r.jobId == job).length +
+                lifecycle.where((r) => r.jobId == job).length >=
             128) {
       throw const CompanyJobDetailsCapacityRefusal.history();
     }
@@ -1009,6 +1064,14 @@ extension CompanyJobDetailsCommands on CompanyJobCommands {
   }) async {
     verified ??= <String>{};
     await _validateDetailsDependencies(_db, command);
+    await _verifyGraphReferences(
+      JobCausalContext(
+        (command.observedLifecycleHeads ?? []).map(
+          (id) => JobOperationRef(JobOperationFamily.lifecycle, id),
+        ),
+      ),
+      verified: verified,
+    );
     final baseline = await (_db.select(
       _db.companyJobs,
     )..where((t) => t.jobId.equals(command.jobId))).getSingle();

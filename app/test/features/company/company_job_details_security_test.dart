@@ -273,7 +273,7 @@ void main() {
         expect(
           (await f.db.customSelect('PRAGMA user_version').getSingle())
               .read<int>('user_version'),
-          10,
+          kAppSchemaVersion,
         );
         expect(await f.db.select(f.db.companyJobs).get(), creation);
         expect(await f.db.select(f.db.companyJobNames).get(), names);

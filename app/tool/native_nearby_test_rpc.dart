@@ -97,9 +97,11 @@ final class NativeTestResidentViewInfo {
     required this.sameNearbyState,
     required this.discovered,
     required this.codePresent,
+    this.allowedActions = const {},
   });
   final NativeTestPhase phase;
   final bool sameNearbyState, discovered, codePresent;
+  final Set<NativeTestAction> allowedActions;
 }
 
 final class NativeTestResidentRpc {
@@ -121,6 +123,8 @@ final class NativeTestResidentRpc {
   final NativeTestResidentViewInfo Function() readInfoInLoop;
   final void Function(NativeTestConfigureDiagnostic)? onDiagnostic;
   NativeTestResidentViewInfo? _published;
+  Set<NativeTestAction> _publishedAllowedActions = const {};
+  Set<NativeTestAction> get allowedActions => _publishedAllowedActions;
   _PendingConfiguration? _pending;
   bool _configureAttempted = false;
   bool _configured = false;
@@ -148,7 +152,12 @@ final class NativeTestResidentRpc {
   // an immutable summary, including while an awaited pump owns a guard scope.
   void refreshInfoInLoop() {
     if (!_closed) {
-      _published = readInfoInLoop();
+      final next = readInfoInLoop();
+      final allowedActions = Set<NativeTestAction>.unmodifiable(
+        next.allowedActions,
+      );
+      _published = next;
+      _publishedAllowedActions = allowedActions;
       _publishedAtMillis = clockMillis();
     }
   }
@@ -253,6 +262,7 @@ final class NativeTestResidentRpc {
   void close() {
     _closed = true;
     _published = null;
+    _publishedAllowedActions = const {};
     final pending = _pending;
     _pending = null;
     if (pending != null) {

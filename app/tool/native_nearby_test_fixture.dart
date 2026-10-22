@@ -433,6 +433,10 @@ final class NativeFixtureSnapshot {
         ..sort((a, b) => a.actualTableName.compareTo(b.actualTableName));
       for (final table in tables) {
         final name = table.actualTableName;
+        if (name == 'company_job_lifecycles' ||
+            name == 'company_job_lifecycle_peer_acks') {
+          continue;
+        }
         if (version == 2 && !_schema2Columns.containsKey(name)) continue;
         if (version < 5 && _schema5Columns.containsKey(name)) continue;
         if (version < 6 && _schema6Columns.containsKey(name)) continue;
