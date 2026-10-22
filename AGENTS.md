@@ -9,6 +9,16 @@ These project instructions supplement the user's universal operating doctrine. F
 - Keep one functional milestone per builder and one coordinated integration path to the intended `main` or release branch. While the backlog needs completion, open a new PR only for a concrete fix or an independent approved priority. Do not start parallel replacements for unfinished work.
 - Use a short-lived branch unless a stack is necessary for a real dependency. For each stack, record the bottom-to-top landing order, owner, base, destination and acceptance gates in the governing issue. A merge into a feature branch is intermediate integration, not delivery.
 
+## Recorded authority for the existing backlog
+
+The owner explicitly authorized normal completion of this project's already-approved PR backlog in PROMPT 3 on 2026-10-22. This is project authority, not a change to tool-enforced permissions. The original PR set and current dispositions are tracked in [issue #88's current checklist](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/88#issuecomment-6333643401).
+
+- Existing owners may edit project code and tests, repair defects and conflicts, update instructions, commit and push task branches, create necessary repair PRs, mark eligible work ready, obtain independent automated review, and merge eligible work through intended integration branches into `main` without routine per-PR approval questions.
+- Owners may close verified duplicate, superseded or already-integrated PRs after preserving useful changes and recording the reason. Keep one writer per scope, the existing Windows integration and Mac native-acceptance owners, and one coordinated landing path. Feature-branch merges remain intermediate progress.
+- Final-revision tests and CI, independent nonauthor review, applicable native acceptance, branch protections and post-merge verification remain required. Fix failures; do not waive gates or treat an author's own review as independent. Advance the next eligible step after each result.
+- This authority excludes production deployment/publication, purchases or paid services, credential/access-policy changes, disabling safeguards, force-pushing shared/protected branches, destructive data operations, unrelated features and scope expansion. Do not change approval settings automatically.
+- An enforced denial is still a block. If separate runtime approval or a permitted settings change is necessary, present its exact action, scope and effects for the owner to approve. Record real decisions, permission blocks and unresolved risks; never fabricate authority or automate approval controls.
+
 ## Own the change through delivery
 
 1. State the smallest useful outcome and its acceptance test before implementation. Link the issue, branch, PR and evidence. Keep a current delivery checklist.
