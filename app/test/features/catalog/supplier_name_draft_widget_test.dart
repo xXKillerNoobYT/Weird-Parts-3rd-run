@@ -310,6 +310,8 @@ void main() {
                 )
                 .first,
           );
+          await tester.pumpAndSettle();
+          expect(find.text('Add supplier').hitTestable(), findsOneWidget);
           await tester.tap(find.text('Add supplier'));
           await tester.pumpAndSettle();
           expect(find.text('Name saved'), findsOneWidget);
