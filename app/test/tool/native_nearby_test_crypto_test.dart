@@ -191,6 +191,60 @@ pairProtocolFixture() async {
 }
 
 void main() {
+  test('rendered observation constructor accepts a five-minute window', () {
+    final observation = RenderedObservation(
+      renderedCode: '739281',
+      attemptId: 'attempt-a',
+      localExpiresAtMillis: 1000000,
+      remainingMillis: 300000,
+      deviceId: 'sender',
+      peerId: 'receiver',
+    );
+    expect(observation.remainingMillis, 300000);
+  });
+
+  test('rendered observation JSON accepts a five-minute window', () {
+    final observation = RenderedObservation.fromJson({
+      'renderedCode': '739281',
+      'attemptId': 'attempt-a',
+      'localExpiresAtMillis': 1000000,
+      'remainingMillis': 300000,
+      'deviceId': 'sender',
+      'peerId': 'receiver',
+    });
+    expect(observation.remainingMillis, 300000);
+  });
+
+  for (final remaining in [300001, 0, -1]) {
+    test('rendered observation constructor rejects $remaining ms', () {
+      expect(
+        () => RenderedObservation(
+          renderedCode: '739281',
+          attemptId: 'attempt-a',
+          localExpiresAtMillis: 1000000,
+          remainingMillis: remaining,
+          deviceId: 'sender',
+          peerId: 'receiver',
+        ),
+        failure,
+      );
+    });
+
+    test('rendered observation JSON rejects $remaining ms', () {
+      expect(
+        () => RenderedObservation.fromJson({
+          'renderedCode': '739281',
+          'attemptId': 'attempt-a',
+          'localExpiresAtMillis': 1000000,
+          'remainingMillis': remaining,
+          'deviceId': 'sender',
+          'peerId': 'receiver',
+        }),
+        failure,
+      );
+    });
+  }
+
   test('combined pair protocol issues verifiable grants', () async {
     final f = await pairProtocolFixture();
     final result = await f.protocol.handle(
@@ -1492,7 +1546,7 @@ void main() {
           renderedCode: '739281',
           attemptId: 'a',
           localExpiresAtMillis: 1,
-          remainingMillis: 120001,
+          remainingMillis: 300001,
           deviceId: 'a',
           peerId: 'b',
         ),

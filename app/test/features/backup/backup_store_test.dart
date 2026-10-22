@@ -109,18 +109,26 @@ void main() {
   test('codec plus store round-trip a file backup', () async {
     final dir = Directory.systemTemp.createTempSync('wp-bak-rt-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([4, 5, 6]);
+    final sqlite = await sqliteBytesWithSetting(
+      key: 'marker',
+      value: 'round-trip',
+    );
+    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync(sqlite);
 
     final store = BackupStore(supportDir: dir);
     final codec = BackupCodec(iterations: 1000);
     final payload = await store.collect(
       sourceDeviceId: 'dev-b',
       createdAt: DateTime.utc(2026, 1, 2, 3, 4),
-      sqliteBytes: Uint8List.fromList([4, 5, 6]),
+      sqliteBytes: sqlite,
     );
     final file = await codec.encrypt(payload, 'pw');
     final restored = await codec.decrypt(file, 'pw');
-    expect(restored.sqliteBytes, [4, 5, 6]);
+    final restoredDir = Directory.systemTemp.createTempSync('wp-bak-rt-read-');
+    addTearDown(() => restoredDir.deleteSync(recursive: true));
+    File(p.join(restoredDir.path, kSqliteFileName))
+        .writeAsBytesSync(restored.sqliteBytes);
+    expect(await readSqliteSetting(restoredDir, 'marker'), 'round-trip');
     expect(restored.sourceDeviceId, 'dev-b');
   });
 

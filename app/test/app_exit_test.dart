@@ -61,6 +61,13 @@ class _ControlledReset extends LocalDataReset {
   Future<void> wipeFiles() async => await gate?.future;
 }
 
+class _FailingReset extends LocalDataReset {
+  _FailingReset(this.error);
+  final StateError error;
+  @override
+  Future<void> wipeFiles() async => throw error;
+}
+
 Future<String> _mount(
   WidgetTester tester,
   _ObservedDatabase db, {
@@ -335,24 +342,64 @@ void main() {
   ) async {
     final original = _ObservedDatabase();
     final next = _ObservedDatabase.failOnOpen();
+    var reopenCalls = 0;
     addTearDown(original.cleanUp);
     addTearDown(next.cleanUp);
     await _mount(
       tester,
       original,
       reset: _ControlledReset(),
-      reopenDatabase: () => next,
+      reopenDatabase: () {
+        reopenCalls++;
+        return next;
+      },
     );
     final scope = tester.widget<AppScope>(find.byType(AppScope));
     await tester.runAsync(
       () => expectLater(scope.wipeLocalData(), throwsA(isA<StateError>())),
     );
+    expect(reopenCalls, 1);
     expect(original.closed, isTrue);
+    expect(original.closeCalls, 1);
     expect(next.closed, isTrue);
     expect(next.closeCalls, 1);
+    expect(tester.widget<AppScope>(find.byType(AppScope)).db, same(original));
     expect(BackupIo.isBusy, isFalse);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'failed file wipe reopens once and preserves the original error',
+    (tester) async {
+      final original = _ObservedDatabase();
+      final next = _ObservedDatabase();
+      final failure = StateError('Synthetic file wipe failure');
+      var reopenCalls = 0;
+      addTearDown(original.cleanUp);
+      addTearDown(next.cleanUp);
+      await _mount(
+        tester,
+        original,
+        reset: _FailingReset(failure),
+        reopenDatabase: () {
+          reopenCalls++;
+          return next;
+        },
+      );
+      final scope = tester.widget<AppScope>(find.byType(AppScope));
+      await tester.runAsync(
+        () => expectLater(scope.wipeLocalData(), throwsA(same(failure))),
+      );
+      await tester.pumpAndSettle();
+      expect(reopenCalls, 1);
+      expect(original.closed, isTrue);
+      expect(original.closeCalls, 1);
+      expect(next.closeCalls, 0);
+      expect(tester.widget<AppScope>(find.byType(AppScope)).db, same(next));
+      expect(BackupIo.isBusy, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('unmounted wipe closes the newly opened replacement once', (
     tester,
