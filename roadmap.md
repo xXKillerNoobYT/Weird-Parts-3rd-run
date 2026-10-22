@@ -6,7 +6,7 @@ Living tracker. End goal is saved under `docs/end-goal/`; details get worked out
 
 **WiredPart** — outdoor / field construction ops app (jobs, notebooks, parts, warehouse, scheduling, chat, fleet, people/Hats, etc.).
 
-**Foundation first** — local-first, server-free Parts + Jobs/JPO on every device, nearby sync, encrypted backup. No cloud required. Accounts/MCP later; company cloud much later.
+**Foundation first** — local-first, server-free Parts + Jobs/JPO on every device, nearby sync, encrypted backup. No cloud required. Nearby proof uses real devices on the same local network; a cloud machine is never a nearby peer. Accounts and product AI/MCP are parked until Isaac asks; company cloud is much later.
 
 Reference drafts (rough, not binding detail yet):
 
@@ -27,13 +27,14 @@ Reference drafts (rough, not binding detail yet):
 | Who uses it        | Crew / shop — shared jobs + catalog                                                                                                                |
 | Platforms (v1)     | iOS, Android, Windows, Mac                                                                                                                         |
 | Stack              | Flutter + SQLite (Drift)                                                                                                                           |
-| Sync               | Bluetooth discover/approve + local Wi‑Fi bulk; BT fallback; **no internet required**                                                               |
+| Sync               | Local nearby only; the current Phase 4 proof is Wi‑Fi between the Mac and Impure on the house LAN. Bluetooth remains a later fallback; Impure has no Bluetooth. **No internet required; cloud is never a nearby peer.** |
 | Catalog edits (v1) | Trusted editors via **shared shop PIN**; field can add custom/temp parts on jobs                                                                   |
 | Photos             | In v1 — capture and sync (prefer Wi‑Fi for media)                                                                                                  |
 | Identity now       | Device ID; no accounts                                                                                                                             |
 | Identity later     | Local user profiles, peer sync + backup (before cloud)                                                                                             |
 | Permissions later  | **Hats** (admin-assigned roles) — replace/extend PIN                                                                                               |
-| AI                 | On-device later; **MCP + 3rd-party AI** sooner than cloud, permissioned by logged-in user + MCP settings                                           |
+| Product AI/MCP     | Parked until Isaac asks. Do not turn developer app-control tooling into a custom WiredPart MCP.                                                     |
+| Dev app control    | Enable the official Dart/Flutter MCP on Impure and Mac, debug-only. Use that cheaper path for non-UI tests; UI tests remain the visual pass.        |
 | Catalog identity   | **General Part** is the default (info, no MPN). Brand versions optional when brand matters. Part has a **default supplier**.                       |
 | Job line tracking  | Needed / shop-pull separate from orders. **Order splits**: multiple supplier+qty rows per line. Brand optional on the line; else default supplier. |
 | Cloud              | Far future, optional                                                                                                                               |
@@ -55,7 +56,13 @@ Reference drafts (rough, not binding detail yet):
 - [x] App scaffold
 - [x] **Phase 1 — Local core** complete (`feature/phase-1-local-core`)
 
-**Current focus:** Phase 2 — file-tree catalog, Variance under Brands, job Requested / Split / Left to Pull/Order.
+**Current focus:** Phase 4 acceptance proof for draft [#29](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/29). Do not merge it until the Mac and Impure copy a shop over Wi‑Fi on the house LAN.
+
+Recent merged truth:
+
+- [x] Encrypted backup and restore, including backup date and source device — [#13](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/13)
+- [x] Deleted catalog parts keep job-line names and order splits — [#14](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/14)
+- [x] Job Promote can add missing Category / Type / Variant and supplier data — [#24](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/24)
 
 ---
 
@@ -82,18 +89,23 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 - [x] Part photos (compress, store, attach) — after the tree
 - [x] Custom part → promote to catalog (editor) — after the tree (#6)
 - [x] Catalog remove (parts + empty folders, PIN) + local reset / wipe all data
+- [x] Deleted-part snapshots preserve job-line names and order splits ([#14](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/14))
+- [x] Promote can create missing Category / Type / Variant and supplier data ([#24](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/24))
 
 ### Phase 3 — Backup
 
-- [ ] Encrypted export / import
-- [ ] Show backup date + source device
+- [x] Encrypted export / import ([#13](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/13))
+- [x] Show backup date + source device ([#13](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/13))
 
 ### Phase 4 — Nearby link (one-way test only)
 
-- [ ] Manual discover / pair / verify code
-- [ ] One-way test transfer (BT and/or local Wi‑Fi) — engineering step only, not the product sync UX
+- [ ] Manual discover / pair / verify code — implemented on draft [#29](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/29), not accepted or merged
+- [ ] One-way Wi‑Fi shop copy — engineering step only, not the product sync UX
+- [ ] **Merge gate for #29:** the Mac and Impure must copy a shop on the house LAN using Wi‑Fi only. Impure has no Bluetooth. Never use a cloud machine as the nearby peer, and do not merge before this physical-device proof.
 
 ### Phase 5 — Two-way sync (one session, both directions)
+
+**Later:** Phase 5 has not started. The one-way Phase 4 draft does not satisfy this phase.
 
 - [ ] **True two-way sync in a single Sync Now** — both devices send and receive changes; users should not have to run two one-way syncs
 - [ ] Change-set sync, tombstones, sync receipts
@@ -113,14 +125,28 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 
 ---
 
+## Parked until Isaac asks
+
+Do not pull these into the current Phase 4 acceptance work:
+
+- [ ] Backup leftovers and large-catalog/platform follow-ups — [#22](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/22)
+- [ ] Catalog follow-ons — [#25](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/25), [#26](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/26), [#27](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/27), [#28](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/28)
+- [ ] Hats
+- [ ] Warehouse
+- [ ] Product AI/MCP
+
+Developer remote control is separate from the parked product MCP: enable the official Dart/Flutter MCP on Impure and Mac in debug builds only. Do not build a custom WiredPart MCP unless Isaac explicitly asks.
+
+---
+
 ## End-goal backlog (later — detail while building)
 
 Do **not** fully spec these now. Pull from `docs/end-goal/` when a phase starts.
 
-- [ ] Hats data layer + admin (roles from MERGE-PLAN; confirm with Bob)
+- [ ] Hats data layer + admin (parked; roles from MERGE-PLAN)
 - [ ] Local user profiles (peer sync + backup)
-- [ ] MCP bridge (tool permissions per user / settings)
-- [ ] Warehouse stock, locations, movements
+- [ ] Product AI/MCP bridge (parked until Isaac asks; tool permissions per user / settings)
+- [ ] Warehouse stock, locations, movements (parked)
 - [ ] Restock orders / receiving / returns
 - [ ] Dashboard, clock, notebooks, panel schedule
 - [ ] Scheduling, chat, fleet, tools
@@ -151,4 +177,5 @@ From end-goal drafts — park here, decide in context:
 1. Check off items when done.
 2. When starting a new end-goal module, add a short “In progress” note under **Where we are** and open the matching `docs/end-goal/` doc.
 3. Don’t expand the whole WiredPart UI into the foundation spec — keep foundation lean; grow the roadmap instead.
+4. Update this roadmap whenever implementation, validation, merge, parking, or sequencing status changes.
 
