@@ -57,9 +57,7 @@ Reference drafts (rough, not binding detail yet):
 - [x] App scaffold
 - [x] **Phase 1 — Local core** complete (`feature/phase-1-local-core`)
 
-**Current focus.** Phase 4 closeout under [issue #39](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/39) and draft [PR #36](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/36). Main was observed at `a4546d3ae30030bb8884ab31db4167408d1e1ec2`. The feature candidate is `95a06a96994ec03014a37075ce4406f183e3c12e`; it is not assumed merged.
-
-Historical isolated encrypted recovery and one Mac-to-Windows replacement with restart passed. The fresh candidate has build, unit-test, analysis, configured-baseline and discovery evidence. Its required three-leg same-open-page native acceptance is still pending. Phase 5 implementation remains on hold until that gate passes. See the [dated evidence and limits](docs/sync/foundation-plan.md#current-evidence-and-its-limits).
+**Current focus.** Issue [#33](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/33) is the live foundation record. Issue [#39](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/39) and draft [PR #36](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/36) track the Nearby lifecycle fix and its delivery gates. The `95a06a96994ec03014a37075ce4406f183e3c12e` candidate snapshot and its pending checklist below are historical. The bounded [c998 one-way copy and restart receipt](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/84#issuecomment-6106016809) records three resident copy legs and two normal cold restarts passing on isolated Windows and Mac installations. The separate [c998 encrypted recovery receipt](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/59#issuecomment-6106348163) records the bounded recovery checks passing on both hosts. These receipts prove whole-shop replacement and encrypted recovery for their recorded fixtures. They do not prove changes-only two-way sync, company enrollment, or mobile, Bluetooth, or mesh support. Issue #39 remains open, and PR #36 remains draft; check those live records for remaining work. See the [historical evidence and limits](docs/sync/foundation-plan.md#historical-evidence-and-its-limits).
 
 ---
 
@@ -95,13 +93,13 @@ Isaac’s shop walk (approved plan). Old “search, filters, media” wording is
 
 Isolated recovery proof is recorded in issue #33 and PR #36. Repeat safe backup and restore before any real-shop migration. Bad passwords, damaged files and unsupported schemas must leave existing data unchanged.
 
-### Phase 4. Nearby one-way engineering gate
+### Phase 4. Nearby one-way engineering gate (historical, completed at c998)
 
 - [x] Historical actual Mac-to-Windows whole-shop replacement and restart proof.
-- [ ] Finish exact-candidate Mac to Windows, Windows to Mac, then Mac to Windows without recreating the receiving Nearby controllers.
-- [ ] Fresh verified pairing, per-leg domain and local identity checks, photos and final restart admission by independent review.
+- [x] At c998, complete Mac to Windows, Windows to Mac, then Mac to Windows while both Nearby pages remain open. See the [published copy and restart receipt](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/84#issuecomment-6106016809).
+- [x] At c998, verify fresh pairing, each leg's records and local identity, photos, final restarts, and retained evidence through independent review. The [published receipt](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/84#issuecomment-6106016809) defines the limits.
 
-Keep [PR #29](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/29) and PR #36 draft until their own gates pass. No merge is authorized by this plan. One-way replacement is distinct from genuine two-way merging.
+This historical one-way replacement gate does not implement genuine two-way sync. PR #36 remains draft pending its separate review, full-suite, CI, and landing gates. No merge is authorized by this plan.
 
 ### Phase 5. Company-scoped two-way foundation
 
