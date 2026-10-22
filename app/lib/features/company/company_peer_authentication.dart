@@ -1,5 +1,26 @@
 part of '../installation/installation_security.dart';
 
+void requireCreatedJobSyncCapabilities({
+  required Map<String, Object?> localUser,
+  required Map<String, Object?> localDevice,
+  required Map<String, Object?> peerUser,
+  required Map<String, Object?> peerDevice,
+  required String shop,
+}) {
+  for (final entry in [localUser, localDevice, peerUser, peerDevice]) {
+    final shops = entry['shops'];
+    final capabilities = entry['capabilities'];
+    if (shops is! List ||
+        !shops.contains(shop) ||
+        capabilities is! List ||
+        !capabilities.contains('createJob')) {
+      throw const CompanyBootstrapRefusal(
+        'Both installations require current shop access and Create Job permission',
+      );
+    }
+  }
+}
+
 /// Retained, verified enrollment binding. Network callers cannot supply a key.
 final class RetainedCompanyPeer {
   RetainedCompanyPeer._(this._membership);
@@ -16,6 +37,152 @@ final class VerifiedPeerMembership {
   final _PeerExchange _held;
   String get deviceId => _held.peer.deviceId;
   Future<void> requireCurrent() => _owner._recheck(_held);
+
+  Future<void> requireJobSyncPermission() async {
+    await requireCurrent();
+    final local = _owner._localMembership!;
+    final remote = _held.peer._membership;
+    requireCreatedJobSyncCapabilities(
+      localUser: local.user,
+      localDevice: local.device,
+      peerUser: remote.user,
+      peerDevice: remote.device,
+      shop: _held.owner.identity.shopId,
+    );
+    _held.owner.validateAuthority(
+      _owner.enrollment.installation._record!.companyTrust!,
+      _owner.enrollment.installation.knownSecurityFloors,
+    );
+    _held.channel._requireLive();
+  }
+
+  Future<HeldPeerCreateContext> prepareCreateCommand(OwnerSession owner) async {
+    await requireCurrent();
+    if (!identical(owner, _held.owner)) {
+      throw const CompanyBootstrapRefusal(
+        'Peer belongs to another local session',
+      );
+    }
+    final installation = _owner.enrollment.installation;
+    final trust = installation._record!.companyTrust!;
+    final custody = (await _owner.enrollment._readCustody())!;
+    await requireCurrent();
+    return HeldPeerCreateContext._(
+      this,
+      trust,
+      Map.of(installation.knownSecurityFloors),
+      custody,
+    );
+  }
+}
+
+final class HeldPeerCreateContext {
+  HeldPeerCreateContext._(this.peer, this._trust, this._floors, this._custody);
+  final VerifiedPeerMembership peer;
+  final CompanyTrustAnchor _trust;
+  final Map<String, int> _floors;
+  final _CompanyCustody _custody;
+
+  void validateAuthor(Map<String, Object?> body, [List<int>? publicKey]) {
+    final member = peer._held.peer._membership;
+    if (body['company'] != _trust.companyId.value ||
+        body['shop'] != peer._held.owner.identity.shopId ||
+        body['device'] != member.device['id'] ||
+        body['user'] != member.user['id'] ||
+        body['installation'] != member.device['installation'] ||
+        body['generation'] != member.device['generation'] ||
+        (publicKey != null &&
+            base64Encode(publicKey) != member.device['key'])) {
+      throw const CompanyBootstrapRefusal(
+        'Create author is not this retained peer',
+      );
+    }
+  }
+
+  void validateAuthorization(Map<String, Object?> assertion) {
+    final member = peer._held.peer._membership;
+    validateAuthor(assertion);
+    if (assertion['grant'] != member.device['grant'] ||
+        assertion['credential'] != member.user['credential'] ||
+        assertion['permission'] != member.user['permission'] ||
+        assertion['authority'] != _trust.authorityVersion ||
+        assertion['facts'] != _trust.factsCommitment ||
+        (member.certificateBytes == null
+            ? assertion['v'] != 2
+            : assertion['v'] != 3 ||
+                  assertion['membership'] != member.proofCommitment)) {
+      throw const CompanyBootstrapRefusal(
+        'Create authority differs from retained peer',
+      );
+    }
+  }
+
+  Future<void> requireHeld(CompanyCommandIntent intent) async {
+    final enrollment = peer._owner.enrollment;
+    final installation = enrollment.installation;
+    final db = enrollment.db;
+    if (!db.hasCallerTransaction ||
+        intent.family != CompanyCommandFamily.jobCreateIncoming ||
+        !identical(peer._owner._exchange, peer._held)) {
+      throw const CompanyBootstrapRefusal('No held peer create command');
+    }
+    final authority = await _membershipAuthority(db, _trust);
+    final retained = peer._held.peer._membership;
+    final ResolvedCompanyMembership current;
+    if (retained.certificateBytes case final String certificate) {
+      current = await _resolveMemberCertificate(
+        certificate,
+        authority,
+        _trust,
+        _floors,
+      );
+      if (!_custody.isMember) {
+        final rows =
+            await (db.select(db.companyMembershipCertificates)..where(
+                  (t) => t.proofCommitment.equals(retained.proofCommitment),
+                ))
+                .get();
+        if (rows.length != 1 || rows.single.proofBytes != certificate) {
+          throw const CompanyBootstrapRefusal('Retained certificate changed');
+        }
+      }
+    } else {
+      current = ResolvedCompanyMembership._(
+        _securityCanonical((authority['users'] as List).single),
+        _securityCanonical((authority['devices'] as List).single),
+        _trust.factsCommitment,
+        null,
+      );
+      _memberFloors(current.user, current.device, _trust, _floors);
+    }
+    if (current._device != retained._device ||
+        current._user != retained._user ||
+        current.proofCommitment != retained.proofCommitment) {
+      throw const CompanyBootstrapRefusal('Held peer membership changed');
+    }
+    final custody = await enrollment._readCustody();
+    if (custody?.revision != _custody.revision ||
+        _securityCanonical(custody?.values) !=
+            _securityCanonical(_custody.values)) {
+      throw const CompanyBootstrapRefusal('Held company custody changed');
+    }
+    final state = await installation.store.readState(installation.namespace);
+    if (state == null) {
+      throw const CompanyBootstrapRefusal('Protected identity missing');
+    }
+    final record = _InstallationRecord.decode(state.bytes);
+    if (_securityCanonical(record.pendingCommand?.encode()) !=
+            _securityCanonical(intent.encode()) ||
+        _securityCanonical(record.companyTrust?.encode()) !=
+            _securityCanonical(_trust.encode()) ||
+        _securityCanonical(record.floors) != _securityCanonical(_floors) ||
+        record.storeGeneration.value != intent.storeGeneration ||
+        state.revision != installation._persisted?.revision) {
+      throw const CompanyBootstrapRefusal('Held peer authority changed');
+    }
+    peer._held.owner.validateAuthority(_trust, _floors);
+    peer._held.channel._requireLive();
+  }
 }
 
 final class _PeerExchange {
@@ -48,6 +215,7 @@ final class CompanyPeerAuthentication {
   // cross this seam; every caller still passes the following live checks.
   final Future<void> Function(CompanyPeerProofCheckpoint)? onProofCheckpoint;
   _PeerExchange? _exchange;
+  ResolvedCompanyMembership? _localMembership;
 
   Future<List<RetainedCompanyPeer>> retainedPeers({
     required OwnerSession session,
@@ -203,6 +371,7 @@ final class CompanyPeerAuthentication {
       session: owner.sessionId,
     );
     channel._requireLive();
+    _localMembership = local;
     return _securityCanonical({
       'v': 1,
       'purpose': 'company.peer@1',
@@ -215,9 +384,13 @@ final class CompanyPeerAuthentication {
   }
 
   Future<void> _recheck(_PeerExchange held) async {
-    if (!identical(_exchange, held) ||
-        await _context(held.channel, held.owner, held.peer, held.initiator) !=
-            held.context) {
+    final context = await _context(
+      held.channel,
+      held.owner,
+      held.peer,
+      held.initiator,
+    );
+    if (!identical(_exchange, held) || context != held.context) {
       throw const CompanyBootstrapRefusal('Retained peer context changed');
     }
   }

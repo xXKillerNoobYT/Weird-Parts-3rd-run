@@ -21,7 +21,7 @@ import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 7;
+const kAppSchemaVersion = 8;
 
 @DriftDatabase(
   tables: [
@@ -39,6 +39,7 @@ const kAppSchemaVersion = 7;
     SupplierListings,
     Jobs,
     CompanyJobs,
+    CompanyJobPeerAcks,
     JobLines,
     OrderSplits,
     CompanyBootstrapWitnesses,
@@ -126,6 +127,9 @@ class AppDatabase extends _$AppDatabase {
         }
       }
       await transaction(() async {
+        if (from < 8) {
+          await m.createTable(companyJobPeerAcks);
+        }
         if (from < 7) {
           await m.createTable(companyMembershipCertificates);
           await m.createTable(companyJoinRequests);

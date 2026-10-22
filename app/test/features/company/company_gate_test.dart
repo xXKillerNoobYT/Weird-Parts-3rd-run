@@ -392,10 +392,12 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     await tester.tap(find.byKey(const Key('create-company')));
+    await tester.binding.setSurfaceSize(const Size(800, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     for (
       var attempt = 0;
       attempt < 50 &&
-          find.byKey(const Key('company-signout')).evaluate().isEmpty;
+          find.textContaining('Company ID:').evaluate().isEmpty;
       attempt++
     ) {
       await tester.runAsync(
@@ -403,6 +405,12 @@ void main() {
       );
       await tester.pump();
     }
+    expect(find.textContaining('Company ID:'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('company-signout')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.byKey(const Key('company-signout')), findsOneWidget);
     expect(destination.existsSync(), isTrue);
     expect(find.text('Parts'), findsNothing);

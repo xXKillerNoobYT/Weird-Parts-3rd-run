@@ -59,6 +59,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
   Timer? _expiryTimer;
   bool _foreground = true;
   int _loginIntentEpoch = 0;
+  int _jobsViewEpoch = 0;
 
   @override
   void initState() {
@@ -112,7 +113,10 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         ),
       ),
     );
-    if (mounted) await _load();
+    if (mounted) {
+      setState(() => _jobsViewEpoch++);
+      await _load();
+    }
   }
 
   void _scheduleExpiry(OwnerSession session) {
@@ -637,7 +641,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       ),
       const SizedBox(height: 16),
       CompanyJobsPanel(
-        key: ValueKey(session.sessionId),
+        key: ValueKey('${session.sessionId}:$_jobsViewEpoch'),
         commands: CompanyJobCommands(enrollment: _enrollment),
         owner: session,
       ),

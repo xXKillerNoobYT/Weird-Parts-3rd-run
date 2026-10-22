@@ -129,9 +129,18 @@ final class JoinActivationStore
   Map<String, ProtectedInstallationState> get states => delegate.states;
   JoinStoreCapacityFault? refuseNextCapacityAt;
   int capacityRefusalCount = 0;
+  void Function(String namespace)? onRead;
+  Future<void>? Function(String namespace)? beforeRead;
   @override
-  Future<ProtectedInstallationState?> readState(String namespace) =>
-      delegate.readState(namespace);
+  Future<ProtectedInstallationState?> readState(String namespace) {
+    onRead?.call(namespace);
+    final barrier = beforeRead?.call(namespace);
+    if (barrier != null) {
+      return barrier.then((_) => delegate.readState(namespace));
+    }
+    return delegate.readState(namespace);
+  }
+
   @override
   Future<void> writeRecoveryFileExclusive(String path, Uint8List bytes) =>
       delegate.writeRecoveryFileExclusive(path, bytes);
@@ -214,7 +223,8 @@ final class JoinFixture {
   final OwnerSession owner;
   OwnerDataSnapshot? _ownerData;
   Future<void>? _closing;
-  static Future<JoinFixture> create() async {
+  bool allowOwnerAdditions = false;
+  static Future<JoinFixture> create({bool allowOwnerAdditions = false}) async {
     final root = Directory.systemTemp.createTempSync('join-durable-');
     final aDb = AppDatabase.forTesting(
       NativeDatabase(File('${root.path}/a.sqlite')),
@@ -256,6 +266,7 @@ final class JoinFixture {
       await ae.signIn('1234'),
     );
     addTearDown(fixture.closeAndCheckOwnerData);
+    fixture.allowOwnerAdditions = allowOwnerAdditions;
     await seedExistingOwnerJob(fixture);
     fixture._ownerData = await captureOwnerData(fixture);
     return fixture;
@@ -266,7 +277,23 @@ final class JoinFixture {
   Future<void> _close() async {
     try {
       final ownerData = _ownerData;
-      if (ownerData != null) await expectOwnerDataUnchanged(this, ownerData);
+      if (ownerData != null) {
+        if (allowOwnerAdditions) {
+          expect(await aDb.select(aDb.jobs).get(), containsAll(ownerData.jobs));
+          expect(
+            await aDb.select(aDb.companyJobs).get(),
+            containsAll(ownerData.history),
+          );
+          expect(
+            hashes.sha256
+                .convert(await File('${root.path}/a.wpca').readAsBytes())
+                .toString(),
+            ownerData.packageSha256,
+          );
+        } else {
+          await expectOwnerDataUnchanged(this, ownerData);
+        }
+      }
     } finally {
       await aDb.close();
       await bDb.close();

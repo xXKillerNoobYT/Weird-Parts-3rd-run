@@ -23,3 +23,19 @@ class CompanyJobs extends Table {
     {companyId, originGeneration, requestId},
   ];
 }
+
+class CompanyJobPeerAcks extends Table {
+  TextColumn get companyId => text()();
+  TextColumn get originGeneration => text()();
+  TextColumn get requestId => text()();
+  TextColumn get peerDeviceId => text()();
+  TextColumn get operationDigest => text()();
+  TextColumn get ackBytes => text()();
+  @override
+  Set<Column> get primaryKey => {
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+  };
+}

@@ -733,7 +733,11 @@ class CompanyJobCommands {
         }
         final result = <Job>[];
         for (final row in rows) {
-          await _verifyRecord(row);
+          if (row.outgoing) {
+            await _verifyRecord(row);
+          } else {
+            await verifyIncomingRecord(row);
+          }
           result.add(
             await (_db.select(
               _db.jobs,

@@ -7879,6 +7879,448 @@ class CompanyJobsCompanion extends UpdateCompanion<CompanyJob> {
   }
 }
 
+class $CompanyJobPeerAcksTable extends CompanyJobPeerAcks
+    with TableInfo<$CompanyJobPeerAcksTable, CompanyJobPeerAck> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CompanyJobPeerAcksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originGenerationMeta = const VerificationMeta(
+    'originGeneration',
+  );
+  @override
+  late final GeneratedColumn<String> originGeneration = GeneratedColumn<String>(
+    'origin_generation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requestIdMeta = const VerificationMeta(
+    'requestId',
+  );
+  @override
+  late final GeneratedColumn<String> requestId = GeneratedColumn<String>(
+    'request_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _peerDeviceIdMeta = const VerificationMeta(
+    'peerDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> peerDeviceId = GeneratedColumn<String>(
+    'peer_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationDigestMeta = const VerificationMeta(
+    'operationDigest',
+  );
+  @override
+  late final GeneratedColumn<String> operationDigest = GeneratedColumn<String>(
+    'operation_digest',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ackBytesMeta = const VerificationMeta(
+    'ackBytes',
+  );
+  @override
+  late final GeneratedColumn<String> ackBytes = GeneratedColumn<String>(
+    'ack_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+    operationDigest,
+    ackBytes,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'company_job_peer_acks';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CompanyJobPeerAck> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('origin_generation')) {
+      context.handle(
+        _originGenerationMeta,
+        originGeneration.isAcceptableOrUnknown(
+          data['origin_generation']!,
+          _originGenerationMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originGenerationMeta);
+    }
+    if (data.containsKey('request_id')) {
+      context.handle(
+        _requestIdMeta,
+        requestId.isAcceptableOrUnknown(data['request_id']!, _requestIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_requestIdMeta);
+    }
+    if (data.containsKey('peer_device_id')) {
+      context.handle(
+        _peerDeviceIdMeta,
+        peerDeviceId.isAcceptableOrUnknown(
+          data['peer_device_id']!,
+          _peerDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_peerDeviceIdMeta);
+    }
+    if (data.containsKey('operation_digest')) {
+      context.handle(
+        _operationDigestMeta,
+        operationDigest.isAcceptableOrUnknown(
+          data['operation_digest']!,
+          _operationDigestMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_operationDigestMeta);
+    }
+    if (data.containsKey('ack_bytes')) {
+      context.handle(
+        _ackBytesMeta,
+        ackBytes.isAcceptableOrUnknown(data['ack_bytes']!, _ackBytesMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ackBytesMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+  };
+  @override
+  CompanyJobPeerAck map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CompanyJobPeerAck(
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      originGeneration: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_generation'],
+      )!,
+      requestId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_id'],
+      )!,
+      peerDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_device_id'],
+      )!,
+      operationDigest: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation_digest'],
+      )!,
+      ackBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ack_bytes'],
+      )!,
+    );
+  }
+
+  @override
+  $CompanyJobPeerAcksTable createAlias(String alias) {
+    return $CompanyJobPeerAcksTable(attachedDatabase, alias);
+  }
+}
+
+class CompanyJobPeerAck extends DataClass
+    implements Insertable<CompanyJobPeerAck> {
+  final String companyId;
+  final String originGeneration;
+  final String requestId;
+  final String peerDeviceId;
+  final String operationDigest;
+  final String ackBytes;
+  const CompanyJobPeerAck({
+    required this.companyId,
+    required this.originGeneration,
+    required this.requestId,
+    required this.peerDeviceId,
+    required this.operationDigest,
+    required this.ackBytes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['company_id'] = Variable<String>(companyId);
+    map['origin_generation'] = Variable<String>(originGeneration);
+    map['request_id'] = Variable<String>(requestId);
+    map['peer_device_id'] = Variable<String>(peerDeviceId);
+    map['operation_digest'] = Variable<String>(operationDigest);
+    map['ack_bytes'] = Variable<String>(ackBytes);
+    return map;
+  }
+
+  CompanyJobPeerAcksCompanion toCompanion(bool nullToAbsent) {
+    return CompanyJobPeerAcksCompanion(
+      companyId: Value(companyId),
+      originGeneration: Value(originGeneration),
+      requestId: Value(requestId),
+      peerDeviceId: Value(peerDeviceId),
+      operationDigest: Value(operationDigest),
+      ackBytes: Value(ackBytes),
+    );
+  }
+
+  factory CompanyJobPeerAck.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CompanyJobPeerAck(
+      companyId: serializer.fromJson<String>(json['companyId']),
+      originGeneration: serializer.fromJson<String>(json['originGeneration']),
+      requestId: serializer.fromJson<String>(json['requestId']),
+      peerDeviceId: serializer.fromJson<String>(json['peerDeviceId']),
+      operationDigest: serializer.fromJson<String>(json['operationDigest']),
+      ackBytes: serializer.fromJson<String>(json['ackBytes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'companyId': serializer.toJson<String>(companyId),
+      'originGeneration': serializer.toJson<String>(originGeneration),
+      'requestId': serializer.toJson<String>(requestId),
+      'peerDeviceId': serializer.toJson<String>(peerDeviceId),
+      'operationDigest': serializer.toJson<String>(operationDigest),
+      'ackBytes': serializer.toJson<String>(ackBytes),
+    };
+  }
+
+  CompanyJobPeerAck copyWith({
+    String? companyId,
+    String? originGeneration,
+    String? requestId,
+    String? peerDeviceId,
+    String? operationDigest,
+    String? ackBytes,
+  }) => CompanyJobPeerAck(
+    companyId: companyId ?? this.companyId,
+    originGeneration: originGeneration ?? this.originGeneration,
+    requestId: requestId ?? this.requestId,
+    peerDeviceId: peerDeviceId ?? this.peerDeviceId,
+    operationDigest: operationDigest ?? this.operationDigest,
+    ackBytes: ackBytes ?? this.ackBytes,
+  );
+  CompanyJobPeerAck copyWithCompanion(CompanyJobPeerAcksCompanion data) {
+    return CompanyJobPeerAck(
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      originGeneration: data.originGeneration.present
+          ? data.originGeneration.value
+          : this.originGeneration,
+      requestId: data.requestId.present ? data.requestId.value : this.requestId,
+      peerDeviceId: data.peerDeviceId.present
+          ? data.peerDeviceId.value
+          : this.peerDeviceId,
+      operationDigest: data.operationDigest.present
+          ? data.operationDigest.value
+          : this.operationDigest,
+      ackBytes: data.ackBytes.present ? data.ackBytes.value : this.ackBytes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobPeerAck(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('peerDeviceId: $peerDeviceId, ')
+          ..write('operationDigest: $operationDigest, ')
+          ..write('ackBytes: $ackBytes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    companyId,
+    originGeneration,
+    requestId,
+    peerDeviceId,
+    operationDigest,
+    ackBytes,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CompanyJobPeerAck &&
+          other.companyId == this.companyId &&
+          other.originGeneration == this.originGeneration &&
+          other.requestId == this.requestId &&
+          other.peerDeviceId == this.peerDeviceId &&
+          other.operationDigest == this.operationDigest &&
+          other.ackBytes == this.ackBytes);
+}
+
+class CompanyJobPeerAcksCompanion extends UpdateCompanion<CompanyJobPeerAck> {
+  final Value<String> companyId;
+  final Value<String> originGeneration;
+  final Value<String> requestId;
+  final Value<String> peerDeviceId;
+  final Value<String> operationDigest;
+  final Value<String> ackBytes;
+  final Value<int> rowid;
+  const CompanyJobPeerAcksCompanion({
+    this.companyId = const Value.absent(),
+    this.originGeneration = const Value.absent(),
+    this.requestId = const Value.absent(),
+    this.peerDeviceId = const Value.absent(),
+    this.operationDigest = const Value.absent(),
+    this.ackBytes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CompanyJobPeerAcksCompanion.insert({
+    required String companyId,
+    required String originGeneration,
+    required String requestId,
+    required String peerDeviceId,
+    required String operationDigest,
+    required String ackBytes,
+    this.rowid = const Value.absent(),
+  }) : companyId = Value(companyId),
+       originGeneration = Value(originGeneration),
+       requestId = Value(requestId),
+       peerDeviceId = Value(peerDeviceId),
+       operationDigest = Value(operationDigest),
+       ackBytes = Value(ackBytes);
+  static Insertable<CompanyJobPeerAck> custom({
+    Expression<String>? companyId,
+    Expression<String>? originGeneration,
+    Expression<String>? requestId,
+    Expression<String>? peerDeviceId,
+    Expression<String>? operationDigest,
+    Expression<String>? ackBytes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (companyId != null) 'company_id': companyId,
+      if (originGeneration != null) 'origin_generation': originGeneration,
+      if (requestId != null) 'request_id': requestId,
+      if (peerDeviceId != null) 'peer_device_id': peerDeviceId,
+      if (operationDigest != null) 'operation_digest': operationDigest,
+      if (ackBytes != null) 'ack_bytes': ackBytes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CompanyJobPeerAcksCompanion copyWith({
+    Value<String>? companyId,
+    Value<String>? originGeneration,
+    Value<String>? requestId,
+    Value<String>? peerDeviceId,
+    Value<String>? operationDigest,
+    Value<String>? ackBytes,
+    Value<int>? rowid,
+  }) {
+    return CompanyJobPeerAcksCompanion(
+      companyId: companyId ?? this.companyId,
+      originGeneration: originGeneration ?? this.originGeneration,
+      requestId: requestId ?? this.requestId,
+      peerDeviceId: peerDeviceId ?? this.peerDeviceId,
+      operationDigest: operationDigest ?? this.operationDigest,
+      ackBytes: ackBytes ?? this.ackBytes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (originGeneration.present) {
+      map['origin_generation'] = Variable<String>(originGeneration.value);
+    }
+    if (requestId.present) {
+      map['request_id'] = Variable<String>(requestId.value);
+    }
+    if (peerDeviceId.present) {
+      map['peer_device_id'] = Variable<String>(peerDeviceId.value);
+    }
+    if (operationDigest.present) {
+      map['operation_digest'] = Variable<String>(operationDigest.value);
+    }
+    if (ackBytes.present) {
+      map['ack_bytes'] = Variable<String>(ackBytes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CompanyJobPeerAcksCompanion(')
+          ..write('companyId: $companyId, ')
+          ..write('originGeneration: $originGeneration, ')
+          ..write('requestId: $requestId, ')
+          ..write('peerDeviceId: $peerDeviceId, ')
+          ..write('operationDigest: $operationDigest, ')
+          ..write('ackBytes: $ackBytes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $JobLinesTable extends JobLines with TableInfo<$JobLinesTable, JobLine> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -13687,6 +14129,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   );
   late final $JobsTable jobs = $JobsTable(this);
   late final $CompanyJobsTable companyJobs = $CompanyJobsTable(this);
+  late final $CompanyJobPeerAcksTable companyJobPeerAcks =
+      $CompanyJobPeerAcksTable(this);
   late final $JobLinesTable jobLines = $JobLinesTable(this);
   late final $OrderSplitsTable orderSplits = $OrderSplitsTable(this);
   late final $CompanyBootstrapWitnessesTable companyBootstrapWitnesses =
@@ -13737,6 +14181,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     supplierListings,
     jobs,
     companyJobs,
+    companyJobPeerAcks,
     jobLines,
     orderSplits,
     companyBootstrapWitnesses,
@@ -14017,11 +14462,12 @@ class $$AppSettingsTableTableManager
               $$AppSettingsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
               $$AppSettingsTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback: ({
-            Value<String> key = const Value.absent(),
-            Value<String> value = const Value.absent(),
-            Value<int> rowid = const Value.absent(),
-          }) => AppSettingsCompanion(key: key, value: value, rowid: rowid),
+          updateCompanionCallback:
+              ({
+                Value<String> key = const Value.absent(),
+                Value<String> value = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppSettingsCompanion(key: key, value: value, rowid: rowid),
           createCompanionCallback:
               ({
                 required String key,
@@ -14057,26 +14503,28 @@ typedef $$AppSettingsTableProcessedTableManager =
       AppSetting,
       PrefetchHooks Function()
     >;
-typedef $$CategoriesTableCreateCompanionBuilder = CategoriesCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String name,
-  Value<int> rowid,
-});
-typedef $$CategoriesTableUpdateCompanionBuilder = CategoriesCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> name,
-  Value<int> rowid,
-});
+typedef $$CategoriesTableCreateCompanionBuilder =
+    CategoriesCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$CategoriesTableUpdateCompanionBuilder =
+    CategoriesCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<int> rowid,
+    });
 
 class $$CategoriesTableFilterComposer
     extends Composer<_$AppDatabase, $CategoriesTable> {
@@ -14291,28 +14739,30 @@ typedef $$CategoriesTableProcessedTableManager =
       Category,
       PrefetchHooks Function()
     >;
-typedef $$StylesTableCreateCompanionBuilder = StylesCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String categoryId,
-  required String name,
-  Value<int> rowid,
-});
-typedef $$StylesTableUpdateCompanionBuilder = StylesCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> categoryId,
-  Value<String> name,
-  Value<int> rowid,
-});
+typedef $$StylesTableCreateCompanionBuilder =
+    StylesCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String categoryId,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$StylesTableUpdateCompanionBuilder =
+    StylesCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> categoryId,
+      Value<String> name,
+      Value<int> rowid,
+    });
 
 class $$StylesTableFilterComposer
     extends Composer<_$AppDatabase, $StylesTable> {
@@ -14546,28 +14996,30 @@ typedef $$StylesTableProcessedTableManager =
       Style,
       PrefetchHooks Function()
     >;
-typedef $$TypesTableCreateCompanionBuilder = TypesCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String styleId,
-  required String name,
-  Value<int> rowid,
-});
-typedef $$TypesTableUpdateCompanionBuilder = TypesCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> styleId,
-  Value<String> name,
-  Value<int> rowid,
-});
+typedef $$TypesTableCreateCompanionBuilder =
+    TypesCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String styleId,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$TypesTableUpdateCompanionBuilder =
+    TypesCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> styleId,
+      Value<String> name,
+      Value<int> rowid,
+    });
 
 class $$TypesTableFilterComposer extends Composer<_$AppDatabase, $TypesTable> {
   $$TypesTableFilterComposer({
@@ -14798,26 +15250,28 @@ typedef $$TypesTableProcessedTableManager =
       Type,
       PrefetchHooks Function()
     >;
-typedef $$DevicesTableCreateCompanionBuilder = DevicesCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String name,
-  Value<int> rowid,
-});
-typedef $$DevicesTableUpdateCompanionBuilder = DevicesCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> name,
-  Value<int> rowid,
-});
+typedef $$DevicesTableCreateCompanionBuilder =
+    DevicesCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$DevicesTableUpdateCompanionBuilder =
+    DevicesCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<int> rowid,
+    });
 
 class $$DevicesTableFilterComposer
     extends Composer<_$AppDatabase, $DevicesTable> {
@@ -15032,26 +15486,28 @@ typedef $$DevicesTableProcessedTableManager =
       Device,
       PrefetchHooks Function()
     >;
-typedef $$BrandsTableCreateCompanionBuilder = BrandsCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String name,
-  Value<int> rowid,
-});
-typedef $$BrandsTableUpdateCompanionBuilder = BrandsCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> name,
-  Value<int> rowid,
-});
+typedef $$BrandsTableCreateCompanionBuilder =
+    BrandsCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$BrandsTableUpdateCompanionBuilder =
+    BrandsCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<int> rowid,
+    });
 
 class $$BrandsTableFilterComposer
     extends Composer<_$AppDatabase, $BrandsTable> {
@@ -15266,26 +15722,28 @@ typedef $$BrandsTableProcessedTableManager =
       Brand,
       PrefetchHooks Function()
     >;
-typedef $$SuppliersTableCreateCompanionBuilder = SuppliersCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String name,
-  Value<int> rowid,
-});
-typedef $$SuppliersTableUpdateCompanionBuilder = SuppliersCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> name,
-  Value<int> rowid,
-});
+typedef $$SuppliersTableCreateCompanionBuilder =
+    SuppliersCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<int> rowid,
+    });
+typedef $$SuppliersTableUpdateCompanionBuilder =
+    SuppliersCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<int> rowid,
+    });
 
 class $$SuppliersTableFilterComposer
     extends Composer<_$AppDatabase, $SuppliersTable> {
@@ -15500,46 +15958,48 @@ typedef $$SuppliersTableProcessedTableManager =
       Supplier,
       PrefetchHooks Function()
     >;
-typedef $$PartsTableCreateCompanionBuilder = PartsCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String name,
-  Value<String> description,
-  Value<String?> categoryId,
-  Value<String?> styleId,
-  Value<String?> typeId,
-  Value<String> uom,
-  Value<String> specs,
-  Value<String> keywords,
-  Value<String?> photoPath,
-  Value<bool> active,
-  Value<String?> defaultSupplierId,
-  Value<int> rowid,
-});
-typedef $$PartsTableUpdateCompanionBuilder = PartsCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> name,
-  Value<String> description,
-  Value<String?> categoryId,
-  Value<String?> styleId,
-  Value<String?> typeId,
-  Value<String> uom,
-  Value<String> specs,
-  Value<String> keywords,
-  Value<String?> photoPath,
-  Value<bool> active,
-  Value<String?> defaultSupplierId,
-  Value<int> rowid,
-});
+typedef $$PartsTableCreateCompanionBuilder =
+    PartsCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<String> description,
+      Value<String?> categoryId,
+      Value<String?> styleId,
+      Value<String?> typeId,
+      Value<String> uom,
+      Value<String> specs,
+      Value<String> keywords,
+      Value<String?> photoPath,
+      Value<bool> active,
+      Value<String?> defaultSupplierId,
+      Value<int> rowid,
+    });
+typedef $$PartsTableUpdateCompanionBuilder =
+    PartsCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<String> description,
+      Value<String?> categoryId,
+      Value<String?> styleId,
+      Value<String?> typeId,
+      Value<String> uom,
+      Value<String> specs,
+      Value<String> keywords,
+      Value<String?> photoPath,
+      Value<bool> active,
+      Value<String?> defaultSupplierId,
+      Value<int> rowid,
+    });
 
 class $$PartsTableFilterComposer extends Composer<_$AppDatabase, $PartsTable> {
   $$PartsTableFilterComposer({
@@ -16920,36 +17380,38 @@ typedef $$SupplierListingsTableProcessedTableManager =
       SupplierListing,
       PrefetchHooks Function()
     >;
-typedef $$JobsTableCreateCompanionBuilder = JobsCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String name,
-  Value<String?> customer,
-  Value<String?> location,
-  Value<String?> jobNumber,
-  Value<String> status,
-  Value<String?> notes,
-  Value<int> rowid,
-});
-typedef $$JobsTableUpdateCompanionBuilder = JobsCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> name,
-  Value<String?> customer,
-  Value<String?> location,
-  Value<String?> jobNumber,
-  Value<String> status,
-  Value<String?> notes,
-  Value<int> rowid,
-});
+typedef $$JobsTableCreateCompanionBuilder =
+    JobsCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String name,
+      Value<String?> customer,
+      Value<String?> location,
+      Value<String?> jobNumber,
+      Value<String> status,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+typedef $$JobsTableUpdateCompanionBuilder =
+    JobsCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> name,
+      Value<String?> customer,
+      Value<String?> location,
+      Value<String?> jobNumber,
+      Value<String> status,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
 
 class $$JobsTableFilterComposer extends Composer<_$AppDatabase, $JobsTable> {
   $$JobsTableFilterComposer({
@@ -17615,42 +18077,282 @@ typedef $$CompanyJobsTableProcessedTableManager =
       CompanyJob,
       PrefetchHooks Function()
     >;
-typedef $$JobLinesTableCreateCompanionBuilder = JobLinesCompanion Function({
-  required String id,
-  required String originDeviceId,
-  required DateTime createdAt,
-  required DateTime modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  required String jobId,
-  Value<String?> partId,
-  Value<String?> customName,
-  Value<String?> customNotes,
-  Value<String?> brandVersionId,
-  required double neededQty,
-  Value<double> shopPullQty,
-  Value<String?> uom,
-  Value<String?> notes,
-  Value<int> rowid,
-});
-typedef $$JobLinesTableUpdateCompanionBuilder = JobLinesCompanion Function({
-  Value<String> id,
-  Value<String> originDeviceId,
-  Value<DateTime> createdAt,
-  Value<DateTime> modifiedAt,
-  Value<int> revision,
-  Value<DateTime?> deletedAt,
-  Value<String> jobId,
-  Value<String?> partId,
-  Value<String?> customName,
-  Value<String?> customNotes,
-  Value<String?> brandVersionId,
-  Value<double> neededQty,
-  Value<double> shopPullQty,
-  Value<String?> uom,
-  Value<String?> notes,
-  Value<int> rowid,
-});
+typedef $$CompanyJobPeerAcksTableCreateCompanionBuilder =
+    CompanyJobPeerAcksCompanion Function({
+      required String companyId,
+      required String originGeneration,
+      required String requestId,
+      required String peerDeviceId,
+      required String operationDigest,
+      required String ackBytes,
+      Value<int> rowid,
+    });
+typedef $$CompanyJobPeerAcksTableUpdateCompanionBuilder =
+    CompanyJobPeerAcksCompanion Function({
+      Value<String> companyId,
+      Value<String> originGeneration,
+      Value<String> requestId,
+      Value<String> peerDeviceId,
+      Value<String> operationDigest,
+      Value<String> ackBytes,
+      Value<int> rowid,
+    });
+
+class $$CompanyJobPeerAcksTableFilterComposer
+    extends Composer<_$AppDatabase, $CompanyJobPeerAcksTable> {
+  $$CompanyJobPeerAcksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operationDigest => $composableBuilder(
+    column: $table.operationDigest,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ackBytes => $composableBuilder(
+    column: $table.ackBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CompanyJobPeerAcksTableOrderingComposer
+    extends Composer<_$AppDatabase, $CompanyJobPeerAcksTable> {
+  $$CompanyJobPeerAcksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestId => $composableBuilder(
+    column: $table.requestId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operationDigest => $composableBuilder(
+    column: $table.operationDigest,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ackBytes => $composableBuilder(
+    column: $table.ackBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CompanyJobPeerAcksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CompanyJobPeerAcksTable> {
+  $$CompanyJobPeerAcksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get originGeneration => $composableBuilder(
+    column: $table.originGeneration,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestId =>
+      $composableBuilder(column: $table.requestId, builder: (column) => column);
+
+  GeneratedColumn<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get operationDigest => $composableBuilder(
+    column: $table.operationDigest,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ackBytes =>
+      $composableBuilder(column: $table.ackBytes, builder: (column) => column);
+}
+
+class $$CompanyJobPeerAcksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CompanyJobPeerAcksTable,
+          CompanyJobPeerAck,
+          $$CompanyJobPeerAcksTableFilterComposer,
+          $$CompanyJobPeerAcksTableOrderingComposer,
+          $$CompanyJobPeerAcksTableAnnotationComposer,
+          $$CompanyJobPeerAcksTableCreateCompanionBuilder,
+          $$CompanyJobPeerAcksTableUpdateCompanionBuilder,
+          (
+            CompanyJobPeerAck,
+            BaseReferences<
+              _$AppDatabase,
+              $CompanyJobPeerAcksTable,
+              CompanyJobPeerAck
+            >,
+          ),
+          CompanyJobPeerAck,
+          PrefetchHooks Function()
+        > {
+  $$CompanyJobPeerAcksTableTableManager(
+    _$AppDatabase db,
+    $CompanyJobPeerAcksTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CompanyJobPeerAcksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CompanyJobPeerAcksTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CompanyJobPeerAcksTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> companyId = const Value.absent(),
+                Value<String> originGeneration = const Value.absent(),
+                Value<String> requestId = const Value.absent(),
+                Value<String> peerDeviceId = const Value.absent(),
+                Value<String> operationDigest = const Value.absent(),
+                Value<String> ackBytes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobPeerAcksCompanion(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                peerDeviceId: peerDeviceId,
+                operationDigest: operationDigest,
+                ackBytes: ackBytes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String companyId,
+                required String originGeneration,
+                required String requestId,
+                required String peerDeviceId,
+                required String operationDigest,
+                required String ackBytes,
+                Value<int> rowid = const Value.absent(),
+              }) => CompanyJobPeerAcksCompanion.insert(
+                companyId: companyId,
+                originGeneration: originGeneration,
+                requestId: requestId,
+                peerDeviceId: peerDeviceId,
+                operationDigest: operationDigest,
+                ackBytes: ackBytes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CompanyJobPeerAcksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CompanyJobPeerAcksTable,
+      CompanyJobPeerAck,
+      $$CompanyJobPeerAcksTableFilterComposer,
+      $$CompanyJobPeerAcksTableOrderingComposer,
+      $$CompanyJobPeerAcksTableAnnotationComposer,
+      $$CompanyJobPeerAcksTableCreateCompanionBuilder,
+      $$CompanyJobPeerAcksTableUpdateCompanionBuilder,
+      (
+        CompanyJobPeerAck,
+        BaseReferences<
+          _$AppDatabase,
+          $CompanyJobPeerAcksTable,
+          CompanyJobPeerAck
+        >,
+      ),
+      CompanyJobPeerAck,
+      PrefetchHooks Function()
+    >;
+typedef $$JobLinesTableCreateCompanionBuilder =
+    JobLinesCompanion Function({
+      required String id,
+      required String originDeviceId,
+      required DateTime createdAt,
+      required DateTime modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      required String jobId,
+      Value<String?> partId,
+      Value<String?> customName,
+      Value<String?> customNotes,
+      Value<String?> brandVersionId,
+      required double neededQty,
+      Value<double> shopPullQty,
+      Value<String?> uom,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+typedef $$JobLinesTableUpdateCompanionBuilder =
+    JobLinesCompanion Function({
+      Value<String> id,
+      Value<String> originDeviceId,
+      Value<DateTime> createdAt,
+      Value<DateTime> modifiedAt,
+      Value<int> revision,
+      Value<DateTime?> deletedAt,
+      Value<String> jobId,
+      Value<String?> partId,
+      Value<String?> customName,
+      Value<String?> customNotes,
+      Value<String?> brandVersionId,
+      Value<double> neededQty,
+      Value<double> shopPullQty,
+      Value<String?> uom,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
 
 class $$JobLinesTableFilterComposer
     extends Composer<_$AppDatabase, $JobLinesTable> {
@@ -20751,6 +21453,8 @@ class $AppDatabaseManager {
   $$JobsTableTableManager get jobs => $$JobsTableTableManager(_db, _db.jobs);
   $$CompanyJobsTableTableManager get companyJobs =>
       $$CompanyJobsTableTableManager(_db, _db.companyJobs);
+  $$CompanyJobPeerAcksTableTableManager get companyJobPeerAcks =>
+      $$CompanyJobPeerAcksTableTableManager(_db, _db.companyJobPeerAcks);
   $$JobLinesTableTableManager get jobLines =>
       $$JobLinesTableTableManager(_db, _db.jobLines);
   $$OrderSplitsTableTableManager get orderSplits =>

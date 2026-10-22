@@ -15,3 +15,4 @@ part 'job_line_reducer.dart';
 part 'job_line_store.dart';
 
 part 'create_job.dart';
+part 'create_job_sync.dart';

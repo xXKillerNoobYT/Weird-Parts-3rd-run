@@ -18,7 +18,19 @@ const companyMarkerTables = [
   'company_membership_certificates',
   'company_join_requests',
   'company_join_events',
+  'company_job_peer_acks',
 ];
+
+const companySyncTableColumns = <String, Set<String>>{
+  'company_job_peer_acks': {
+    'company_id',
+    'origin_generation',
+    'request_id',
+    'peer_device_id',
+    'operation_digest',
+    'ack_bytes',
+  },
+};
 
 const companyJoinTableColumns = <String, Set<String>>{
   'company_membership_certificates': {
@@ -55,13 +67,16 @@ Future<void> requireCompanyJoinSchema(AppDatabase db) async {
   if (version > kAppSchemaVersion) {
     throw StateError('A newer company schema requires a compatible app');
   }
-  if (version != 7) return;
-  for (final table in companyJoinTableColumns.keys) {
+  if (version < 7) return;
+  final expected = {
+    ...companyJoinTableColumns,
+    if (version >= 8) ...companySyncTableColumns,
+  };
+  for (final table in expected.keys) {
     final columns = await db.customSelect('PRAGMA table_info("$table")').get();
-    if (!companyJoinColumnsMatch(
-      table,
-      columns.map((r) => r.read<String>('name')),
-    )) {
+    final actual = columns.map((r) => r.read<String>('name')).toSet();
+    if (actual.length != expected[table]!.length ||
+        !actual.containsAll(expected[table]!)) {
       throw StateError('Unsupported or incomplete company enrollment schema');
     }
   }

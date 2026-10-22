@@ -38,6 +38,7 @@ final class CompanyBootstrap {
       'company_membership_certificates',
       'company_join_requests',
       'company_join_events',
+      'company_job_peer_acks',
       'job_lines',
       'order_splits',
       'company_bootstrap_witnesses',

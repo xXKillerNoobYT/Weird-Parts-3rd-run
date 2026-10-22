@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { isIPv4 } from 'node:net';
 
 const RUN = 'j60-join-v10';
+const ALLOWED_RUNS = new Set([RUN, 'j61-created-v16']);
 const REQUEST_PREFIX = 'wired-parts/j60-test-control/request/v1\n';
 const RESPONSE_PREFIX = 'wired-parts/j60-test-control/response/v1\n';
 const MAX_BODY = 16384;
@@ -63,9 +64,9 @@ function bounded(promise, milliseconds, onTimeout) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export function createJoinControlServer({ channelId, windowsPublicKeyDer, privateKey, peerAddress, now = Date.now, lifetimeMillis = 600000, handlerTimeoutMillis = 8000 }) {
+export function createJoinControlServer({ channelId, windowsPublicKeyDer, privateKey, peerAddress, run = RUN, now = Date.now, lifetimeMillis = 600000, handlerTimeoutMillis = 8000 }) {
   decode(channelId, 16, 16);
-  if (!isIPv4(peerAddress) || !Number.isInteger(lifetimeMillis) || lifetimeMillis < 1 || lifetimeMillis > 600000 || !Number.isInteger(handlerTimeoutMillis) || handlerTimeoutMillis < 1 || handlerTimeoutMillis > 8000 || typeof now !== 'function') throw new Error('Invalid local configuration');
+  if (!ALLOWED_RUNS.has(run) || !isIPv4(peerAddress) || !Number.isInteger(lifetimeMillis) || lifetimeMillis < 1 || lifetimeMillis > 600000 || !Number.isInteger(handlerTimeoutMillis) || handlerTimeoutMillis < 1 || handlerTimeoutMillis > 8000 || typeof now !== 'function') throw new Error('Invalid local configuration');
   const publicKey = createPublicKey({ key: decode(windowsPublicKeyDer, 128), format: 'der', type: 'spki' });
   if (publicKey.asymmetricKeyType !== 'ed25519' || privateKey?.type !== 'private' || privateKey.asymmetricKeyType !== 'ed25519') throw new Error('Ed25519 keys required');
   const expires = now() + lifetimeMillis;
@@ -103,7 +104,7 @@ export function createJoinControlServer({ channelId, windowsPublicKeyDer, privat
 
   function signed(payload, requestBytes, ok, result) {
     if (!ok && !ERRORS.has(result.error)) throw new Error('Invalid local error');
-    const raw = canonical({ version: 1, run: RUN, channelId, nonce: payload.nonce, requestSha256: createHash('sha256').update(requestBytes).digest('hex'), ok, result });
+    const raw = canonical({ version: 1, run, channelId, nonce: payload.nonce, requestSha256: createHash('sha256').update(requestBytes).digest('hex'), ok, result });
     if (Buffer.byteLength(raw) > MAX_PAYLOAD) throw new Error('Invalid local result');
     const body = JSON.stringify({ payload: Buffer.from(raw).toString('base64url'), signature: sign(null, Buffer.from(RESPONSE_PREFIX + raw), privateKey).toString('base64url') });
     if (Buffer.byteLength(body) > MAX_BODY) throw new Error('Invalid local result');
@@ -150,7 +151,7 @@ export function createJoinControlServer({ channelId, windowsPublicKeyDer, privat
     let error;
     if (!isLive || lane.kind === 'stopped') error = 'closed';
     else if (lane.kind === 'busy') error = 'busy';
-    else if (!shape(payload, ['version', 'run', 'channelId', 'op', 'nonce', 'expiresAtMillis', 'args']) || payload.version !== 1 || payload.run !== RUN || payload.channelId !== channelId) error = 'refused';
+    else if (!shape(payload, ['version', 'run', 'channelId', 'op', 'nonce', 'expiresAtMillis', 'args']) || payload.version !== 1 || payload.run !== run || payload.channelId !== channelId) error = 'refused';
     else if (!Number.isSafeInteger(payload.expiresAtMillis) || payload.expiresAtMillis <= now() || payload.expiresAtMillis - now() > 10000) error = 'expired';
     else if (nonces.has(payload.nonce)) error = 'replay';
     else if (payload.op === 'echo') {

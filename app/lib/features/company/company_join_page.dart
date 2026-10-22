@@ -15,12 +15,14 @@ class CompanyJoinPage extends StatefulWidget {
     this.approver,
     this.reconnect = false,
     this.createController,
+    this.onJobSyncDiagnostic,
     super.key,
   });
   final CompanyEnrollment enrollment;
   final OwnerSession? approver;
   final bool reconnect;
   final NearbyController Function(String encounterAlias)? createController;
+  final void Function(CreatedJobSyncDiagnostic)? onJobSyncDiagnostic;
   @override
   State<CompanyJoinPage> createState() => _CompanyJoinPageState();
 }
@@ -37,6 +39,10 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   Future<NearbyJoinChannel>? _channelPending;
   NearbyPairedJoinSession? _pair;
   VerifiedJoinRequest? _request;
+  VerifiedPeerMembership? _peerMembership;
+  CompanyCreatedJobSync? _jobSync;
+  Timer? _jobAvailabilityTimer;
+  String? _lastConfirmedJobSync;
   CompanyJoinPreview? _preview;
   String? _error;
   String _status = 'Pair and compare the code on both devices.';
@@ -83,6 +89,10 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     pair.requireCurrent();
     if (identical(pair, _pair)) return _channelPending!;
     _channel?.close();
+    _jobAvailabilityTimer?.cancel();
+    _jobSync?.close();
+    _jobSync = null;
+    _peerMembership = null;
     _channel = null;
     _pair = pair;
     _request = null;
@@ -110,6 +120,44 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     NearbyPairedJoinSession pair,
     Map<String, Object?> wire,
   ) async {
+    if (widget.reconnect && wire['kind'] == 'created-jobs') {
+      const CreatedJobSyncDiagnostic.receiverEntered().notify(
+        widget.onJobSyncDiagnostic,
+      );
+      late CompanyCreatedJobSync sync;
+      try {
+        await _currentChannel(pair);
+        final current = _jobSync;
+        if (current == null) {
+          throw const CompanyBootstrapRefusal('Enable manual Job sync first');
+        }
+        sync = current;
+      } catch (error) {
+        final result = CreatedJobSyncResult(
+          0,
+          0,
+          false,
+          0,
+          failure: CreatedJobSyncFailure.fromError(
+            error,
+            CreatedJobSyncStage.channel,
+          ),
+        );
+        if (mounted && !_closed) setState(() => _status = result.message);
+        CreatedJobSyncDiagnostic.terminal(
+          result,
+          receiverCallbackReached: true,
+        ).notify(widget.onJobSyncDiagnostic);
+        rethrow;
+      }
+      final receiving = sync.receive(wire);
+      if (mounted && !_closed) setState(() {});
+      try {
+        return await receiving;
+      } finally {
+        if (mounted && !_closed) setState(() {});
+      }
+    }
     final channel = await _currentChannel(pair);
     if (widget.reconnect) {
       Map<String, Object?>? reply;
@@ -127,6 +175,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
           wire,
         );
         await result.membership.requireCurrent();
+        _peerMembership = result.membership;
         reply = result.acknowledgment;
         if (mounted) {
           setState(
@@ -135,13 +184,15 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
           );
         }
       } else if (wire['kind'] == 'peer-ack') {
-        await (await _authentication.receivePeerAcknowledgment(
+        final membership = await _authentication.receivePeerAcknowledgment(
           channel,
           wire,
-        )).requireCurrent();
+        );
+        await membership.requireCurrent();
+        _peerMembership = membership;
         if (mounted) {
           setState(
-            () => _status = 'Trusted peer authenticated for this live connection. Job catch-up remains unavailable.',
+            () => _status = 'Trusted peer authenticated. Verification alone does not exchange Jobs.',
           );
         }
       } else {
@@ -193,6 +244,64 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
     }
+  }
+
+  Future<void> _enableJobSync() async {
+    final peer = _peerMembership;
+    if (peer == null) {
+      throw const CompanyBootstrapRefusal('Verify the retained peer first');
+    }
+    final available = await CompanyJobSyncAvailability.open(
+      enrollment: widget.enrollment,
+      owner: widget.approver!,
+      peer: peer,
+    );
+    if (!mounted || _closed) {
+      available.close();
+      return;
+    }
+    final sync = _jobSync = CompanyCreatedJobSync(
+      availability: available,
+      controller: _controller,
+      onDiagnostic: (diagnostic) =>
+          diagnostic.notify(widget.onJobSyncDiagnostic),
+      onStatus: (status) {
+        if (mounted && !_closed) {
+          setState(() {
+            _status = status;
+            if (status.startsWith('Job snapshot synced.')) {
+              _lastConfirmedJobSync = status;
+            }
+          });
+        }
+      },
+    );
+    _jobAvailabilityTimer?.cancel();
+    final remaining =
+        _controller.pairedJoinSession?.timeUntilExpiry ?? Duration.zero;
+    _jobAvailabilityTimer = Timer(
+      remaining + const Duration(milliseconds: 1),
+      () {
+        if (mounted && !_closed && identical(_jobSync, sync)) {
+          setState(() {});
+        }
+      },
+    );
+    setState(
+      () => _status = 'Ready to exchange Jobs with this verified peer while this page is open and unlocked. Either device can choose Sync Now.',
+    );
+  }
+
+  Future<void> _syncJobs() async {
+    final sync = _jobSync;
+    if (sync == null) {
+      throw const CompanyBootstrapRefusal('Enable manual Job sync first');
+    }
+    setState(
+      () => _status = 'Exchanging offline-created Jobs in both directions.',
+    );
+    final result = await sync.syncNow();
+    if (mounted && !_closed) setState(() => _status = result.message);
   }
 
   Future<void> _challenge() async {
@@ -279,12 +388,14 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
     if (mounted) {
       setState(() {
         _confirmed = true;
-        _status = 'Joined. Sign in with the existing company PIN. Jobs arrive only through a later catch-up feature.';
+        _status = 'Joined. Sign in with the existing company PIN. Reconnect to the trusted peer and enable Job availability to use Sync Now.';
       });
     }
   }
 
   Future<void> _cancel() async {
+    _jobAvailabilityTimer?.cancel();
+    await _jobSync?.closeAndDrain();
     _channel?.close();
     await _controller.stop();
     if (mounted) Navigator.of(context).pop(_activated);
@@ -293,6 +404,8 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
+      _jobAvailabilityTimer?.cancel();
+      _jobSync?.close();
       _channel?.close();
       _controller.stop();
       if (mounted) {
@@ -309,6 +422,8 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
 
   @override
   void dispose() {
+    _jobAvailabilityTimer?.cancel();
+    _jobSync?.close();
     WidgetsBinding.instance.removeObserver(this);
     _channel?.close();
     _controller.onJoinMessage = null;
@@ -331,6 +446,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
       );
     }
     final state = _controller.state;
+    final jobsLive = _jobSync?.isLive ?? false;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -348,6 +464,18 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
             'Use the same Wi-Fi. Match establishes a private channel; company access still requires approval and consent.',
           ),
           Text(_status, key: const Key('company-join-status')),
+          if (_busy)
+            const LinearProgressIndicator(key: Key('company-join-busy')),
+          if (_lastConfirmedJobSync case final confirmed?)
+            if (_status != confirmed || !jobsLive)
+              Text(
+                'Last successful exchange: $confirmed',
+                key: const Key('company-jobs-last-confirmed'),
+              ),
+          if (_jobSync != null && !jobsLive)
+            const Text(
+              'This connection is no longer available. Pair again and verify the company device.',
+            ),
           if (_error ?? state.error case final error?)
             Text(error, key: const Key('company-join-error')),
           if (state.verifyCode case final code?) ...[
@@ -396,6 +524,20 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
                   : () => _run(_challenge),
               child: const Text('Verify selected retained peer'),
             ),
+            if (_peerMembership != null && _jobSync == null)
+              FilledButton(
+                key: const Key('company-jobs-enable-sync'),
+                onPressed: _busy ? null : () => _run(_enableJobSync),
+                child: const Text('Make Jobs available to this verified peer'),
+              ),
+            if (_jobSync != null)
+              FilledButton(
+                key: const Key('company-jobs-sync-now'),
+                onPressed: _busy || !jobsLive || (_jobSync?.isRunning ?? false)
+                    ? null
+                    : () => _run(_syncJobs),
+                child: const Text('Sync Now'),
+              ),
           ],
           if (!widget.reconnect &&
               !_approving &&

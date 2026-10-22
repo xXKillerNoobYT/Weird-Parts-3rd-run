@@ -16,7 +16,9 @@ import '../../data/app_database.dart';
 import '../company/company_bootstrap.dart';
 import '../company/company_store_markers.dart';
 import '../nearby/nearby_pairing.dart';
-import '../nearby/nearby_controller.dart' show NearbyPairedJoinSession;
+import '../nearby/nearby_protocol.dart' show NearbyException;
+import '../nearby/nearby_controller.dart'
+    show NearbyPairedJoinSession, NearbyController, NearbyCompanyDisclosure;
 import '../job_line_commands/job_line_commands.dart'
     show
         JobLineCommand,
@@ -27,7 +29,11 @@ import '../job_line_commands/job_line_commands.dart'
         VerifiedCreateJobSession,
         CreateJob,
         CreateJobAuthorization,
+        CompanyJobCommands,
+        CompanyJobSyncCommands,
         validateCreateJobCommit,
+        validateIncomingCreateJobCommit,
+        verifyIncomingCreateJobReceipt,
         JobLineCommandReceipt,
         decodeJobLineReceipt;
 
@@ -35,6 +41,7 @@ part '../company/company_protocol.dart';
 part '../company/company_join.dart';
 part '../company/company_membership.dart';
 part '../company/company_peer_authentication.dart';
+part '../company/company_created_job_sync.dart';
 part '../nearby/nearby_join_envelope.dart';
 
 const kInstallationBindingKey = 'local_installation_binding_v1';
@@ -139,7 +146,8 @@ Future<String> _companyCommandWitness(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
-  if (intent.family == CompanyCommandFamily.jobCreate) {
+  if (intent.family == CompanyCommandFamily.jobCreate ||
+      intent.family == CompanyCommandFamily.jobCreateIncoming) {
     final records =
         await (db.select(db.companyJobs)..where(
               (t) =>
@@ -234,6 +242,9 @@ Future<void> _validateCompanyCommit(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
+  if (intent.family == CompanyCommandFamily.jobCreateIncoming) {
+    return validateIncomingCreateJobCommit(db, intent);
+  }
   if (intent.family == CompanyCommandFamily.jobCreate) {
     return validateCreateJobCommit(db, intent);
   }
@@ -328,7 +339,8 @@ Future<JobLineReceipt?> _companyCommandReceipt(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
-  if (intent.family == CompanyCommandFamily.jobCreate) {
+  if (intent.family == CompanyCommandFamily.jobCreate ||
+      intent.family == CompanyCommandFamily.jobCreateIncoming) {
     final row = await (db.select(
       db.companyJobs,
     )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingleOrNull();
@@ -348,7 +360,24 @@ Future<JobLineReceipt?> _companyCommandReceipt(
   )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingleOrNull();
 }
 
-enum CompanyCommandFamily { jobLinePatch, jobCreate }
+enum CompanyCommandFamily { jobLinePatch, jobCreate, jobCreateIncoming }
+
+Future<void> _verifyCompanyReceipt(
+  String bytes,
+  InstallationIdentity identity,
+  String store,
+  CompanyCommandFamily family,
+) async {
+  if (family == CompanyCommandFamily.jobCreateIncoming) {
+    return verifyIncomingCreateJobReceipt(bytes, identity, store);
+  }
+  return JobLineCommandReceipt.verifyAdmissionSeal(
+    bytes,
+    identity,
+    store,
+    expectedFamily: family,
+  );
+}
 
 final class CompanyCommandIntent {
   const CompanyCommandIntent({
@@ -391,6 +420,8 @@ final class CompanyCommandIntent {
       );
   Map<String, Object?> encode() => {
     if (family == CompanyCommandFamily.jobCreate) 'family': 'job.create@1',
+    if (family == CompanyCommandFamily.jobCreateIncoming)
+      'family': 'job.create.incoming@1',
     'receipt': receiptKey,
     'operation': operationCommitment,
     'command': commandCommitment,
@@ -405,7 +436,11 @@ final class CompanyCommandIntent {
   static CompanyCommandIntent decode(Object? raw) {
     if (raw is! Map<String, dynamic> ||
         !((raw.length == 10 && !raw.containsKey('family')) ||
-            (raw.length == 11 && raw['family'] == 'job.create@1')) ||
+            (raw.length == 11 &&
+                [
+                  'job.create@1',
+                  'job.create.incoming@1',
+                ].contains(raw['family']))) ||
         [
           'receipt',
           'operation',
@@ -432,6 +467,8 @@ final class CompanyCommandIntent {
     return CompanyCommandIntent(
       family: raw['family'] == 'job.create@1'
           ? CompanyCommandFamily.jobCreate
+          : raw['family'] == 'job.create.incoming@1'
+          ? CompanyCommandFamily.jobCreateIncoming
           : CompanyCommandFamily.jobLinePatch,
       receiptKey: raw['receipt'] as String,
       operationCommitment: raw['operation'] as String,
@@ -928,11 +965,11 @@ class InstallationSecurity {
       throw StateError('Pending command changed before commit');
     }
     final receipt = (await _companyCommandReceipt(db, intent))!;
-    await JobLineCommandReceipt.verifyAdmissionSeal(
+    await _verifyCompanyReceipt(
       receipt.receiptBytes,
       record.identity,
       record.storeGeneration.value,
-      expectedFamily: intent.family,
+      intent.family,
     );
     final sealed = intent.withWitness(
       after: await _companyCommandWitness(db, intent),
@@ -1120,13 +1157,15 @@ class InstallationSecurity {
           }
         } else {
           await _validateCompanyCommit(db, intent);
-          await JobLineCommandReceipt.verifyAdmissionSeal(
+          await _verifyCompanyReceipt(
             receipt.receiptBytes,
             next.identity,
             next.storeGeneration.value,
-            expectedFamily: intent.family,
+            intent.family,
           );
-          final value = decodeJobLineReceipt(receipt.receiptBytes);
+          final value = intent.family == CompanyCommandFamily.jobCreateIncoming
+              ? <String, Object?>{}
+              : decodeJobLineReceipt(receipt.receiptBytes);
           if (value['parent'] case final String parentKey) {
             final parent = await (db.select(
               db.jobLineReceipts,
