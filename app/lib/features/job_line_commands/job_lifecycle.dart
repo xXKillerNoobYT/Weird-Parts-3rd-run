@@ -462,7 +462,7 @@ Future<void> _validateMetadataLifecycle(
               (r) => r.family == JobOperationFamily.lifecycle,
             )
           : _canonical(heads) != _canonical(graph.lifecycleHeads))) {
-    throw const JobLineRefusal(
+    throw const _JobMetadataLifecycleRefusal(
       'Job lifecycle changed. Review the current Job before editing.',
     );
   }
@@ -473,10 +473,14 @@ Future<void> _validateMetadataLifecycle(
   // Lifecycle-only references may contain transitive ancestry; their maximal closure is checked below.
   final observed = graph.select(context);
   if (observed.state != CompanyJobLifecycleState.live) {
-    throw const JobLineRefusal(
+    throw const _JobMetadataLifecycleRefusal(
       'Deleted or deletion-conflicted Job cannot be edited',
     );
   }
+}
+
+final class _JobMetadataLifecycleRefusal extends JobLineRefusal {
+  const _JobMetadataLifecycleRefusal(super.reason);
 }
 
 const kCompanyJobLifecycleHistoryLimit = 128;

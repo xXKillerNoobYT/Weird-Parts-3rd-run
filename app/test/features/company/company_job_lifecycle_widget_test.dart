@@ -248,6 +248,130 @@ void main() {
       );
     },
   );
+  testWidgets(
+    'stale name save after deleting the edited Job keeps raw input cancelable without writes',
+    (tester) async {
+      final f = (await tester.runAsync(NameFixture.create))!;
+      addTearDown(f.close);
+      final otherJobId = const Uuid().v4();
+      await tester.runAsync(
+        () => f.commands.createJob(
+          CreateJob(
+            companyId: f.owner.identity.companyId,
+            shopId: f.owner.identity.shopId,
+            jobId: otherJobId,
+            requestId: const Uuid().v4(),
+            name: 'Other live Job',
+          ),
+          ownerSession: f.owner,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CompanyJobsPanel(commands: f.commands, owner: f.owner),
+            ),
+          ),
+        ),
+      );
+      final edit = find.byKey(Key('company-job-edit-${f.createCommand.jobId}'));
+      await waitForWidget(tester, edit);
+      await tester.ensureVisible(edit);
+      await tester.tap(edit);
+      await tester.pump();
+      final nameField = find.byKey(const Key('company-job-edit-name'));
+      const rawName = '  Unsaved name before deletion · exact  ';
+      await tester.enterText(nameField, rawName);
+      final delete = find.byKey(
+        Key('company-job-delete-${f.createCommand.jobId}'),
+      );
+      await tester.ensureVisible(delete);
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+      expect(find.text('Delete Job?'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.widgetWithText(FilledButton, 'Delete Job'));
+        await Future<void>.delayed(const Duration(seconds: 1));
+      });
+      await waitForWidget(tester, find.text('Deleted Job history'));
+      final deleted = (await tester.runAsync(() async {
+        final view = (await f.commands.listJobViews(ownerSession: f.owner))
+            .singleWhere((view) => view.baseJob.id == f.createCommand.jobId);
+        final protected = f.store.states[f.security.namespace]!;
+        return (
+          view: view,
+          sql: await sqlSnapshot(f.db),
+          protectedRevision: protected.revision,
+          protectedBytes: Uint8List.fromList(protected.bytes),
+          nameOperations: await f.db.select(f.db.companyJobNames).get(),
+          operations: await f.db.select(f.db.jobLineOperations).get(),
+          audits: await f.db.select(f.db.jobLineAudits).get(),
+        );
+      }))!;
+      expect(deleted.view.lifecycle.state, CompanyJobLifecycleState.deleted);
+      expect(tester.widget<TextField>(nameField).controller!.text, rawName);
+
+      final save = find.byKey(const Key('company-job-save-name'));
+      await tester.ensureVisible(save);
+      await tester.runAsync(() async {
+        await tester.tap(save);
+        await Future<void>.delayed(const Duration(seconds: 1));
+      });
+      await waitForWidget(tester, find.byKey(const Key('company-job-error')));
+      expect(await tester.runAsync(() => sqlSnapshot(f.db)), deleted.sql);
+      expect(
+        f.store.states[f.security.namespace]!.revision,
+        deleted.protectedRevision,
+      );
+      expect(
+        f.store.states[f.security.namespace]!.bytes,
+        deleted.protectedBytes,
+      );
+      expect(
+        await tester.runAsync(() => f.db.select(f.db.companyJobNames).get()),
+        deleted.nameOperations,
+      );
+      expect(
+        await tester.runAsync(() => f.db.select(f.db.jobLineOperations).get()),
+        deleted.operations,
+      );
+      expect(
+        await tester.runAsync(() => f.db.select(f.db.jobLineAudits).get()),
+        deleted.audits,
+      );
+      expect(tester.widget<TextField>(nameField).controller!.text, rawName);
+      final cancel = find.widgetWithText(TextButton, 'Cancel name edit');
+      expect(cancel, findsOneWidget);
+      expect(tester.widget<TextButton>(cancel).onPressed, isNotNull);
+      expect(tester.widget<TextField>(nameField).enabled, isTrue);
+      expect(find.byKey(const Key('company-job-retry-name')), findsNothing);
+      await tester.ensureVisible(cancel);
+      await tester.tap(cancel);
+      await tester.pump();
+      expect(nameField, findsNothing);
+      final otherEdit = find.byKey(Key('company-job-edit-$otherJobId'));
+      expect(tester.widget<TextButton>(otherEdit).onPressed, isNotNull);
+      await tester.ensureVisible(otherEdit);
+      await tester.tap(otherEdit);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(nameField).controller!.text,
+        'Other live Job',
+      );
+      expect(tester.widget<TextField>(nameField).enabled, isTrue);
+      expect(await tester.runAsync(() => sqlSnapshot(f.db)), deleted.sql);
+      expect(
+        f.store.states[f.security.namespace]!.revision,
+        deleted.protectedRevision,
+      );
+      expect(
+        f.store.states[f.security.namespace]!.bytes,
+        deleted.protectedBytes,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   for (final failure in [
     StateError('lost lifecycle completion'),
     const JobLineRefusal('post-commit lifecycle validation failed'),
