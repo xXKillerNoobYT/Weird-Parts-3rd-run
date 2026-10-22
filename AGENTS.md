@@ -6,8 +6,16 @@ These project instructions supplement the user's universal operating doctrine. F
 
 - Before editing, read applicable instructions, issue #33 and the current milestone, issue #88's delivery record, open PRs, dependencies and active builder assignments. Check live repository state against recorded evidence. Prefer completing approved work already in progress.
 - Preserve the existing owner's responsibility from implementation through delivery. Delegate bounded review or testing without creating competing writers or taking over another builder's branch. Record any coordinated handoff in the governing GitHub issue.
-- Keep one functional milestone per builder and one coordinated integration path to the intended `main` or release branch. While the backlog needs completion, open a new PR only for a concrete fix or an independent approved priority. Do not start parallel replacements for unfinished work.
+- Keep one functional milestone per builder and one coordinated integration path to the intended `main` or release branch. Continue owning pending PRs alongside that milestone. Open new PRs when the authorized goal or a necessary repair needs them; avoid competing writers, duplicate work and unnecessary stacks.
 - Use a short-lived branch unless a stack is necessary for a real dependency. For each stack, record the bottom-to-top landing order, owner, base, destination and acceptance gates in the governing issue. A merge into a feature branch is intermediate integration, not delivery.
+
+## Continuous PR ownership alongside every goal
+
+- A new goal advances alongside ownership of all pending PRs. Do not require a separate PR-cleanup goal or pause authorized goal work until every older PR is closed. This standing rule supersedes any blanket backlog-first pause.
+- Reconcile the open PR queue at task startup, after each delivery or material dependency change, and during ongoing goal work. Address review findings, failing checks, conflicts and dependencies. Prioritize PRs needed by the current goal and advance independent pending PRs when ready under existing authority.
+- Keep unrelated blocked PRs visible in the current GitHub checklist with their exact blocker, impact, owner and clearing condition. They are not prerequisites for the new goal unless a real dependency requires it. Low functional WIP does not suspend routine PR ownership or independent ready work.
+- Own every PR through its final disposition. Merge eligible reviewed work and close verified duplicate, superseded or already-integrated work only after preserving useful changes and documenting the result. Verify the intended integration branch and application; a feature-branch merge remains intermediate.
+- This rule changes sequencing, not authority or acceptance. Keep review, tests, permissions, branch protections, release requirements and existing builder ownership intact.
 
 ## Recorded authority for the existing backlog
 
