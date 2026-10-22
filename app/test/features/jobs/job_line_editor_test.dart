@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/features/catalog/catalog_name_dialog.dart';
+import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
 import 'package:wired_parts/features/jobs/job_line_editor.dart';
 import 'package:wired_parts/features/jobs/jobs_repository.dart';
 import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
@@ -32,6 +34,7 @@ Future<void> _openEditor(
   required String deviceId,
   required String jobId,
   String? lineId,
+  EditDrafts? edits,
 }) async {
   tester.view.physicalSize = const Size(1000, 1400);
   tester.view.devicePixelRatio = 1;
@@ -42,6 +45,7 @@ Future<void> _openEditor(
       db: db,
       pin: PinService(db.settingsDao),
       deviceId: deviceId,
+      edits: edits,
       wipeLocalData: () async {},
       restoreFromBackup: (_, _) async {},
       child: MaterialApp(
@@ -328,18 +332,44 @@ void main() {
     tester,
   ) async {
     final jobId = await jobs.createJob('Supplier draft');
-    await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+    final beforeJob = await jobs.getJob(jobId);
+    final beforeLines = await jobs.listLinesForJob(jobId);
+    final beforeSplits = await db.select(db.orderSplits).get();
+    final beforeSuppliers = await db.select(db.suppliers).get();
+    await _openEditor(
+      tester,
+      db: db,
+      deviceId: deviceId,
+      jobId: jobId,
+      edits: EditDrafts(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: deviceId,
+      ),
+    );
     await tester.tap(find.text('Custom'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(_field('Qty'));
     await tester.enterText(_field('Qty'), '4');
     await tester.tap(find.text('Add supplier'));
     await tester.pumpAndSettle();
-    expect(find.text('Add supplier'), findsNWidgets(2));
+    expect(find.byType(CatalogNameDialog), findsOneWidget);
     expect(_field('Name'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    await tester.enterText(_field('Name'), '  Unfinished supplier  ');
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(await jobs.listLinesForJob(jobId), isEmpty);
+    expect(find.byType(CatalogNameDialog), findsNothing);
+    expect(tester.widget<TextField>(_field('Qty')).controller!.text, '4');
+    expect(await jobs.getJob(jobId), beforeJob);
+    expect(await jobs.listLinesForJob(jobId), beforeLines);
+    expect(await db.select(db.orderSplits).get(), beforeSplits);
+    expect(await db.select(db.suppliers).get(), beforeSuppliers);
+    expect(
+      await db.settingsDao.getSetting(
+        'local_edit_v1/catalog-name-new/supplier/input',
+      ),
+      contains('  Unfinished supplier  '),
+    );
   });
 
   testWidgets(

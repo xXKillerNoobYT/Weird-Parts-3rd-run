@@ -83,24 +83,24 @@ class _MaintenancePageState extends State<MaintenancePage> {
     if (!await _gate() || !mounted) return;
     switch (_kind) {
       case _Kind.types:
-        await _editTaxonomyName(CatalogNameTarget.newCategory(), 'Add category');
+        await _editTaxonomyName(
+          CatalogNameTarget.newCategory(),
+          'Add category',
+        );
       case _Kind.brands:
         await _editTaxonomyName(CatalogNameTarget.newBrand(), 'Add brand');
       case _Kind.suppliers:
-        final name = await promptName(context, title: 'Add supplier');
-        if (name == null || name.isEmpty) return;
-        try {
-          await _repo.createSupplier(name);
-          await _reload();
-        } on StateError catch (e) {
-          _showMessage(e.message);
-        }
+        await _editTaxonomyName(
+          CatalogNameTarget.newSupplier(),
+          'Add supplier',
+        );
     }
   }
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _editTaxonomyName(CatalogNameTarget target, String title) async {
@@ -113,9 +113,24 @@ class _MaintenancePageState extends State<MaintenancePage> {
         onNotice: (message) {
           if (mounted) setState(() => _catalogNameNotice = message);
         },
-        onSaved: (_) async {
+        onSaved: (saved) async {
           try {
+            if (saved.kind != target.kind) {
+              throw StateError('The saved catalog name has a different kind');
+            }
             await _reload();
+            if (!mounted) {
+              throw StateError('Maintenance is no longer available');
+            }
+            if (saved.kind == CatalogNameKind.supplier &&
+                (_kind != _Kind.suppliers ||
+                    !_rows.any(
+                      (row) => row.id == saved.id && row.name == saved.name,
+                    ))) {
+              throw StateError(
+                'The saved supplier is not in the refreshed list',
+              );
+            }
           } catch (_) {
             if (mounted) setState(() => _loading = false);
             rethrow;
@@ -132,10 +147,16 @@ class _MaintenancePageState extends State<MaintenancePage> {
     try {
       switch (parent.kind) {
         case CatalogTreeKind.category:
-          await _editTaxonomyName(CatalogNameTarget.newType(parent.id), 'Add type');
+          await _editTaxonomyName(
+            CatalogNameTarget.newType(parent.id),
+            'Add type',
+          );
           return;
         case CatalogTreeKind.type:
-          await _editTaxonomyName(CatalogNameTarget.newVariant(parent.id), 'Add variant');
+          await _editTaxonomyName(
+            CatalogNameTarget.newVariant(parent.id),
+            'Add variant',
+          );
           return;
         case CatalogTreeKind.variant:
           final details = await showDialog<PartDetails>(
@@ -298,26 +319,24 @@ class _MaintenancePageState extends State<MaintenancePage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _kind == _Kind.types
-                    ? CatalogTreeView(
-                        nodes: _tree,
-                        mode: CatalogTreeMode.editor,
-                        onOpenPart: _openPart,
-                        onAddChild: _addChild,
-                        onRename: _rename,
-                        onRemove: _removeNode,
-                      )
-                    : _rows.isEmpty
-                        ? Center(
-                            child: Text('No ${_label(_kind).toLowerCase()} yet'),
-                          )
-                        : ListView.separated(
-                            itemCount: _rows.length,
-                            separatorBuilder: (_, _) => const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final row = _rows[index];
-                              return ListTile(title: Text(row.name));
-                            },
-                          ),
+                ? CatalogTreeView(
+                    nodes: _tree,
+                    mode: CatalogTreeMode.editor,
+                    onOpenPart: _openPart,
+                    onAddChild: _addChild,
+                    onRename: _rename,
+                    onRemove: _removeNode,
+                  )
+                : _rows.isEmpty
+                ? Center(child: Text('No ${_label(_kind).toLowerCase()} yet'))
+                : ListView.separated(
+                    itemCount: _rows.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final row = _rows[index];
+                      return ListTile(title: Text(row.name));
+                    },
+                  ),
           ),
         ],
       ),

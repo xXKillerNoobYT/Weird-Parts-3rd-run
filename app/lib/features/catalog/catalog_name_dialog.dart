@@ -24,6 +24,7 @@ Future<void> showCatalogNameDialog(
   if (!context.mounted || saved == null) return;
   final label = switch (saved.kind) {
     CatalogNameKind.brand => 'Brand',
+    CatalogNameKind.supplier => 'Supplier',
     CatalogNameKind.category => 'Category',
     CatalogNameKind.type => 'Type',
     CatalogNameKind.variant => 'Variant',

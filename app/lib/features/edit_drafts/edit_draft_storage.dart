@@ -9,6 +9,7 @@ extension _CatalogNameStore on CatalogNameKind {
     CatalogNameKind.type => 'styles',
     CatalogNameKind.variant => 'types',
     CatalogNameKind.brand => 'brands',
+    CatalogNameKind.supplier => 'suppliers',
   };
 
   String? get _parentColumn => switch (this) {
@@ -16,6 +17,7 @@ extension _CatalogNameStore on CatalogNameKind {
     CatalogNameKind.type => 'category_id',
     CatalogNameKind.variant => 'style_id',
     CatalogNameKind.brand => null,
+    CatalogNameKind.supplier => null,
   };
 }
 
@@ -24,6 +26,7 @@ CatalogNameKind _catalogNameKind(String? value) => switch (value) {
   'type' => CatalogNameKind.type,
   'variant' => CatalogNameKind.variant,
   'brand' => CatalogNameKind.brand,
+  'supplier' => CatalogNameKind.supplier,
   _ => throw const FormatException('Unsupported catalog name entity'),
 };
 
@@ -33,11 +36,19 @@ void _catalogNameTarget(Map<String, String> target) {
   if (!rename && target['kind'] != 'catalog-name-new') {
     throw const FormatException('Unsupported catalog name target');
   }
+  if (rename && kind == CatalogNameKind.supplier) {
+    throw const FormatException('Supplier rename is unsupported');
+  }
+  final listing = target.containsKey('listingVersion');
   final expected = {
     'kind',
     'entity',
     rename ? 'id' : 'reserved',
     if (!rename && kind._parentColumn != null) 'parent',
+    if (!rename && kind == CatalogNameKind.supplier && listing) ...{
+      'listingVersion',
+      'listingReserved',
+    },
   };
   if (target.length != expected.length ||
       !expected.every(target.containsKey) ||
@@ -48,6 +59,15 @@ void _catalogNameTarget(Map<String, String> target) {
 
 Set<String> _catalogNameResultFields(Map<String, String> result) {
   final kind = _catalogNameKind(result['entity']);
+  var listing = false;
+  if (kind == CatalogNameKind.supplier) {
+    final target = _strings(jsonDecode(_text(result['target'])));
+    _catalogNameTarget(target);
+    if (target['entity'] != kind.name) {
+      throw const FormatException('Saved supplier target mismatch');
+    }
+    listing = target.containsKey('listingVersion');
+  }
   return {
     'entity',
     'id',
@@ -57,6 +77,7 @@ Set<String> _catalogNameResultFields(Map<String, String> result) {
     'target',
     if (kind._parentColumn != null) 'parent',
     if (kind == CatalogNameKind.variant) 'category',
+    if (listing) ...{'listing', 'listingRow', 'listingPart'},
   };
 }
 
@@ -294,7 +315,8 @@ String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
   if (target['kind'] == 'catalog-name-new') {
     return 'catalog-name-new/${segment('entity')}'
-        '${target.containsKey('parent') ? '/${segment('parent')}' : ''}';
+        '${target.containsKey('parent') ? '/${segment('parent')}' : ''}'
+        '${target.containsKey('listingVersion') ? '/version/${segment('listingVersion')}' : ''}';
   }
   if (target['kind'] == 'catalog-name-rename') {
     return 'catalog-name-rename/${segment('entity')}/${segment('id')}';
@@ -524,9 +546,16 @@ class EditDrafts {
         kind,
         rename ? _catalogNameParent(kind, row!) : target['parent'],
       );
+      final listing = await _supplierListingContext(target);
+      if (target.containsKey('listingReserved') &&
+          await _row('supplier_listings', target['listingReserved']!) != null) {
+        throw StateError('Reserved supplier listing ID is already in use');
+      }
       return {
         'record': _digest(row),
         for (final entry in ancestors.entries) entry.key: _digest(entry.value),
+        for (final entry in listing.entries)
+          'listing${entry.key}': _digest(entry.value),
       };
     }
     if (target['kind'] == 'warehouse-location-new') {
@@ -740,6 +769,22 @@ class EditDrafts {
     return row;
   }
 
+  Future<Map<String, Map<String, Object?>>> _supplierListingContext(
+    Map<String, String> target,
+  ) async {
+    final versionId = target['listingVersion'];
+    if (versionId == null) return {};
+    final version = await _row('brand_versions', versionId);
+    if (version == null || version['deleted_at'] != null) {
+      throw StateError('Supplier listing variance is unavailable');
+    }
+    final part = await _row('parts', _text(version['part_id']));
+    if (part == null || part['deleted_at'] != null) {
+      throw StateError('Supplier listing Part is unavailable');
+    }
+    return {'Version': version, 'Part': part};
+  }
+
   Future<Map<String, Map<String, Object?>>> _catalogNameAncestors(
     CatalogNameKind kind,
     String? parentId,
@@ -770,6 +815,10 @@ class EditDrafts {
       'entity': target.kind.name,
       if (target.isRename) 'id': target.id! else 'reserved': newId(),
       if (target.parentId != null) 'parent': target.parentId!,
+      if (target.listingVersionId != null) ...{
+        'listingVersion': target.listingVersionId!,
+        'listingReserved': newId(),
+      },
     };
     return _open<CatalogNameEditSession>(
       recordTarget,
@@ -815,6 +864,7 @@ class EditDrafts {
           'entity',
           'id',
           'parent',
+          'listingVersion',
         ].every((key) => target[key] == wanted[key]) ||
         (!rename &&
             kind._parentColumn != null &&
@@ -841,6 +891,23 @@ class EditDrafts {
       for (final entry in ancestors.entries) {
         if (entry.value['id'] != result[entry.key]) {
           throw StateError('The saved catalog name hierarchy changed');
+        }
+      }
+      if (target.containsKey('listingVersion')) {
+        final context = await _supplierListingContext(target);
+        final listing = await _row('supplier_listings', result['listing']!);
+        if (result['listing'] != target['listingReserved'] ||
+            result['listingPart'] != context['Part']!['id'] ||
+            listing == null ||
+            listing['deleted_at'] != null ||
+            listing['origin_device_id'] != _deviceId ||
+            listing['supplier_id'] != result['id'] ||
+            listing['brand_version_id'] != target['listingVersion'] ||
+            listing['sku'] != '' ||
+            _digest(listing) != result['listingRow']) {
+          throw StateError(
+            'The saved supplier listing changed or is unavailable',
+          );
         }
       }
     }
@@ -1207,6 +1274,7 @@ class EditDrafts {
               'part',
               'entity',
               'parent',
+              'listingVersion',
             ].every((key) => record.target[key] == target[key])) {
           throw const FormatException('Unfinished edits target mismatch');
         }
