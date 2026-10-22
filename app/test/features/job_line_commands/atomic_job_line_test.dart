@@ -1675,6 +1675,49 @@ void main() {
         expect(await fixture.counts(1), appliedCounts);
       },
     );
+
+    test('post-hook receipt seal tamper rolls back job-line and permits same request', () async {
+      final command = fixture.command(
+        const JobLinePatch(notes: SetField('Only intact evidence commits')),
+      );
+      final db = fixture.databases[0];
+      final before = businessRows(fixture.files[0], includeHistory: true);
+      var reached = false;
+      final service = fixture.commands(
+        0,
+        beforeCommit: () async {
+          reached = true;
+          final row = (await db.select(db.jobLineReceipts).get()).single;
+          final receipt = jsonDecode(row.receiptBytes) as Map<String, dynamic>;
+          receipt['seal'] = base64Encode(List<int>.filled(64, 7));
+          await db.customStatement(
+            'UPDATE job_line_receipts SET receipt_bytes = ? WHERE receipt_key = ?',
+            [canonical(receipt), row.receiptKey],
+          );
+        },
+      );
+      await expectLater(
+        service.patchJobLine(await fixture.session(0, command), command),
+        throwsStateError,
+      );
+      expect(reached, isTrue);
+      expect(businessRows(fixture.files[0], includeHistory: true), before);
+      expect(await fixture.counts(0), [0, 0, 0, 0, 0, 0]);
+      await fixture.installations[0].reconcile(db);
+      expect(fixture.installations[0].readiness, InstallationReadiness.ready);
+      final state = jsonDecode(
+        utf8.decode(
+          fixture
+              .secureStores[0]
+              .states[fixture.installations[0].namespace]!
+              .bytes,
+        ),
+      );
+      expect(state['pendingCommand'], isNull);
+      expect((await fixture.commit(0, command)).status, 'applied');
+      expect((await fixture.row(0)).notes, 'Only intact evidence commits');
+      expect(await fixture.counts(0), [1, 1, 1, 1, 1, 0]);
+    });
     test('precommit failure rolls back every database effect and clears only proven no-commit', () async {
       final command = fixture.command(
         const JobLinePatch(notes: SetField('Never committed')),
@@ -2037,6 +2080,11 @@ void main() {
       final file = File('${fixture.directory.path}/1.db');
       var raw = raw_sqlite.sqlite3.open(file.path);
       for (final table in [
+        'company_bootstrap_witnesses',
+        'company_jobs',
+        'company_membership_certificates',
+        'company_join_requests',
+        'company_join_events',
         'company_authority_facts',
         'job_line_baselines',
         'job_line_operations',
@@ -2084,6 +2132,11 @@ void main() {
       final file = fixture.files[1];
       final raw = raw_sqlite.sqlite3.open(file.path);
       const history = [
+        'company_bootstrap_witnesses',
+        'company_jobs',
+        'company_membership_certificates',
+        'company_join_requests',
+        'company_join_events',
         'company_authority_facts',
         'job_line_baselines',
         'job_line_operations',

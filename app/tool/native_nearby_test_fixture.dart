@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/company/company_store_markers.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'nearby_lan_workspace.dart';
@@ -72,8 +73,15 @@ void _validateExistingDatabase(File file, String deviceId) {
   final db = raw.sqlite3.open(file.path, mode: raw.OpenMode.readOnly);
   try {
     db.execute('BEGIN');
-    final version = db.select('PRAGMA user_version').single.values.single as int;
-    if (version != 2 && version != 3 && version != 4 && version != 5) {
+    final version =
+        db.select('PRAGMA user_version').single.values.single as int;
+    if (version != 2 &&
+        version != 3 &&
+        version != 4 &&
+        version != 5 &&
+        version != 6 &&
+        version != 7 &&
+        version != 8) {
       rejectNativeTest('fixture-rejected');
     }
     final tables = db
@@ -84,6 +92,9 @@ void _validateExistingDatabase(File file, String deviceId) {
       ..._schema2Columns,
       if (version >= 3) ..._companyColumns,
       if (version >= 5) ..._schema5Columns,
+      if (version >= 6) ..._schema6Columns,
+      if (version >= 7) ..._schema7Columns,
+      if (version >= 8) ..._schema8Columns,
     };
     if (tables.length != expectedTables.length ||
         !tables.containsAll(expectedTables.keys)) {
@@ -106,6 +117,9 @@ void _validateExistingDatabase(File file, String deviceId) {
     for (final table in {
       ..._companyColumns.keys,
       ..._schema5Columns.keys,
+      ..._schema6Columns.keys,
+      if (version >= 7) ..._schema7Columns.keys,
+      if (version >= 8) ..._schema8Columns.keys,
     }.where(tables.contains)) {
       if (db.select('SELECT 1 FROM "$table" LIMIT 1').isNotEmpty) {
         rejectNativeTest('fixture-rejected');
@@ -189,6 +203,26 @@ const _schema5Columns = {
     'package_id',
     'package_digest',
     'status',
+  },
+};
+const _schema7Columns = companyJoinTableColumns;
+const _schema8Columns = companySyncTableColumns;
+
+const _schema6Columns = {
+  'company_jobs': {
+    'job_id',
+    'company_id',
+    'shop_id',
+    'origin_generation',
+    'request_id',
+    'operation_commitment',
+    'command_commitment',
+    'operation_bytes',
+    'projection_bytes',
+    'receipt_key',
+    'receipt_bytes',
+    'audit_bytes',
+    'outgoing',
   },
 };
 const _schema2Columns = {
@@ -324,7 +358,13 @@ final class NativeFixtureSnapshot {
     await db.transaction(() async {
       version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');
-      if (version != 2 && version != 3 && version != 4 && version != 5) {
+      if (version != 2 &&
+          version != 3 &&
+          version != 4 &&
+          version != 5 &&
+          version != 6 &&
+          version != 7 &&
+          version != 8) {
         rejectNativeTest('fixture-rejected');
       }
       final names =
@@ -339,6 +379,9 @@ final class NativeFixtureSnapshot {
         ..._schema2Columns.keys,
         if (version >= 3) ..._companyColumns.keys,
         if (version >= 5) ..._schema5Columns.keys,
+        if (version >= 6) ..._schema6Columns.keys,
+        if (version >= 7) ..._schema7Columns.keys,
+        if (version >= 8) ..._schema8Columns.keys,
       };
       if (names.length != expectedNames.length ||
           !names.containsAll(expectedNames)) {
@@ -347,6 +390,9 @@ final class NativeFixtureSnapshot {
       for (final table in {
         ..._companyColumns.keys,
         ..._schema5Columns.keys,
+        ..._schema6Columns.keys,
+        if (version >= 7) ..._schema7Columns.keys,
+        if (version >= 8) ..._schema8Columns.keys,
       }.where(names.contains)) {
         if ((await db.customSelect('SELECT 1 FROM "$table" LIMIT 1').get())
             .isNotEmpty) {
@@ -359,6 +405,9 @@ final class NativeFixtureSnapshot {
         final name = table.actualTableName;
         if (version == 2 && !_schema2Columns.containsKey(name)) continue;
         if (version < 5 && _schema5Columns.containsKey(name)) continue;
+        if (version < 6 && _schema6Columns.containsKey(name)) continue;
+        if (version < 7 && _schema7Columns.containsKey(name)) continue;
+        if (version < 8 && _schema8Columns.containsKey(name)) continue;
         final order = table.$primaryKey
             .map((column) => '"${column.$name}"')
             .join(',');

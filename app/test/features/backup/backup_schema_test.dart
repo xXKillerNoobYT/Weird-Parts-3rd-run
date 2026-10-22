@@ -16,17 +16,88 @@ import '../../../tool/nearby_lan_validation.dart';
 import 'backup_test_support.dart';
 
 void main() {
+  for (final table in [
+    'company_membership_certificates',
+    'company_join_requests',
+    'company_join_events',
+    'company_job_peer_acks',
+  ]) {
+    for (final malformed in ['missing', 'wrong columns']) {
+      test(
+        'schema8 $malformed $table refuses backup before file mutation',
+        () async {
+          final dir = Directory.systemTemp.createTempSync('join-schema-file-');
+          addTearDown(() => dir.deleteSync(recursive: true));
+          final file = File(p.join(dir.path, kSqliteFileName));
+          final db = AppDatabase.forTesting(NativeDatabase(file));
+          await db.customSelect('SELECT 1').get();
+          await db.close();
+          final raw = sqlite3.sqlite3.open(file.path);
+          raw.execute('DROP TABLE "$table"');
+          if (malformed == 'wrong columns') {
+            raw.execute('CREATE TABLE "$table" (wrong TEXT)');
+          }
+          raw.dispose();
+          final before = file.readAsBytesSync();
+          expect(
+            () => requireLegacyBusinessFile(file),
+            throwsA(isA<BackupFormatException>()),
+          );
+          expect(file.readAsBytesSync(), before);
+        },
+      );
+    }
+  }
+
+  test(
+    'schema6 missing company Job journal refuses legacy file handling',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('missing-company-jobs-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File(p.join(dir.path, kSqliteFileName));
+      final db = AppDatabase.forTesting(NativeDatabase(file));
+      await db.customSelect('SELECT 1 FROM company_jobs LIMIT 1').get();
+      await db.close();
+      final raw = sqlite3.sqlite3.open(file.path);
+      raw.execute('DROP TABLE company_jobs');
+      for (final table in [
+        'company_membership_certificates',
+        'company_join_requests',
+        'company_join_events',
+        'company_job_peer_acks',
+      ]) {
+        raw.execute('DROP TABLE $table');
+      }
+      raw.dispose();
+      expect(
+        () => requireLegacyBusinessFile(file),
+        throwsA(isA<BackupFormatException>()),
+      );
+    },
+  );
+
   test('schema-4 empty-history backup remains admissible; schema-5 witness is required', () async {
     final dir = Directory.systemTemp.createTempSync('company-schema-gate-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final file = File(p.join(dir.path, kSqliteFileName));
     final db = AppDatabase.forTesting(NativeDatabase(file));
-    await db.customSelect('SELECT 1 FROM company_bootstrap_witnesses LIMIT 1').get();
+    await db
+        .customSelect('SELECT 1 FROM company_bootstrap_witnesses LIMIT 1')
+        .get();
     await db.close();
 
     requireLegacyBusinessFile(file);
     final old = sqlite3.sqlite3.open(file.path);
     old.execute('DROP TABLE company_bootstrap_witnesses');
+    old.execute('DROP TABLE company_jobs');
+    for (final table in [
+      'company_membership_certificates',
+      'company_join_requests',
+      'company_join_events',
+      'company_job_peer_acks',
+    ]) {
+      old.execute('DROP TABLE $table');
+    }
     old.execute('PRAGMA user_version = 4');
     old.dispose();
     requireLegacyBusinessFile(file);
@@ -34,7 +105,10 @@ void main() {
     final malformed = sqlite3.sqlite3.open(file.path);
     malformed.execute('PRAGMA user_version = 5');
     malformed.dispose();
-    expect(() => requireLegacyBusinessFile(file), throwsA(isA<BackupFormatException>()));
+    expect(
+      () => requireLegacyBusinessFile(file),
+      throwsA(isA<BackupFormatException>()),
+    );
   });
 
   test('unknown SQLite schemas reject before live recovery, directory creation or file changes', () async {
@@ -119,6 +193,15 @@ void main() {
     await source.customStatement(
       'ALTER TABLE brand_versions DROP COLUMN is_main',
     );
+    await source.customStatement('DROP TABLE company_jobs');
+    for (final table in [
+      'company_membership_certificates',
+      'company_join_requests',
+      'company_join_events',
+      'company_job_peer_acks',
+    ]) {
+      await source.customStatement('DROP TABLE $table');
+    }
     await source.customStatement('PRAGMA user_version = 1');
     await source.close();
     final original = File(p.join(scenario.source.support.path, kSqliteFileName))

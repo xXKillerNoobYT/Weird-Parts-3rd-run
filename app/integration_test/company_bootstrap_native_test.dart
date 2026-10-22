@@ -17,6 +17,7 @@ import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
+import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
@@ -24,6 +25,7 @@ import '../tool/nearby_lan_workspace.dart';
 import '../tool/native_nearby_test_exit.dart';
 
 const _run = String.fromEnvironment('COMPANY_VALIDATION_RUN');
+const _jobValidation = bool.fromEnvironment('COMPANY_JOB_VALIDATION');
 const _revision = String.fromEnvironment('COMPANY_VALIDATION_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_VALIDATION_SOURCE_TREE');
 const _readOnlyCustody = bool.fromEnvironment(
@@ -428,6 +430,26 @@ Future<void> _signIn(WidgetTester tester, {bool wrong = false}) async {
   }
 }
 
+bool companyJobCreationIsReady(WidgetTester tester, String jobName) {
+  final list = find.byKey(const Key('company-jobs-list'));
+  final input = find.byKey(const Key('company-job-name'));
+  final create = find.byKey(const Key('company-create-job'));
+  if (list.evaluate().length != 1 ||
+      input.evaluate().length != 1 ||
+      create.evaluate().length != 1 ||
+      find
+              .descendant(of: list, matching: find.text(jobName))
+              .evaluate()
+              .length !=
+          1) {
+    return false;
+  }
+  final field = tester.widget<TextField>(input);
+  return field.controller?.text.isEmpty == true &&
+      field.enabled == true &&
+      tester.widget<FilledButton>(create).onPressed != null;
+}
+
 Future<void> _signOut(WidgetTester tester) async {
   await _tap(tester, find.byKey(const Key('company-signout')));
   await _waitFor(
@@ -534,16 +556,65 @@ Future<Map<String, Object?>> _snapshot(_Installation installation) async {
       final rows = await db.customSelect('SELECT * FROM "$name"').get();
       evidence[name] = rows.map((row) => _canonical(row.data)).toList()..sort();
       counts[name] = rows.length;
-      if (![
-        'device_profiles',
-        'app_settings',
-        'company_authority_facts',
-        'company_bootstrap_witnesses',
-      ].contains(name)) {
+      if (!(_jobValidation &&
+              installation.workspace.role == ValidationRole.sender &&
+              ['jobs', 'company_jobs'].contains(name)) &&
+          ![
+            'device_profiles',
+            'app_settings',
+            'company_authority_facts',
+            'company_bootstrap_witnesses',
+          ].contains(name)) {
         _require(rows.isEmpty);
       }
     }
   });
+  Map<String, Object?>? jobEvidence;
+  if (_jobValidation) {
+    final records = await db.select(db.companyJobs).get();
+    final jobs = await db.select(db.jobs).get();
+    if (installation.workspace.role == ValidationRole.sender) {
+      _stage = 'sender-snapshot-job-count';
+      _require(records.length == 1 && jobs.length == 1);
+      final record = records.single;
+      final job = jobs.single;
+      final body = jsonDecode(record.operationBytes)['body'] as Map;
+      _require(
+        record.companyId == company!.companyId &&
+            record.shopId == company.shopId &&
+            record.jobId == job.id &&
+            record.outgoing &&
+            job.name == 'Synthetic offline Job $_run' &&
+            body['contract'] == 'job.create@1' &&
+            body['user'] == company.userId &&
+            body['device'] == company.deviceId &&
+            body['generation'] == identity!.generation.value,
+      );
+      _stage = 'sender-snapshot-job-seal';
+      await JobLineCommandReceipt.verifyAdmissionSeal(
+        record.receiptBytes,
+        identity!,
+        security.receivingStoreGeneration!.value,
+        expectedFamily: CompanyCommandFamily.jobCreate,
+      );
+      jobEvidence = {
+        'jobId': job.id,
+        'name': job.name,
+        'originalUser': body['user'],
+        'originalDevice': body['device'],
+        'originalInstallation': body['installation'],
+        'originalGeneration': body['generation'],
+        'createdAt': body['createdAt'],
+        'operationCommitment': record.operationCommitment,
+        'receiptSha256': _hash(utf8.encode(record.receiptBytes)),
+        'pendingOutgoing': 1,
+        'recordCount': 1,
+        'sealedReceiptVerified': true,
+      };
+    } else {
+      _require(records.isEmpty && jobs.isEmpty);
+    }
+  }
   final base = await _store.readState(security.namespace);
   final custody = await _store.readState(
     companyCustodyNamespace(security.namespace),
@@ -588,7 +659,9 @@ Future<Map<String, Object?>> _snapshot(_Installation installation) async {
     'nativeRecordsWithinCapacity': true,
     'baseProtectedBytes': base.bytes.length,
     'custodyProtectedBytes': custody.bytes.length,
-    'legacyBusinessEmpty': true,
+    'legacyBusinessEmpty':
+        !_jobValidation || installation.workspace.role != ValidationRole.sender,
+    if (_jobValidation) 'companyJob': jobEvidence,
   };
 }
 
@@ -644,8 +717,8 @@ Future<void> _resident(
 void main() {
   _require(const bool.fromEnvironment('NATIVE_COMPANY_TEST_MODE'));
   _require(Platform.isWindows || Platform.isMacOS);
-  _require(RegExp(r'^j97-(win|mac)-[a-z0-9-]{1,20}$').hasMatch(_run));
-  _require(_run.startsWith(Platform.isWindows ? 'j97-win-' : 'j97-mac-'));
+  _require(RegExp(r'^j(97|99)-(win|mac)-[a-z0-9-]{1,20}$').hasMatch(_run));
+  _require(_run.contains(Platform.isWindows ? '-win-' : '-mac-'));
   _require(
     RegExp(r'^[a-f0-9]{40}$').hasMatch(_revision) &&
         RegExp(r'^[a-f0-9]{40}$').hasMatch(_tree),
@@ -757,6 +830,19 @@ void main() {
           _require(find.text('Company locked').evaluate().length == 1);
           await _signIn(tester, wrong: true);
           await _signIn(tester);
+          if (_jobValidation &&
+              installation.workspace.role == ValidationRole.sender) {
+            await _waitFor(
+              tester,
+              () => companyJobCreationIsReady(
+                tester,
+                'Synthetic offline Job $_run',
+              ),
+            );
+            _require(
+              find.byKey(const Key('company-jobs-list')).evaluate().length == 1,
+            );
+          }
           await _signOut(tester);
         }
       } else {
@@ -764,12 +850,45 @@ void main() {
         lifetime.visible = original;
         await _mount(tester, original);
         await _createOrRecover(tester, original);
+        if (_jobValidation) {
+          await _signIn(tester);
+          await _waitFor(
+            tester,
+            () =>
+                find.byKey(const Key('company-job-name')).evaluate().length ==
+                1,
+          );
+          await tester.enterText(
+            find.byKey(const Key('company-job-name')),
+            'Synthetic offline Job $_run',
+          );
+          _stage = 'awaiting-original-committed-job';
+          final started = Stopwatch()..start();
+          await _tap(tester, find.byKey(const Key('company-create-job')));
+          await _waitFor(
+            tester,
+            () => companyJobCreationIsReady(
+              tester,
+              'Synthetic offline Job $_run',
+            ),
+            measurement: 'create-offline-job',
+            started: started,
+          );
+          _require(find.byType(HomeShell).evaluate().isEmpty);
+          _stage = 'original-job-durable-snapshot-before-signout';
+          await _snapshot(original);
+          _stage = 'original-job-signout-after-verified-create';
+          await _signOut(tester);
+        }
         lifetime.visible = replacement;
         await _mount(tester, replacement, sourcePackage: sourcePackage);
         await _createOrRecover(tester, replacement, recovery: true);
       }
+      _stage = 'final-original-snapshot';
       final first = await _snapshot(original);
+      _stage = 'final-replacement-snapshot';
       final second = await _snapshot(replacement);
+      _stage = 'final-company-identity-comparison';
       _require(
         ['company', 'shop', 'user'].every((key) => first[key] == second[key]),
       );
@@ -789,12 +908,15 @@ void main() {
             (first['authorityVersion'] as int),
       );
       if (exercise != null) {
+        _stage = 'final-restart-snapshot-comparison';
         _require(
           _canonical(first) == _canonical(exercise['original']) &&
               _canonical(second) == _canonical(exercise['replacement']),
         );
       }
+      _stage = 'final-visible-company-signin';
       await _signIn(tester);
+      _stage = 'writing-company-$phase-receipt';
       _writeOnce(File(p.join(root, 'company-$phase.json')), {
         'phase': phase,
         'passed': true,
@@ -811,6 +933,8 @@ void main() {
         'measurementScope': 'small native UI-action samples; polling gaps and Flutter frame timings are distinct; RSS is sampled whole process, not peak or KDF-only',
         'lockedFreshProcess': restarting,
         'recoveryOnFreshInstallation': true,
+        if (_jobValidation) 'originalJobRetainedOnce': true,
+        if (_jobValidation) 'authorityRecoveryDoesNotRestoreJobs': true,
         'nativeExclusivePublisherNoOverwrite': true,
         'sessionAndPrivateMaterialExported': false,
         'normalQuitFreshProcess': 'external host evidence required',

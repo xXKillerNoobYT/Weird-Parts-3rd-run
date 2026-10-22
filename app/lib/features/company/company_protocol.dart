@@ -8,6 +8,7 @@ final class _CompanyCustody {
 
   final Map<String, Object?> values;
   final String? revision;
+  bool get isMember => values['v'] == 2;
 
   String get status => values['status'] as String;
   String get company => values['company'] as String;
@@ -53,7 +54,7 @@ final class _CompanyCustody {
     if (raw is! Map<String, dynamic>) {
       throw const FormatException('Invalid company custody');
     }
-    const keys = <String>{
+    const ownerKeys = <String>{
       'v',
       'status',
       'company',
@@ -80,9 +81,36 @@ final class _CompanyCustody {
       'authority',
       'source',
     };
+    const memberKeys = <String>{
+      'v',
+      'status',
+      'company',
+      'shop',
+      'user',
+      'device',
+      'grant',
+      'intent',
+      'installation',
+      'generation',
+      'store',
+      'name',
+      'package',
+      'facts',
+      'pinSalt',
+      'pinVerifier',
+      'pinProfile',
+      'attempts',
+      'authority',
+      'certificate',
+      'activation',
+    };
+    final member = raw['v'] == 2;
+    final keys = member
+        ? memberKeys
+        : {...ownerKeys, if (raw['v'] == 3) 'enrollment'};
     if (raw.keys.toSet().difference(keys).isNotEmpty ||
         keys.difference(raw.keys.toSet()).isNotEmpty ||
-        raw['v'] != 1 ||
+        ![1, 2, 3].contains(raw['v']) ||
         !['pending', 'active'].contains(raw['status']) ||
         raw['pinProfile'] != _companyPinProfile ||
         raw['authority'] is! int ||
@@ -126,11 +154,11 @@ final class _CompanyCustody {
       throw const FormatException('Invalid recovery source commitment');
     }
     for (final entry in <String, int>{
-      'rootSeed': 32,
+      if (!member) 'rootSeed': 32,
       'pinSalt': 16,
       'pinVerifier': 32,
-      'packageSalt': 16,
-      'packageNonce': 12,
+      if (!member) 'packageSalt': 16,
+      if (!member) 'packageNonce': 12,
     }.entries) {
       if (raw[entry.key] is! String ||
           base64Decode(raw[entry.key] as String).length != entry.value) {
@@ -142,11 +170,37 @@ final class _CompanyCustody {
             base64Decode(raw['recoverySeed'] as String).length != 32)) {
       throw const FormatException('Invalid recovery seed');
     }
-    if (raw['status'] == 'active' &&
+    if (!member &&
+        raw['status'] == 'active' &&
         (raw['recoverySeed'] != null ||
             raw['facts'] == null ||
             raw['digest'] == null)) {
       throw const FormatException('Incomplete active company custody');
+    }
+    if (member) {
+      _joinHash(raw['certificate']);
+      final activation = _joinObject(raw['activation'], {
+        'before',
+        'after',
+        'path',
+        'trust',
+        'priorBinding',
+      });
+      for (final key in ['before', 'path', 'priorBinding']) {
+        _joinHash(activation[key]);
+      }
+      if (activation['after'] != null) _joinHash(activation['after']);
+      if (raw['status'] == 'active' && activation['after'] == null) {
+        throw const FormatException('Unsealed member activation');
+      }
+      final trust = CompanyTrustAnchor.decode(activation['trust']);
+      if (trust.companyId.value != raw['company'] ||
+          trust.factsCommitment != raw['facts'] ||
+          trust.authorityVersion != raw['authority']) {
+        throw const FormatException('Member authority binding differs');
+      }
+    } else if (raw['v'] == 3) {
+      _validateJoinIssuerPins(raw['enrollment']);
     }
     return _CompanyCustody._(Map<String, Object?>.from(raw), revision);
   }
@@ -182,6 +236,7 @@ final class CompanyIdentity {
     required this.deviceId,
     required this.name,
     required this.packageId,
+    this.isAuthorityOwner = true,
   });
 
   final String companyId;
@@ -190,6 +245,7 @@ final class CompanyIdentity {
   final String deviceId;
   final String name;
   final String packageId;
+  final bool isAuthorityOwner;
 }
 
 enum CompanyBootstrapStatus {
@@ -197,6 +253,7 @@ enum CompanyBootstrapStatus {
   legacyUnsupported,
   pending,
   pendingRecovery,
+  pendingJoin,
   active,
   needsRecovery,
 }
@@ -209,12 +266,14 @@ final class OwnerSession {
     this.identity,
     this.sessionId,
     this._authoritySnapshot,
+    this._membershipSnapshot,
   ) : _clock = Stopwatch()..start();
 
   final CompanyEnrollment _owner;
   final CompanyIdentity identity;
   final String sessionId;
   final String _authoritySnapshot;
+  final String _membershipSnapshot;
   final Stopwatch _clock;
   Duration _lastUse = Duration.zero;
   bool _revoked = false;
@@ -243,6 +302,7 @@ final class OwnerSession {
     required String session,
   }) {
     if (!isValid ||
+        _membershipSnapshot != _owner.installation._membershipCommitment ||
         company != identity.companyId ||
         shop != identity.shopId ||
         user != identity.userId ||
@@ -257,6 +317,12 @@ final class OwnerSession {
 
   void validateAuthority(CompanyTrustAnchor trust, Map<String, int> floors) {
     if (!isValid ||
+        _membershipSnapshot != _owner.installation._membershipCommitment ||
+        _authoritySnapshot !=
+            _securityCanonical({
+              'trust': _owner.installation._record?.companyTrust?.encode(),
+              'floors': _owner.installation.knownSecurityFloors,
+            }) ||
         _authoritySnapshot !=
             _securityCanonical({'trust': trust.encode(), 'floors': floors})) {
       throw StateError('Local administrator authority changed');
@@ -300,6 +366,7 @@ final class CompanyEnrollment {
 
   Future<void> signOut() async {
     _authenticationEpoch++;
+    installation._activeCompanyChannel?.close();
     final session = _session;
     session?._clear();
     await session?._waitForCommands();
@@ -339,6 +406,9 @@ final class CompanyEnrollment {
         'trust': trust.encode(),
         'floors': installation.knownSecurityFloors,
       }),
+      confirmedCustody.isMember
+          ? confirmedCustody.values['certificate'] as String
+          : trust.factsCommitment,
     );
     _session = session;
     return session;
@@ -373,6 +443,9 @@ final class CompanyEnrollment {
     final body = signed['body'] as Map<String, dynamic>;
     if (body['v'] != 2) {
       throw const CompanyBootstrapRefusal('Production facts version refused');
+    }
+    if (custody.isMember) {
+      throw const CompanyBootstrapRefusal('Job line permission denied');
     }
     final device = (body['devices'] as List)
         .cast<Map<String, dynamic>>()
@@ -433,6 +506,99 @@ final class CompanyEnrollment {
     ).verify(command, proof);
   }
 
+  Future<VerifiedCreateJobSession> issueCreateJobAssertion(
+    CreateJob command,
+  ) async {
+    final session = currentSession;
+    final custody = await _readCustody();
+    if (session == null || custody == null || custody.status != 'active') {
+      throw const CompanyBootstrapRefusal('Administrator sign-in required');
+    }
+    await _checkBinding(custody, requireActive: true);
+    if (command.companyId != custody.company ||
+        command.shopId != custody.shop) {
+      throw const CompanyBootstrapRefusal('Command is outside this company');
+    }
+    final trust = await installation.readCompanyTrust(db);
+    if (trust == null || trust.companyId.value != custody.company) {
+      throw const CompanyBootstrapRefusal('Company trust is unavailable');
+    }
+    session.validateAuthority(trust, installation.knownSecurityFloors);
+    final facts =
+        await (db.select(db.companyAuthorityFacts)..where(
+              (t) =>
+                  t.companyId.equals(custody.company) &
+                  t.commitment.equals(trust.factsCommitment),
+            ))
+            .getSingle();
+    final signed = jsonDecode(facts.signedBytes) as Map<String, dynamic>;
+    final body = signed['body'] as Map<String, dynamic>;
+    if (body['v'] != 2) {
+      throw const CompanyBootstrapRefusal('Production facts version refused');
+    }
+    final membership = await resolveCompanyMembership(
+      db: db,
+      installation: installation,
+    );
+    final device = membership.device;
+    final user = membership.user;
+    final identity = installation.identity!;
+    session.validateCommand(
+      company: custody.company,
+      shop: custody.shop,
+      user: custody.user,
+      device: custody.device,
+      installation: identity.id.value,
+      generation: identity.generation.value,
+      session: session.sessionId,
+    );
+    final assertion = <String, Object?>{
+      'v': custody.isMember ? 3 : 2,
+      if (custody.isMember) 'membership': membership.proofCommitment,
+      'company': custody.company,
+      'shop': custody.shop,
+      'job': command.jobId,
+      'request': command.requestId,
+      'command': command.commitment,
+      'user': custody.user,
+      'device': custody.device,
+      'installation': identity.id.value,
+      'generation': identity.generation.value,
+      'grant': custody.grant,
+      'credential': user['credential'],
+      'permission': user['permission'],
+      'authority': trust.authorityVersion,
+      'facts': trust.factsCommitment,
+      'session': session.sessionId,
+    };
+    if (device['grant'] != custody.grant ||
+        device['installation'] != identity.id.value ||
+        device['generation'] != identity.generation.value) {
+      throw const CompanyBootstrapRefusal('Installation grant differs');
+    }
+    final canonical = _securityCanonical(assertion);
+    final pair = await Ed25519().newKeyPairFromSeed(installation._record!.seed);
+    final signature = await Ed25519().sign(
+      utf8.encode(
+        '${custody.isMember ? 'wiredpart.job.create.authorization@2:' : 'wiredpart.job.create.authorization@1:'}$canonical',
+      ),
+      keyPair: pair,
+    );
+    final proof = Uint8List.fromList(
+      utf8.encode(
+        _securityCanonical({
+          'body': assertion,
+          'signature': base64Encode(signature.bytes),
+          if (custody.isMember) 'membership': membership.certificateBytes,
+        }),
+      ),
+    );
+    return CreateJobAuthorization(
+      db: db,
+      installation: installation,
+    ).verify(command, proof);
+  }
+
   String get _namespace => companyCustodyNamespace(installation.namespace);
 
   Future<_CompanyCustody?> _readCustody() async {
@@ -483,6 +649,9 @@ final class CompanyEnrollment {
           _ => CompanyBootstrapStatus.needsRecovery,
         };
       }
+      if (custody.isMember && custody.status == 'pending') {
+        return CompanyBootstrapStatus.pendingJoin;
+      }
       await _checkBinding(custody, requireActive: custody.status == 'active');
       return custody.status == 'active'
           ? CompanyBootstrapStatus.active
@@ -501,6 +670,7 @@ final class CompanyEnrollment {
     deviceId: custody.device,
     name: custody.name,
     packageId: custody.packageId,
+    isAuthorityOwner: !custody.isMember,
   );
 
   Future<void> _checkBinding(
@@ -934,7 +1104,9 @@ final class CompanyEnrollment {
           'version': 1,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': List<String>.from(
+            (source.body['devices'] as List).single['capabilities'] as List,
+          ),
         },
       ],
       'users': [
@@ -944,7 +1116,7 @@ final class CompanyEnrollment {
           'permission': userPermission,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': List<String>.from(oldUser['capabilities'] as List),
         },
       ],
       'entities': <Object>[],
@@ -1069,7 +1241,12 @@ final class CompanyEnrollment {
           'version': 1,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': [
+            'patchJobLine',
+            'deleteJobLine',
+            'enrollDevice',
+            'createJob',
+          ],
         },
       ],
       'users': [
@@ -1079,7 +1256,12 @@ final class CompanyEnrollment {
           'permission': 1,
           'revoked': false,
           'shops': [custody.shop],
-          'capabilities': ['patchJobLine', 'deleteJobLine', 'enrollDevice'],
+          'capabilities': [
+            'patchJobLine',
+            'deleteJobLine',
+            'enrollDevice',
+            'createJob',
+          ],
         },
       ],
       'entities': <Object>[],
@@ -1628,9 +1810,11 @@ void _requireRecoverableFirstOwner(Map<String, dynamic> body) {
   const capabilities = {'patchJobLine', 'deleteJobLine', 'enrollDevice'};
   bool grants(Object? value) =>
       value is List &&
-      value.length == capabilities.length &&
-      value.toSet().length == capabilities.length &&
-      value.toSet().containsAll(capabilities);
+      value.toSet().length == value.length &&
+      ((value.length == capabilities.length &&
+              value.toSet().containsAll(capabilities)) ||
+          (value.length == capabilities.length + 1 &&
+              value.toSet().containsAll({...capabilities, 'createJob'})));
   bool entities(Object? value) {
     if (value is! List || value.length > 128) return false;
     final seen = <String>{};
@@ -1710,7 +1894,9 @@ void _requireRecoverableFirstOwner(Map<String, dynamic> body) {
       (device['version'] as int) < 1 ||
       device['revoked'] is! bool ||
       !scope(device['shops'], body['shop']) ||
-      !grants(device['capabilities'])) {
+      !grants(device['capabilities']) ||
+      _securityCanonical((device['capabilities'] as List).toList()..sort()) !=
+          _securityCanonical((user['capabilities'] as List).toList()..sort())) {
     throw const CompanyBootstrapRefusal('Unsupported recovery actor semantics');
   }
 }
@@ -1895,7 +2081,22 @@ Future<Map<String, dynamic>> _verifyFactLineage({
     if (prior['company'] != body['company'] ||
         prior['shop'] != body['shop'] ||
         (prior['users'] as List).single['id'] != user['id'] ||
-        prior['authority'] != authority - 1) {
+        prior['authority'] != authority - 1 ||
+        _securityCanonical(
+              ((prior['users'] as List).single['capabilities'] as List).toList()
+                ..sort(),
+            ) !=
+            _securityCanonical(
+              (user['capabilities'] as List).toList()..sort(),
+            ) ||
+        _securityCanonical(
+              ((prior['devices'] as List).single['capabilities'] as List)
+                  .toList()
+                ..sort(),
+            ) !=
+            _securityCanonical(
+              (device['capabilities'] as List).toList()..sort(),
+            )) {
       throw const CompanyBootstrapRefusal(
         'Recovery identity continuity failed',
       );
@@ -1999,6 +2200,10 @@ Future<bool> _companyCustodyReady(
   );
   if (protected == null) return false;
   final custody = _CompanyCustody.decode(protected.bytes);
+  if (custody.isMember) {
+    return _memberCustodyReady(installation, db, record, custody);
+  }
+  installation._membershipCommitment = trust.factsCommitment;
   final custodyRoot = await (await Ed25519().newKeyPairFromSeed(
     custody.rootSeed,
   )).extractPublicKey();

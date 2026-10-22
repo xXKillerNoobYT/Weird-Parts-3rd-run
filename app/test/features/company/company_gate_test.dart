@@ -94,7 +94,15 @@ void main() {
         find.byKey(const Key('recovery-passphrase')),
         'confirm create authority phrase',
       );
+      await tester.ensureVisible(
+        find.byKey(const Key('local-continuity-consent')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('local-continuity-consent')));
+      await tester.ensureVisible(
+        find.byKey(const Key('authority-only-consent')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('authority-only-consent')));
       await tester.scrollUntilVisible(
         find.text('Choose encrypted recovery file'),
@@ -197,7 +205,13 @@ void main() {
     if (confirmation.evaluate().isNotEmpty) {
       await tester.enterText(confirmation, 'different replacement phrase');
     }
+    await tester.ensureVisible(
+      find.byKey(const Key('local-continuity-consent')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('local-continuity-consent')));
+    await tester.ensureVisible(find.byKey(const Key('authority-only-consent')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('authority-only-consent')));
     await tester.scrollUntilVisible(
       find.text('Choose encrypted recovery file'),
@@ -357,7 +371,13 @@ void main() {
       find.byKey(const Key('recovery-passphrase-confirm')),
       'pending gate replacement phrase',
     );
+    await tester.ensureVisible(
+      find.byKey(const Key('local-continuity-consent')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('local-continuity-consent')));
+    await tester.ensureVisible(find.byKey(const Key('authority-only-consent')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('authority-only-consent')));
     await tester.scrollUntilVisible(
       find.text('Choose encrypted recovery file'),
@@ -372,10 +392,12 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     await tester.tap(find.byKey(const Key('create-company')));
+    await tester.binding.setSurfaceSize(const Size(800, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     for (
       var attempt = 0;
       attempt < 50 &&
-          find.byKey(const Key('company-signout')).evaluate().isEmpty;
+          find.textContaining('Company ID:').evaluate().isEmpty;
       attempt++
     ) {
       await tester.runAsync(
@@ -383,6 +405,12 @@ void main() {
       );
       await tester.pump();
     }
+    expect(find.textContaining('Company ID:'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('company-signout')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.byKey(const Key('company-signout')), findsOneWidget);
     expect(destination.existsSync(), isTrue);
     expect(find.text('Parts'), findsNothing);
@@ -596,7 +624,15 @@ void main() {
         find.byKey(const Key('recovery-passphrase-confirm')),
         'separate recovery phrase 123',
       );
+      await tester.ensureVisible(
+        find.byKey(const Key('local-continuity-consent')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('local-continuity-consent')));
+      await tester.ensureVisible(
+        find.byKey(const Key('authority-only-consent')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('authority-only-consent')));
       await tester.scrollUntilVisible(
         find.text('Choose encrypted recovery file'),
@@ -630,7 +666,12 @@ void main() {
       expect(find.textContaining('Company ID:'), findsOneWidget);
       expect(find.text('Parts'), findsNothing);
       expect(find.text('Jobs'), findsNothing);
-      await tester.ensureVisible(find.byKey(const Key('company-signout')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('company-signout')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('company-signout')));
       await tester.pumpAndSettle();
       expect(find.text('Company locked'), findsOneWidget);
@@ -720,7 +761,13 @@ void main() {
       find.byKey(const Key('recovery-passphrase-confirm')),
       'background recovery phrase',
     );
+    await tester.ensureVisible(
+      find.byKey(const Key('local-continuity-consent')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('local-continuity-consent')));
+    await tester.ensureVisible(find.byKey(const Key('authority-only-consent')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('authority-only-consent')));
     await tester.scrollUntilVisible(
       find.text('Choose encrypted recovery file'),

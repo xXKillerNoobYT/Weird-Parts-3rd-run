@@ -2,7 +2,30 @@ part of 'job_line_commands.dart';
 
 /// Only the verifier in this library can construct a session. A valid carrier
 /// or a caller-selected author cannot replace the original signed assertion.
-final class VerifiedJobLineSession {
+sealed class VerifiedCompanyOperation {
+  String get operationDomain;
+  void validateLiveOwner(OwnerSession? owner);
+  void validateOperationSigningContent(
+    Uint8List bytes,
+    InstallationIdentity identity,
+  );
+}
+
+sealed class VerifiedCompanyReceiptAdmission {
+  String get receiptDomain;
+  CompanyCommandFamily get family;
+  Future<Uint8List> validateSigningContent(
+    AppDatabase db,
+    InstallationIdentity identity,
+    CompanyCommandIntent pending,
+    CompanyTrustAnchor trust,
+    Map<String, int> floors,
+  );
+}
+
+final class VerifiedJobLineSession extends VerifiedCompanyOperation {
+  @override
+  String get operationDomain => 'wiredpart.job.line.operation@1:';
   VerifiedJobLineSession._(
     this.command,
     Map<String, Object?> proof,
@@ -20,6 +43,7 @@ final class VerifiedJobLineSession {
   Map<String, Object?> get _proof => _object(jsonDecode(_proofBytes));
   Map<String, Object?> get _assertion => _object(_proof['body']);
 
+  @override
   void validateLiveOwner(OwnerSession? owner) {
     final assertion = _assertion;
     if (assertion['v'] != 2) return;
@@ -40,6 +64,7 @@ final class VerifiedJobLineSession {
 
   /// The protected signer accepts only a complete operation covered by this
   /// opaque proof. Its signature domain cannot mint a login assertion.
+  @override
   void validateOperationSigningContent(
     Uint8List bytes,
     InstallationIdentity identity,
@@ -140,7 +165,12 @@ class _ReceiverAuthority {
 
 /// This capability never leaves the command transaction that created it.
 /// Public installation APIs cannot manufacture an admitted receipt from rows.
-final class VerifiedJobLineReceiptAdmission {
+final class VerifiedJobLineReceiptAdmission
+    extends VerifiedCompanyReceiptAdmission {
+  @override
+  String get receiptDomain => 'wiredpart.job.line.receipt@2:';
+  @override
+  CompanyCommandFamily get family => CompanyCommandFamily.jobLinePatch;
   VerifiedJobLineReceiptAdmission._(
     this._db,
     this._candidate,
@@ -154,6 +184,7 @@ final class VerifiedJobLineReceiptAdmission {
   final VerifiedJobLineSession _verified;
   final CompanyCommandIntent _intent;
 
+  @override
   Future<Uint8List> validateSigningContent(
     AppDatabase db,
     InstallationIdentity identity,
@@ -370,16 +401,20 @@ class JobLineAuthorization {
   }
 
   Future<_ReceiverAuthority> _verifyCurrentReceiver(
-    JobLineCommand command,
-  ) async {
+    JobLineCommand? command, {
+    String? companyId,
+    String? shopId,
+  }) async {
+    final company = command?.companyId ?? companyId!;
+    final shop = command?.shopId ?? shopId!;
     final trust = await installation.readCompanyTrust(db);
-    if (trust == null || trust.companyId.value != command.companyId) {
+    if (trust == null || trust.companyId.value != company) {
       throw const JobLineRefusal('company is not enrolled');
     }
     final factsRow =
         await (db.select(db.companyAuthorityFacts)..where(
               (t) =>
-                  t.companyId.equals(command.companyId) &
+                  t.companyId.equals(company) &
                   t.commitment.equals(trust.factsCommitment),
             ))
             .getSingleOrNull();
@@ -407,8 +442,8 @@ class JobLineAuthorization {
       'entities',
     });
     if (!(factsBody['v'] == 1 || v2) ||
-        factsBody['company'] != command.companyId ||
-        (v2 && factsBody['shop'] != command.shopId) ||
+        factsBody['company'] != company ||
+        (v2 && factsBody['shop'] != shop) ||
         factsBody['authority'] != trust.authorityVersion ||
         factsBody['policy'] != trust.policy ||
         _digest(factsBody) != trust.factsCommitment) {
@@ -437,6 +472,17 @@ class JobLineAuthorization {
     );
     final facts = _CompanyFacts(factsBody);
     final floors = installation.knownSecurityFloors;
+    if (v2) {
+      final membership = await resolveCompanyMembership(
+        db: db,
+        installation: installation,
+      );
+      if (!(membership.device['shops'] as List).contains(shop)) {
+        throw const JobLineRefusal('receiving installation shop denied');
+      }
+      if (command != null) facts.entity('jobLine', command.lineId, shop: shop);
+      return _ReceiverAuthority(facts, trust, Map.unmodifiable(floors));
+    }
     bool allows(Map<String, Object?> value, String key, String item) =>
         value[key] is List && (value[key] as List).contains(item);
     final localIdentity = installation.identity!;
@@ -473,7 +519,7 @@ class JobLineAuthorization {
     _id(receiverId);
     _id(receiverGrant);
     if (receiver['revoked'] != false ||
-        !allows(receiver, 'shops', command.shopId) ||
+        !allows(receiver, 'shops', shop) ||
         receiver['version'] is! int ||
         (receiver['version'] as int) < 1 ||
         (receiver['version'] as int) < (floors['grant.$receiverGrant'] ?? 1) ||
@@ -483,11 +529,10 @@ class JobLineAuthorization {
     }
     if (factsBody['authority'] is! int ||
         (factsBody['authority'] as int) < 1 ||
-        (factsBody['authority'] as int) <
-            (floors['authority.${command.companyId}'] ?? 0)) {
+        (factsBody['authority'] as int) < (floors['authority.$company'] ?? 0)) {
       throw const JobLineRefusal('authority version below protected floor');
     }
-    facts.entity('jobLine', command.lineId, shop: command.shopId);
+    if (command != null) facts.entity('jobLine', command.lineId, shop: shop);
     return _ReceiverAuthority(facts, trust, Map.unmodifiable(floors));
   }
 }

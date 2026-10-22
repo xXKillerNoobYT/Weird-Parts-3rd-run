@@ -43,10 +43,33 @@ void requireLegacyBusinessFile(File file) {
     final schema = db.select('PRAGMA user_version').single.values.first as int;
     if (schema > kAppSchemaVersion ||
         (schema >= 3 && !priorCompanyMarkerTables.every(names.contains)) ||
-        (schema >= 5 && !names.contains('company_bootstrap_witnesses'))) {
+        (schema >= 5 && !names.contains('company_bootstrap_witnesses')) ||
+        (schema >= 6 && !names.contains('company_jobs')) ||
+        (schema >= 7 &&
+            !const {
+              'company_membership_certificates',
+              'company_join_requests',
+              'company_join_events',
+            }.every(names.contains))) {
       throw const BackupFormatException(
         'Unsupported or incomplete company database',
       );
+    }
+    if (schema >= 7) {
+      final expected = {
+        ...companyJoinTableColumns,
+        if (schema >= 8) ...companySyncTableColumns,
+      };
+      for (final table in expected.keys) {
+        final columns = db.select('PRAGMA table_info("$table")');
+        final actual = columns.map((r) => r['name'] as String).toSet();
+        if (actual.length != expected[table]!.length ||
+            !actual.containsAll(expected[table]!)) {
+          throw const BackupFormatException(
+            'Unsupported or incomplete company enrollment schema',
+          );
+        }
+      }
     }
     for (final table in companyMarkerTables.where(names.contains)) {
       if (db.select('SELECT 1 FROM $table LIMIT 1').isNotEmpty) {
