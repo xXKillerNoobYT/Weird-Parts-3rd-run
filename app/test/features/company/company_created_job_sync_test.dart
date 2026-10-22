@@ -115,7 +115,7 @@ Future<Map<String, Object?>> syncAttackWire(
   String run,
   String action,
   Object? data, [
-  String protocol = 'company.job.sync@2',
+  String protocol = 'company.job.sync@3',
 ]) async {
   final keys = pair.keys;
   final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);

@@ -62,3 +62,7 @@ class CompanyJobNames extends Table {
 }
 
 class CompanyJobNamePeerAcks extends CompanyJobPeerAcks {}
+
+class CompanyJobDetails extends CompanyJobNames {}
+
+class CompanyJobDetailPeerAcks extends CompanyJobPeerAcks {}

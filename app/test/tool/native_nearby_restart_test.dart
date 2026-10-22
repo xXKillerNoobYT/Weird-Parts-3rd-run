@@ -201,6 +201,7 @@ void main() {
     7: 25,
     8: 26,
     9: 28,
+    10: 30,
   }.entries) {
     test(
       'schema${entry.key} proof retains its exact table count and cannot relabel current schema',
@@ -222,15 +223,17 @@ void main() {
         expect(bytes(), before);
         proof['tableCount'] = entry.value + 1;
         save();
+        final wrongCountBefore = bytes();
         expect(read, throwsA(isA<NativeTestFailure>()));
+        expect(bytes(), wrongCountBefore);
       },
     );
   }
 
-  test('unknown schema10 proof refuses without writes', () {
+  test('unknown schema11 proof refuses without writes', () {
     final proof = envelope['proof'] as Map<String, dynamic>;
-    proof['schemaVersion'] = 10;
-    proof['tableCount'] = 25;
+    proof['schemaVersion'] = 11;
+    proof['tableCount'] = 30;
     save();
     final before = bytes();
     expect(read, throwsA(isA<NativeTestFailure>()));

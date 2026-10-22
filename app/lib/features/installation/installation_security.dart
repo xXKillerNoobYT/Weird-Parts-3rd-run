@@ -28,6 +28,13 @@ import '../job_line_commands/job_line_commands.dart'
         VerifiedJobLineSession,
         VerifiedCreateJobSession,
         VerifiedRenameJobSession,
+        VerifiedJobDetailsSession,
+        PatchJobDetails,
+        JobDetailField,
+        JobDetailsAuthorization,
+        CompanyJobDetailsCommands,
+        validateJobDetailsCommit,
+        verifyJobDetailsReceipt,
         RenameJob,
         RenameJobAuthorization,
         CompanyJobNameCommands,
@@ -152,6 +159,39 @@ Future<String> _companyCommandWitness(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
+  if (intent.family == CompanyCommandFamily.jobDetails ||
+      intent.family == CompanyCommandFamily.jobDetailsIncoming) {
+    final names =
+        await (db.select(db.companyJobDetails)
+              ..where(
+                (t) =>
+                    t.companyId.equals(intent.companyId) &
+                    t.jobId.equals(intent.lineId),
+              )
+              ..orderBy([(t) => OrderingTerm.asc(t.operationCommitment)])
+              ..limit(129))
+            .get();
+    if (names.length > 128) {
+      throw StateError('Details recovery capacity reached');
+    }
+    final base = await (db.select(
+      db.companyJobs,
+    )..where((t) => t.jobId.equals(intent.lineId))).get();
+    final jobs = await (db.select(
+      db.jobs,
+    )..where((t) => t.id.equals(intent.lineId))).get();
+    return hashes.sha256
+        .convert(
+          utf8.encode(
+            _securityCanonical({
+              'details': names.map((r) => r.toJson()).toList(),
+              'baseline': base.map((r) => r.toJson()).toList(),
+              'jobs': jobs.map((r) => r.toJson()).toList(),
+            }),
+          ),
+        )
+        .toString();
+  }
   if (intent.family == CompanyCommandFamily.jobName ||
       intent.family == CompanyCommandFamily.jobNameIncoming) {
     final names =
@@ -279,6 +319,10 @@ Future<void> _validateCompanyCommit(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
+  if (intent.family == CompanyCommandFamily.jobDetails ||
+      intent.family == CompanyCommandFamily.jobDetailsIncoming) {
+    return validateJobDetailsCommit(db, intent);
+  }
   if (intent.family == CompanyCommandFamily.jobName ||
       intent.family == CompanyCommandFamily.jobNameIncoming) {
     return validateJobNameCommit(db, intent);
@@ -380,6 +424,21 @@ Future<JobLineReceipt?> _companyCommandReceipt(
   AppDatabase db,
   CompanyCommandIntent intent,
 ) async {
+  if (intent.family == CompanyCommandFamily.jobDetails ||
+      intent.family == CompanyCommandFamily.jobDetailsIncoming) {
+    final row = await (db.select(
+      db.companyJobDetails,
+    )..where((t) => t.receiptKey.equals(intent.receiptKey))).getSingleOrNull();
+    return row == null
+        ? null
+        : JobLineReceipt(
+            receiptKey: row.receiptKey,
+            companyId: row.companyId,
+            operationCommitment: row.operationCommitment,
+            commandCommitment: row.commandCommitment,
+            receiptBytes: row.receiptBytes,
+          );
+  }
   if (intent.family == CompanyCommandFamily.jobName ||
       intent.family == CompanyCommandFamily.jobNameIncoming) {
     final row = await (db.select(
@@ -422,6 +481,8 @@ enum CompanyCommandFamily {
   jobCreateIncoming,
   jobName,
   jobNameIncoming,
+  jobDetails,
+  jobDetailsIncoming,
 }
 
 Future<void> _verifyCompanyReceipt(
@@ -430,6 +491,10 @@ Future<void> _verifyCompanyReceipt(
   String store,
   CompanyCommandFamily family,
 ) async {
+  if (family == CompanyCommandFamily.jobDetails ||
+      family == CompanyCommandFamily.jobDetailsIncoming) {
+    return verifyJobDetailsReceipt(bytes, identity, store, family);
+  }
   if (family == CompanyCommandFamily.jobName ||
       family == CompanyCommandFamily.jobNameIncoming) {
     return verifyJobNameReceipt(bytes, identity, store, family);
@@ -485,6 +550,10 @@ final class CompanyCommandIntent {
         afterWitness: after ?? afterWitness,
       );
   Map<String, Object?> encode() => {
+    if (family == CompanyCommandFamily.jobDetails)
+      'family': 'job.details.patch@1',
+    if (family == CompanyCommandFamily.jobDetailsIncoming)
+      'family': 'job.details.incoming@1',
     if (family == CompanyCommandFamily.jobName) 'family': 'job.name.set@1',
     if (family == CompanyCommandFamily.jobNameIncoming)
       'family': 'job.name.incoming@1',
@@ -507,6 +576,8 @@ final class CompanyCommandIntent {
         !((raw.length == 10 && !raw.containsKey('family')) ||
             (raw.length == 11 &&
                 [
+                  'job.details.patch@1',
+                  'job.details.incoming@1',
                   'job.name.set@1',
                   'job.name.incoming@1',
                   'job.create@1',
@@ -536,7 +607,11 @@ final class CompanyCommandIntent {
       }
     }
     return CompanyCommandIntent(
-      family: raw['family'] == 'job.name.set@1'
+      family: raw['family'] == 'job.details.patch@1'
+          ? CompanyCommandFamily.jobDetails
+          : raw['family'] == 'job.details.incoming@1'
+          ? CompanyCommandFamily.jobDetailsIncoming
+          : raw['family'] == 'job.name.set@1'
           ? CompanyCommandFamily.jobName
           : raw['family'] == 'job.name.incoming@1'
           ? CompanyCommandFamily.jobNameIncoming
@@ -1240,6 +1315,8 @@ class InstallationSecurity {
           );
           final value =
               (intent.family == CompanyCommandFamily.jobCreateIncoming ||
+                  intent.family == CompanyCommandFamily.jobDetails ||
+                  intent.family == CompanyCommandFamily.jobDetailsIncoming ||
                   intent.family == CompanyCommandFamily.jobName ||
                   intent.family == CompanyCommandFamily.jobNameIncoming)
               ? <String, Object?>{}

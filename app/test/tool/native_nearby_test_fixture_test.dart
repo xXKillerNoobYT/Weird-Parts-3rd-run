@@ -115,7 +115,7 @@ void main() {
       await seedValidationShop(db, workspace!);
       final baseline = await NativeFixtureSnapshot.capture(db, workspace!);
       expect(baseline.schemaVersion, kAppSchemaVersion);
-      expect(baseline.domain.length, 28);
+      expect(baseline.domain.length, 30);
       expect(baseline.rowCount, 14);
       expect(baseline.referenceCount, 16);
       expect(baseline.referencesValid, true);
@@ -152,76 +152,81 @@ void main() {
     'missing-history-table',
     'missing-company-jobs',
     'nonempty-company-name-table',
-    'unknown-schema10',
+    'unknown-schema11',
+    'extra-details-column',
+    'missing-details-column',
     'missing-column',
   ]) {
-    test(
-      'preflight rejects $mutation database without modifying its bytes',
-      () async {
-        workspace = ValidationWorkspace.open(
-          run: 'unit',
-          role: ValidationRole.sender,
-          temporaryDirectory: temp,
-        );
-        final file = File(
-          p.join(workspace!.support.path, 'wired_parts.sqlite'),
-        );
-        final db = AppDatabase.forTesting(NativeDatabase(file));
-        await seedValidationShop(db, workspace!);
-        workspace!.markInitialized();
-        await db.close();
-        if (mutation == 'empty') {
-          file.writeAsBytesSync([]);
-        } else if (mutation == 'malformed') {
-          file.writeAsStringSync('not a SQLite database');
-        } else {
-          final corrupt = raw.sqlite3.open(file.path);
-          try {
-            if (mutation == 'schema') {
-              corrupt.execute('PRAGMA user_version = 1');
-            } else if (mutation == 'missing-profile') {
-              corrupt.execute('DELETE FROM device_profiles');
-            } else if (mutation == 'missing-table') {
-              corrupt.execute('DROP TABLE styles');
-            } else if (mutation == 'missing-history-table') {
-              corrupt.execute('DROP TABLE job_line_operations');
-            } else if (mutation == 'missing-company-jobs') {
-              corrupt.execute('DROP TABLE company_jobs');
-            } else if (mutation == 'nonempty-company-name-table') {
-              corrupt.execute(
-                "INSERT INTO company_job_names (company_id, shop_id, job_id, origin_generation, request_id, operation_commitment, command_commitment, operation_bytes, receipt_key, receipt_bytes, audit_bytes, outgoing) VALUES ('c', 's', 'j', 'g', 'r', 'o', 'c', 'op', 'k', 'receipt', 'audit', 0)",
-              );
-            } else if (mutation == 'unknown-schema10') {
-              corrupt.execute('PRAGMA user_version = 10');
-            } else if (mutation == 'missing-column') {
-              corrupt.execute('ALTER TABLE job_lines DROP COLUMN notes');
-            } else {
-              corrupt.execute("UPDATE device_profiles SET id = 'other-device'");
-            }
-          } finally {
-            corrupt.dispose();
+    test('preflight rejects $mutation database without modifying its bytes', () async {
+      workspace = ValidationWorkspace.open(
+        run: 'unit',
+        role: ValidationRole.sender,
+        temporaryDirectory: temp,
+      );
+      final file = File(p.join(workspace!.support.path, 'wired_parts.sqlite'));
+      final db = AppDatabase.forTesting(NativeDatabase(file));
+      await seedValidationShop(db, workspace!);
+      workspace!.markInitialized();
+      await db.close();
+      if (mutation == 'empty') {
+        file.writeAsBytesSync([]);
+      } else if (mutation == 'malformed') {
+        file.writeAsStringSync('not a SQLite database');
+      } else {
+        final corrupt = raw.sqlite3.open(file.path);
+        try {
+          if (mutation == 'schema') {
+            corrupt.execute('PRAGMA user_version = 1');
+          } else if (mutation == 'missing-profile') {
+            corrupt.execute('DELETE FROM device_profiles');
+          } else if (mutation == 'missing-table') {
+            corrupt.execute('DROP TABLE styles');
+          } else if (mutation == 'missing-history-table') {
+            corrupt.execute('DROP TABLE job_line_operations');
+          } else if (mutation == 'missing-company-jobs') {
+            corrupt.execute('DROP TABLE company_jobs');
+          } else if (mutation == 'nonempty-company-name-table') {
+            corrupt.execute(
+              "INSERT INTO company_job_names (company_id, shop_id, job_id, origin_generation, request_id, operation_commitment, command_commitment, operation_bytes, receipt_key, receipt_bytes, audit_bytes, outgoing) VALUES ('c', 's', 'j', 'g', 'r', 'o', 'c', 'op', 'k', 'receipt', 'audit', 0)",
+            );
+          } else if (mutation == 'unknown-schema11') {
+            corrupt.execute('PRAGMA user_version = 11');
+          } else if (mutation == 'extra-details-column') {
+            corrupt.execute(
+              'ALTER TABLE company_job_details ADD COLUMN untrusted TEXT',
+            );
+          } else if (mutation == 'missing-details-column') {
+            corrupt.execute(
+              'ALTER TABLE company_job_detail_peer_acks DROP COLUMN ack_bytes',
+            );
+          } else if (mutation == 'missing-column') {
+            corrupt.execute('ALTER TABLE job_lines DROP COLUMN notes');
+          } else {
+            corrupt.execute("UPDATE device_profiles SET id = 'other-device'");
           }
+        } finally {
+          corrupt.dispose();
         }
-        final before = file.readAsBytesSync();
-        workspace!.close();
-        expect(
-          () => openExistingNativeFixture(
-            run: 'unit',
-            role: ValidationRole.sender,
-            temporaryDirectory: temp,
-          ),
-          throwsA(isA<NativeTestFailure>()),
-        );
-        expect(file.readAsBytesSync(), before);
-        // Reacquisition proves the rejected preflight released its owned lock.
-        workspace = ValidationWorkspace.open(
+      }
+      final before = file.readAsBytesSync();
+      workspace!.close();
+      expect(
+        () => openExistingNativeFixture(
           run: 'unit',
           role: ValidationRole.sender,
           temporaryDirectory: temp,
-          requireExisting: true,
-        );
-      },
-    );
+        ),
+        throwsA(isA<NativeTestFailure>()),
+      );
+      expect(file.readAsBytesSync(), before);
+      // Reacquisition proves the rejected preflight released its owned lock.
+      workspace = ValidationWorkspace.open(
+        run: 'unit',
+        role: ValidationRole.sender,
+        temporaryDirectory: temp,
+        requireExisting: true,
+      );
+    });
   }
 
   test(
@@ -258,6 +263,7 @@ void main() {
     7: 25,
     8: 26,
     9: 28,
+    10: 30,
   }.entries) {
     test(
       'frozen schema${entry.key} capture and preflight preserve declared proof and bytes',
@@ -274,7 +280,12 @@ void main() {
         await seedValidationShop(db, workspace!);
         for (final table in db.allTables) {
           final name = table.actualTableName;
-          if ((entry.key < 9 &&
+          if ((entry.key < 10 &&
+                  {
+                    'company_job_details',
+                    'company_job_detail_peer_acks',
+                  }.contains(name)) ||
+              (entry.key < 9 &&
                   {
                     'company_job_names',
                     'company_job_name_peer_acks',
@@ -329,6 +340,8 @@ void main() {
 
   for (final history in [
     'company_job_peer_acks',
+    'company_job_details',
+    'company_job_detail_peer_acks',
     'company_jobs',
     'company_membership_certificates',
     'company_join_requests',
@@ -398,7 +411,9 @@ void main() {
     'missing-company-jobs',
     'missing-company-join',
     'nonempty-company-name-table',
-    'unknown-schema10',
+    'unknown-schema11',
+    'extra-details-column',
+    'missing-details-column',
   ]) {
     test('capture rejects $mutation without altering the source', () async {
       workspace = ValidationWorkspace.open(
@@ -417,8 +432,16 @@ void main() {
         await db.customStatement(
           "INSERT INTO company_job_names (company_id, shop_id, job_id, origin_generation, request_id, operation_commitment, command_commitment, operation_bytes, receipt_key, receipt_bytes, audit_bytes, outgoing) VALUES ('c', 's', 'j', 'g', 'r', 'o', 'c', 'op', 'k', 'receipt', 'audit', 0)",
         );
+      } else if (mutation == 'extra-details-column') {
+        await db.customStatement(
+          'ALTER TABLE company_job_details ADD COLUMN untrusted TEXT',
+        );
+      } else if (mutation == 'missing-details-column') {
+        await db.customStatement(
+          'ALTER TABLE company_job_detail_peer_acks DROP COLUMN ack_bytes',
+        );
       } else {
-        await db.customStatement('PRAGMA user_version = 10');
+        await db.customStatement('PRAGMA user_version = 11');
       }
       final version = (await db.customSelect('PRAGMA user_version').getSingle())
           .read<int>('user_version');

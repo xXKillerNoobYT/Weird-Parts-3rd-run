@@ -27,6 +27,7 @@ void main() {
       ...companyJoinTableColumns,
       ...companySyncTableColumns,
       ...companyNameTableColumns,
+      ...companyDetailsTableColumns,
     }.keys) {
       raw.execute('DROP TABLE "$table"');
     }
@@ -92,6 +93,7 @@ void main() {
     ...companyJoinTableColumns,
     ...companySyncTableColumns,
     ...companyNameTableColumns,
+    ...companyDetailsTableColumns,
   }.keys) {
     test('orphan $table refuses Create Join and legacy Jobs without mutation', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -100,6 +102,7 @@ void main() {
         ...companyJoinTableColumns,
         ...companySyncTableColumns,
         ...companyNameTableColumns,
+        ...companyDetailsTableColumns,
       }[table]!.toList();
       await db.customStatement(
         'INSERT INTO "$table" (${columns.map((n) => '"$n"').join(',')}) VALUES (${columns.map((_) => '?').join(',')})',

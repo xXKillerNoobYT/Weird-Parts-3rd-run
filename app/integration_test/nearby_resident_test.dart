@@ -484,6 +484,7 @@ final class _Resident {
         await Future<void>.delayed(const Duration(seconds: 2));
         rejectNativeTest('exit-unverified');
       case NativeTestAction.jobNameUi:
+      case NativeTestAction.jobDetailsUi:
         rejectNativeTest('wrong-phase');
     }
   }

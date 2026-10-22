@@ -377,6 +377,8 @@ void main() {
         final raw = sqlite.sqlite3.open('${f.root.path}/shop.sqlite');
         raw.execute('DROP TABLE company_job_names');
         raw.execute('DROP TABLE company_job_name_peer_acks');
+        raw.execute('DROP TABLE company_job_details');
+        raw.execute('DROP TABLE company_job_detail_peer_acks');
         raw.execute('PRAGMA user_version = 8');
         raw.dispose();
         f.db = AppDatabase.forTesting(
@@ -392,7 +394,7 @@ void main() {
         expect(
           (await f.db.customSelect('PRAGMA user_version').getSingle())
               .read<int>('user_version'),
-          9,
+          kAppSchemaVersion,
         );
         expect((await f.db.select(f.db.companyJobs).get()).single, before);
         expect(await f.db.select(f.db.jobs).get(), jobs);
@@ -450,7 +452,7 @@ class NameFixture {
     observedHeads: parents,
     name: name,
   );
-  static Future<NameFixture> create() async {
+  static Future<NameFixture> create({String? jobId}) async {
     final root = Directory.systemTemp.createTempSync('job-names-');
     final db = AppDatabase.forTesting(
       NativeDatabase(File('${root.path}/shop.sqlite')),
@@ -473,7 +475,7 @@ class NameFixture {
     final create = CreateJob(
       companyId: identity.companyId,
       shopId: identity.shopId,
-      jobId: const Uuid().v4(),
+      jobId: jobId ?? const Uuid().v4(),
       requestId: const Uuid().v4(),
       name: 'Baseline',
     );

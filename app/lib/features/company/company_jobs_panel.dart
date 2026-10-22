@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../installation/installation_security.dart';
+import 'company_job_details_section.dart';
 import '../job_line_commands/job_line_commands.dart';
 
 class CompanyJobsPanel extends StatefulWidget {
@@ -24,6 +25,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   CompanyJobView? _editing;
   RenameJob? _pendingRename;
   bool _renameAvailable = false;
+  bool _detailsAvailable = false;
   Map<String, int> _confirmedPeers = const {};
   CreateJob? _pending;
   String? _error;
@@ -50,6 +52,9 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         ownerSession: widget.owner,
       );
       final renameAvailable = await widget.commands.canRenameJobs(widget.owner);
+      final detailsAvailable = await widget.commands.canEditJobDetails(
+        widget.owner,
+      );
       final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
         widget.commands.enrollment,
         widget.owner,
@@ -58,6 +63,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       setState(() {
         _jobs = jobs;
         _renameAvailable = renameAvailable;
+        _detailsAvailable = detailsAvailable;
         _confirmedPeers = confirmed;
         _available = true;
         _loading = false;
@@ -198,6 +204,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   }
 
   Widget _jobTile(CompanyJobView job) => Column(
+    key: Key('company-job-view-${job.baseJob.id}'),
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       ListTile(
@@ -243,6 +250,14 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
               ),
           ],
         ),
+      CompanyJobDetailsSection(
+        key: Key('company-job-details-${job.baseJob.id}'),
+        job: job,
+        commands: widget.commands,
+        owner: widget.owner,
+        available: _detailsAvailable,
+        onSaved: _load,
+      ),
     ],
   );
 
