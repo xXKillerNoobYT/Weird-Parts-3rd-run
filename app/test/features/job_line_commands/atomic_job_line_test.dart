@@ -2080,6 +2080,11 @@ void main() {
       final file = File('${fixture.directory.path}/1.db');
       var raw = raw_sqlite.sqlite3.open(file.path);
       for (final table in [
+        'company_bootstrap_witnesses',
+        'company_jobs',
+        'company_membership_certificates',
+        'company_join_requests',
+        'company_join_events',
         'company_authority_facts',
         'job_line_baselines',
         'job_line_operations',
@@ -2127,6 +2132,11 @@ void main() {
       final file = fixture.files[1];
       final raw = raw_sqlite.sqlite3.open(file.path);
       const history = [
+        'company_bootstrap_witnesses',
+        'company_jobs',
+        'company_membership_certificates',
+        'company_join_requests',
+        'company_join_events',
         'company_authority_facts',
         'job_line_baselines',
         'job_line_operations',

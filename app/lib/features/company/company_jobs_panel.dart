@@ -21,6 +21,7 @@ class CompanyJobsPanel extends StatefulWidget {
 class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   final _name = TextEditingController();
   List<Job> _jobs = const [];
+  Map<String, int> _confirmedPeers = const {};
   CreateJob? _pending;
   String? _error;
   bool _loading = true;
@@ -42,9 +43,14 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   Future<void> _load() async {
     try {
       final jobs = await widget.commands.listJobs(ownerSession: widget.owner);
+      final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
+        widget.commands.enrollment,
+        widget.owner,
+      );
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
         _jobs = jobs;
+        _confirmedPeers = confirmed;
         _available = true;
         _loading = false;
       });
@@ -142,7 +148,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
             ),
           ),
           const Text(
-            'Jobs stay on this installation. Outgoing operations are prepared locally; delivery is pending.',
+            'Jobs are saved on this installation. Use Sync Now with a verified retained peer. Confirmations describe the last successful exchange.',
           ),
           if (_jobs.isEmpty) const Text('No company Jobs yet.'),
           Column(
@@ -153,7 +159,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
                   key: Key('company-job-${job.id}'),
                   title: Text(job.name),
                   subtitle: Text(
-                    'Job ID: ${job.id}\nPrepared locally, delivery pending',
+                    'Job ID: ${job.id}\n${(_confirmedPeers[job.id] ?? 0) > 0 ? 'Last confirmed by ${_confirmedPeers[job.id]} retained peer(s)' : 'Peer delivery status unknown'}',
                   ),
                 ),
             ],

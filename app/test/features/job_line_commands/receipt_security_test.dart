@@ -876,27 +876,27 @@ void main() {
     },
   );
 
-  test(
-    'frozen schema3 migration refuses newer schema without row or version changes',
-    () async {
-      await fixture.commit(
-        0,
-        fixture.command(const JobLinePatch(notes: SetField('Kept'))),
-      );
-      await fixture.databases[0].close();
-      final before = snapshot(fixture.files[0]);
-      final old = Schema3Database(NativeDatabase(fixture.files[0]));
-      try {
-        await expectLater(old.customSelect('SELECT 1').get(), throwsStateError);
-      } finally {
-        await old.close();
-      }
-      final raw = sqlite.sqlite3.open(fixture.files[0].path);
-      expect(raw.select('PRAGMA user_version').single.values.single, kAppSchemaVersion);
-      raw.dispose();
-      expect(snapshot(fixture.files[0]), before);
-    },
-  );
+  test('frozen schema3 migration refuses newer schema without row or version changes', () async {
+    await fixture.commit(
+      0,
+      fixture.command(const JobLinePatch(notes: SetField('Kept'))),
+    );
+    await fixture.databases[0].close();
+    final before = snapshot(fixture.files[0]);
+    final old = Schema3Database(NativeDatabase(fixture.files[0]));
+    try {
+      await expectLater(old.customSelect('SELECT 1').get(), throwsStateError);
+    } finally {
+      await old.close();
+    }
+    final raw = sqlite.sqlite3.open(fixture.files[0].path);
+    expect(
+      raw.select('PRAGMA user_version').single.values.single,
+      kAppSchemaVersion,
+    );
+    raw.dispose();
+    expect(snapshot(fixture.files[0]), before);
+  });
 
   test('populated experimental schema3 refuses upgrade before retag or history writes', () async {
     await fixture.commit(
@@ -905,6 +905,15 @@ void main() {
     );
     await fixture.databases[0].close();
     final raw = sqlite.sqlite3.open(fixture.files[0].path);
+    for (final table in [
+      'company_bootstrap_witnesses',
+      'company_jobs',
+      'company_membership_certificates',
+      'company_join_requests',
+      'company_join_events',
+    ]) {
+      raw.execute('DROP TABLE $table');
+    }
     raw.execute('PRAGMA user_version = 3');
     raw.dispose();
     final before = snapshot(fixture.files[0]);
@@ -925,6 +934,15 @@ void main() {
     () async {
       await fixture.databases[0].close();
       final raw = sqlite.sqlite3.open(fixture.files[0].path);
+      for (final table in [
+        'company_bootstrap_witnesses',
+        'company_jobs',
+        'company_membership_certificates',
+        'company_join_requests',
+        'company_join_events',
+      ]) {
+        raw.execute('DROP TABLE $table');
+      }
       raw.execute('PRAGMA user_version = 3');
       raw.dispose();
       final before = snapshot(fixture.files[0]);

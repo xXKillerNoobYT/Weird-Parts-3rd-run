@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../../data/app_database.dart';
 import '../installation/installation_security.dart';
+import 'company_store_markers.dart';
 
 final class CompanyBootstrapRefusal implements Exception {
   const CompanyBootstrapRefusal(this.message);
@@ -20,6 +21,7 @@ final class CompanyBootstrap {
     AppDatabase db, {
     Directory? photosDirectory,
   }) async {
+    await requireCompanyJoinSchema(db);
     for (final table in <String>[
       'categories',
       'styles',
@@ -33,6 +35,10 @@ final class CompanyBootstrap {
       'supplier_listings',
       'jobs',
       'company_jobs',
+      'company_membership_certificates',
+      'company_join_requests',
+      'company_join_events',
+      'company_job_peer_acks',
       'job_lines',
       'order_splits',
       'company_bootstrap_witnesses',

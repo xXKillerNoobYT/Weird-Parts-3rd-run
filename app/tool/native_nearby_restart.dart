@@ -82,7 +82,9 @@ final class NativeRestartExpectation {
               (proof.schemaVersion == 3 && proof.tableCount == 20) ||
               (proof.schemaVersion == 4 && proof.tableCount == 20) ||
               (proof.schemaVersion == 5 && proof.tableCount == 21) ||
-              (proof.schemaVersion == 6 && proof.tableCount == 22)) ||
+              (proof.schemaVersion == 6 && proof.tableCount == 22) ||
+              (proof.schemaVersion == 7 && proof.tableCount == 25) ||
+              (proof.schemaVersion == 8 && proof.tableCount == 26)) ||
           proof.assetCount != 1 ||
           !proof.integrityValid ||
           !proof.referencesValid) {
