@@ -4,7 +4,7 @@ Status: ADMITTED_DESIGN_SCOPE, 2026-10-11. This is the Stage 1 decision under [i
 
 ## Review follow-up clarification, 2026-10-22
 
-The additions in the revocation and durable-receipt paragraphs below clarify review findings received after the 2026-10-11 admission. They are separate from that admitted design and await final review. These additions are unimplemented and untested; the rest of this document retains its prior status and evidence limits. They do not change live credentials or access policy, and they do not enable Phase 5 work.
+The additions in the revocation and durable-receipt paragraphs below clarify review findings received after the 2026-10-11 admission. They are separate from that admitted design; the dated [scoped independent review disposition](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/pull/46#issuecomment-6334810246) records PASS_SCOPED on 2026-10-22. These additions are unimplemented and untested; the rest of this document retains its prior status and evidence limits. They do not change live credentials or access policy, and they do not enable Phase 5 work.
 
 The inspected application revision is `c998590f1f7efe1cca14b8aacffcd3792beab4c2`, tree `c2a681a8955539c466d31c13ab8bad2037092fb7`. Its [native one-way copy gate](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/84#issuecomment-6106016809) and [current-build encrypted recovery gate](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/59#issuecomment-6106348163) passed in isolated Windows and Mac installations. Neither proves genuine two-way sync. Windows full-suite failure #89 and CI UNKNOWN remain separate landing gates.
 
