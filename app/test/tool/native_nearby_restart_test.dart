@@ -48,7 +48,11 @@ void main() {
   };
 
   setUp(() async {
-    temp = Directory.systemTemp.createTempSync('native-restart-unit-');
+    temp = Directory(
+      Directory.systemTemp
+          .createTempSync('native-restart-unit-')
+          .resolveSymbolicLinksSync(),
+    );
     workspace = ValidationWorkspace.open(
       run: nativeRestartRun,
       role: ValidationRole.sender,
