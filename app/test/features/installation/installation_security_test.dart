@@ -93,6 +93,191 @@ Future<void> addSecurityFloor(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final unreadable in [false, true]) {
+    testWidgets(
+      'Documents ${unreadable ? 'unreadable database' : 'company history'} refuses app reset before identity or files change',
+      (tester) async {
+        final directory = temporary();
+        final documents = temporary();
+        final db = open(directory);
+        final legacy = open(documents);
+        final store = FakeSecureStore();
+        final local = security(store);
+        late String id;
+        await tester.runAsync(() async {
+          await legacy
+              .into(legacy.companyAuthorityFacts)
+              .insert(
+                CompanyAuthorityFactsCompanion.insert(
+                  companyId: 'synthetic-company',
+                  commitment: 'synthetic-facts',
+                  signedBytes: 'synthetic-signed-facts',
+                ),
+              );
+          await legacy.close();
+          if (unreadable) {
+            File(p.join(documents.path, kSqliteFileName))
+                .writeAsStringSync('unreadable sqlite');
+          }
+          await local.start(db);
+          await db.settingsDao.setSetting('marker', 'preserve');
+          id = await db.settingsDao.ensureDeviceId();
+          await db.settingsDao.setDeviceDisplayName('Preserve profile');
+          await checkpointWalForExport(db);
+        });
+        final photos = Directory(p.join(directory.path, 'part_photos'))
+          ..createSync();
+        File(p.join(photos.path, 'keep.jpg'))
+            .writeAsStringSync('preserve photo');
+        Future<Map<String, Object?>> rows(AppDatabase database) async => {
+          for (final table in database.allTables)
+            table.actualTableName:
+                (await database
+                        .customSelect('SELECT * FROM ${table.actualTableName}')
+                        .get())
+                    .map((r) => jsonEncode(r.data))
+                    .toList()
+                  ..sort(),
+        };
+        final beforeRows = await tester.runAsync(() => rows(db));
+        final protected = store.states[local.namespace]!;
+        final writes = store.writeCalls;
+        final identity = local.identity;
+        final files = <String, List<int>>{};
+        for (final root in [directory, documents]) {
+          for (final file in root.listSync(recursive: true).whereType<File>()) {
+            files[file.path] = file.readAsBytesSync();
+          }
+        }
+        var reopens = 0;
+        await tester.pumpWidget(
+          WiredPartsApp(
+            db: db,
+            pin: PinService(db.settingsDao),
+            deviceId: id,
+            installation: local,
+            reset: LocalDataReset(
+              supportDir: directory,
+              documentsDir: documents,
+            ),
+            reopenDatabase: () {
+              reopens++;
+              return open(directory);
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        final scope = tester.widget<AppScope>(find.byType(AppScope));
+        await tester.runAsync(
+          () => expectLater(
+            scope.wipeLocalData(),
+            unreadable
+                ? throwsA(isA<SqliteException>())
+                : throwsA(isA<BackupFormatException>()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final live = tester.widget<AppScope>(find.byType(AppScope)).db;
+        final afterRows = await tester.runAsync(() => rows(live));
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(live.close);
+        expect(store.states[local.namespace], same(protected));
+        expect(store.states[local.namespace]!.revision, protected.revision);
+        expect(store.states[local.namespace]!.bytes, protected.bytes);
+        expect(store.writeCalls, writes);
+        expect(local.identity, same(identity));
+        expect(local.readiness, InstallationReadiness.ready);
+        expect(reopens, 0);
+        expect(live, same(db));
+        expect(afterRows, beforeRows);
+        for (final entry in files.entries) {
+          // WAL/SHM lifecycle is owned by SQLite; compare persistent files after close.
+          if (entry.key.endsWith('-wal') || entry.key.endsWith('-shm')) {
+            continue;
+          }
+          expect(
+            File(entry.key).readAsBytesSync(),
+            entry.value,
+            reason: entry.key,
+          );
+        }
+        expect(BackupIo.isBusy, isFalse);
+      },
+    );
+  }
+
+  testWidgets(
+    'legacy app reset removes files and activates a fresh bound identity',
+    (tester) async {
+      final directory = temporary();
+      final documents = temporary();
+      final db = open(directory);
+      final legacy = open(documents);
+      final store = FakeSecureStore();
+      final local = security(store);
+      late String oldDeviceId;
+      await tester.runAsync(() async {
+        await legacy.settingsDao.setSetting('marker', 'Documents legacy');
+        await legacy.close();
+        await local.start(db);
+        await addSecurityFloor(store, local, db);
+        oldDeviceId = await db.settingsDao.ensureDeviceId();
+        await db.settingsDao.setSetting('marker', 'Support legacy');
+      });
+      final previous = store.states[local.namespace]!;
+      final oldIdentity = local.identity!.id;
+      final photo = File(p.join(directory.path, 'part_photos', 'remove.jpg'));
+      photo.parent.createSync();
+      photo.writeAsStringSync('remove');
+      var reopens = 0;
+      await tester.pumpWidget(
+        WiredPartsApp(
+          db: db,
+          pin: PinService(db.settingsDao),
+          deviceId: oldDeviceId,
+          installation: local,
+          reset: LocalDataReset(supportDir: directory, documentsDir: documents),
+          reopenDatabase: () {
+            reopens++;
+            return open(directory);
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.runAsync(
+        tester.widget<AppScope>(find.byType(AppScope)).wipeLocalData,
+      );
+      await tester.pumpAndSettle();
+      final scope = tester.widget<AppScope>(find.byType(AppScope));
+      expect(reopens, 1);
+      expect(local.readiness, InstallationReadiness.ready);
+      expect(local.identity!.id, isNot(oldIdentity));
+      expect(store.states[local.namespace]!.revision, isNot(previous.revision));
+      expect(scope.deviceId, isNot(oldDeviceId));
+      expect(photo.existsSync(), isFalse);
+      expect(
+        File(p.join(documents.path, kSqliteFileName)).existsSync(),
+        isFalse,
+      );
+      await tester.runAsync(() async {
+        expect(await scope.db.settingsDao.getSetting('marker'), isNull);
+        final record = jsonDecode(
+          utf8.decode(store.states[local.namespace]!.bytes),
+        ) as Map;
+        final binding = jsonDecode(
+          (await scope.db.settingsDao.getSetting(kInstallationBindingKey))!,
+        ) as Map;
+        expect(binding['id'], record['id']);
+        expect(binding['generation'], record['generation']);
+        expect(binding['public'], record['public']);
+        expect(record['floors']['authority.test-company'], 7);
+      });
+      expect(BackupIo.isBusy, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(scope.db.close);
+    },
+  );
+
   testWidgets(
     'staged restore failure through app callback explicitly retains prior ready identity',
     (tester) async {

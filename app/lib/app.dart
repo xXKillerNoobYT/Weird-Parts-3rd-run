@@ -150,6 +150,8 @@ class _WiredPartsAppState extends State<WiredPartsApp>
     }
     _wiping = true;
     try {
+      await requireLegacyBusinessStore(_db);
+      await widget.reset.preflight();
       await widget.installation?.prepareReset();
       await _db.close();
       try {
@@ -216,6 +218,8 @@ class _WiredPartsAppState extends State<WiredPartsApp>
       await widget.beforeRestore?.call();
       final payload = await load();
       backupSqliteSchemaVersion(payload.sqliteBytes);
+      await requireLegacyBusinessStore(_db);
+      await requireLegacyBusinessPayload(payload);
       final localDeviceProfile = await _db
           .select(_db.deviceProfiles)
           .getSingleOrNull();

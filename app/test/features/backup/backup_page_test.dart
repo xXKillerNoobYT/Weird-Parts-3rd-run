@@ -656,5 +656,8 @@ class _HangReset extends LocalDataReset {
   final Completer<void> gate;
 
   @override
+  Future<void> preflight() async {}
+
+  @override
   Future<void> wipeFiles() => gate.future;
 }

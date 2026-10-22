@@ -174,8 +174,10 @@ void main() {
       );
       final external = File(p.join(temp.path, 'unrelated.sqlite'))
         ..writeAsStringSync('preserve');
-      final legacy = File(p.join(workspace!.documents.path, kSqliteFileName))
-        ..writeAsStringSync('synthetic');
+      final legacy = File(p.join(workspace!.documents.path, kSqliteFileName));
+      final legacyDb = AppDatabase.forTesting(NativeDatabase(legacy));
+      await legacyDb.customSelect('SELECT 1').get();
+      await legacyDb.close();
       await const LocalDataReset().wipeFiles();
       expect(legacy.existsSync(), false);
       expect(external.readAsStringSync(), 'preserve');

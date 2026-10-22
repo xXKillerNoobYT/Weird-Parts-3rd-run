@@ -72,27 +72,40 @@ void _validateExistingDatabase(File file, String deviceId) {
   final db = raw.sqlite3.open(file.path, mode: raw.OpenMode.readOnly);
   try {
     db.execute('BEGIN');
-    if (db.select('PRAGMA user_version').single.values.single != 2) {
+    final version = db.select('PRAGMA user_version').single.values.single;
+    if (version != 2 && version != 3 && version != 4) {
       rejectNativeTest('fixture-rejected');
     }
     final tables = db
         .select("SELECT name FROM sqlite_master WHERE type = 'table'")
         .map((row) => row['name'])
         .toSet();
-    if (!tables.containsAll(_schema2Columns.keys)) {
+    final expectedTables = {
+      ..._schema2Columns,
+      if (version == 3 || version == 4) ..._companyColumns,
+    };
+    if (tables.length != expectedTables.length ||
+        !tables.containsAll(expectedTables.keys)) {
       rejectNativeTest('fixture-rejected');
     }
-    for (final entry in _schema2Columns.entries) {
+    for (final entry in expectedTables.entries) {
       final columns = db
           .select('PRAGMA table_info("${entry.key}")')
           .map((row) => row['name'])
           .toSet();
       final expected = {
         ...entry.value,
-        if (entry.key != 'device_profiles' && entry.key != 'app_settings')
+        if (_schema2Columns.containsKey(entry.key) &&
+            entry.key != 'device_profiles' &&
+            entry.key != 'app_settings')
           ..._syncColumns,
       };
       if (!columns.containsAll(expected)) rejectNativeTest('fixture-rejected');
+    }
+    for (final table in _companyColumns.keys.where(tables.contains)) {
+      if (db.select('SELECT 1 FROM "$table" LIMIT 1').isNotEmpty) {
+        rejectNativeTest('fixture-rejected');
+      }
     }
     final profiles = db.select(
       'SELECT id, display_name, created_at FROM device_profiles LIMIT 2',
@@ -114,8 +127,7 @@ void _validateExistingDatabase(File file, String deviceId) {
   }
 }
 
-// This entrypoint deliberately admits only the frozen schema-2 test fixture.
-// A future migration must update its admission tests before a native rerun.
+// Frozen schema-2 proofs remain distinct from schema-3 history-free proofs.
 const _syncColumns = {
   'id',
   'origin_device_id',
@@ -123,6 +135,47 @@ const _syncColumns = {
   'modified_at',
   'revision',
   'deleted_at',
+};
+const _companyColumns = {
+  'company_authority_facts': {'company_id', 'commitment', 'signed_bytes'},
+  'job_line_baselines': {
+    'company_id',
+    'line_id',
+    'shop_id',
+    'baseline_id',
+    'baseline_bytes',
+    'projection_bytes',
+  },
+  'job_line_operations': {
+    'company_id',
+    'origin_generation',
+    'request_id',
+    'line_id',
+    'commitment',
+    'operation_bytes',
+    'admitted',
+  },
+  'job_line_receipts': {
+    'receipt_key',
+    'company_id',
+    'operation_commitment',
+    'command_commitment',
+    'receipt_bytes',
+  },
+  'job_line_audits': {'receipt_key', 'audit_bytes'},
+  'job_line_outgoing': {
+    'company_id',
+    'origin_generation',
+    'request_id',
+    'operation_commitment',
+  },
+  'job_line_conflicts': {
+    'conflict_id',
+    'company_id',
+    'line_id',
+    'unit',
+    'alternatives_bytes',
+  },
 };
 const _schema2Columns = {
   'device_profiles': {'id', 'display_name', 'created_at'},
@@ -255,14 +308,44 @@ final class NativeFixtureSnapshot {
     late bool integrity, validReferences;
     var referenceCount = 0;
     await db.transaction(() async {
+      version = (await db.customSelect('PRAGMA user_version').getSingle())
+          .read<int>('user_version');
+      if (version != 2 && version != 3 && version != 4) {
+        rejectNativeTest('fixture-rejected');
+      }
+      final names =
+          (await db
+                  .customSelect(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'",
+                  )
+                  .get())
+              .map((row) => row.read<String>('name'))
+              .toSet();
+      final expectedNames = {
+        ..._schema2Columns.keys,
+        if (version >= 3) ..._companyColumns.keys,
+      };
+      if (names.length != expectedNames.length ||
+          !names.containsAll(expectedNames)) {
+        rejectNativeTest('fixture-rejected');
+      }
+      for (final table in _companyColumns.keys.where(names.contains)) {
+        if ((await db.customSelect('SELECT 1 FROM "$table" LIMIT 1').get())
+            .isNotEmpty) {
+          rejectNativeTest('fixture-rejected');
+        }
+      }
       final tables = db.allTables.toList()
         ..sort((a, b) => a.actualTableName.compareTo(b.actualTableName));
       for (final table in tables) {
         final name = table.actualTableName;
-        final order = name == 'app_settings' ? 'key' : 'id';
+        if (version == 2 && !_schema2Columns.containsKey(name)) continue;
+        final order = table.$primaryKey
+            .map((column) => '"${column.$name}"')
+            .join(',');
         final rows =
             (await db
-                    .customSelect('SELECT * FROM "$name" ORDER BY "$order"')
+                    .customSelect('SELECT * FROM "$name" ORDER BY $order')
                     .get())
                 .map((row) => Map<String, Object?>.from(row.data))
                 .toList();
@@ -274,8 +357,6 @@ final class NativeFixtureSnapshot {
           domain[name] = rows;
         }
       }
-      version = (await db.customSelect('PRAGMA user_version').getSingle())
-          .read<int>('user_version');
       final check = await db.customSelect('PRAGMA integrity_check').get();
       integrity = check.length == 1 && check.single.data.values.single == 'ok';
       validReferences =

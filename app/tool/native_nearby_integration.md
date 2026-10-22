@@ -45,8 +45,11 @@ It admits only Windows receiver or macOS sender, the explicit test flag, and
 the existing `nearby-lifecycle-20261007a` run. The separate
 `nearby-resident-probe-20261009a` run is admitted only if its fixture was already
 initialized. This entrypoint never seeds a database. It holds the fixture lock
-and opens SQLite read-only to verify schema 2, required table/column names,
-integrity and the exact local device profile before production startup.
+and opens SQLite read-only to verify declared schema 2, 3 or 4, required
+table/column names, integrity and the exact local device profile before
+production startup. Schemas 3 and 4 require all seven company-history tables to be
+empty. Snapshot proofs keep their exact schema/count pairs, `(2, 13)` or
+`(3, 20)` or `(4, 20)`. Earlier proofs never establish acceptance of a newer schema.
 
 `tool/native_nearby_test_host.dart` starts the stock Flutter native test runner.
 Its only argument is `--run=<one of those runs>`. It privately discovers the

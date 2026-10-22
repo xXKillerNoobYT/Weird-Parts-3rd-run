@@ -13,12 +13,13 @@ import 'tables/app_settings.dart';
 import 'tables/device_profile.dart';
 import 'sqlite_file.dart';
 import 'tables/jobs.dart';
+import 'tables/job_line_history.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 2;
+const kAppSchemaVersion = 4;
 
 @DriftDatabase(
   tables: [
@@ -37,6 +38,13 @@ const kAppSchemaVersion = 2;
     Jobs,
     JobLines,
     OrderSplits,
+    CompanyAuthorityFacts,
+    JobLineBaselines,
+    JobLineOperations,
+    JobLineReceipts,
+    JobLineAudits,
+    JobLineOutgoing,
+    JobLineConflicts,
   ],
   daos: [SettingsDao, TaxonomyDao, PartsDao, JobsDao],
 )
@@ -56,6 +64,11 @@ class AppDatabase extends _$AppDatabase {
 
   final Future<void> Function()? _waitForWorkerExit;
   Future<void>? _closeFuture;
+
+  // Drift 2.31 has no public transaction-zone predicate. Its resolved engine
+  // distinguishes the outer caller's transaction from this root connection.
+  // ignore: invalid_use_of_internal_member
+  bool get hasCallerTransaction => !identical(resolvedEngine, this);
 
   @override
   Future<void> close() {
@@ -84,10 +97,42 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
-      if (from < 2) {
-        await m.addColumn(brandVersions, brandVersions.varianceName);
-        await m.addColumn(brandVersions, brandVersions.isMain);
+      if (from > to) {
+        throw StateError('A newer database requires a compatible app');
       }
+      if (from == 3) {
+        for (final table in [
+          'job_line_baselines',
+          'job_line_operations',
+          'job_line_receipts',
+          'job_line_audits',
+          'job_line_outgoing',
+          'job_line_conflicts',
+        ]) {
+          if ((await customSelect(
+            'SELECT 1 FROM $table LIMIT 1',
+          ).get()).isNotEmpty) {
+            throw StateError(
+              'Unsigned experimental schema-3 history requires its original compatible recovery app',
+            );
+          }
+        }
+      }
+      await transaction(() async {
+        if (from < 2) {
+          await m.addColumn(brandVersions, brandVersions.varianceName);
+          await m.addColumn(brandVersions, brandVersions.isMain);
+        }
+        if (from < 3) {
+          await m.createTable(companyAuthorityFacts);
+          await m.createTable(jobLineBaselines);
+          await m.createTable(jobLineOperations);
+          await m.createTable(jobLineReceipts);
+          await m.createTable(jobLineAudits);
+          await m.createTable(jobLineOutgoing);
+          await m.createTable(jobLineConflicts);
+        }
+      });
     },
   );
 }

@@ -58,12 +58,16 @@ class _ControlledReset extends LocalDataReset {
   _ControlledReset([this.gate]);
   final Completer<void>? gate;
   @override
+  Future<void> preflight() async {}
+  @override
   Future<void> wipeFiles() async => await gate?.future;
 }
 
 class _FailingReset extends LocalDataReset {
   _FailingReset(this.error);
   final StateError error;
+  @override
+  Future<void> preflight() async {}
   @override
   Future<void> wipeFiles() async => throw error;
 }
