@@ -638,6 +638,8 @@ void main() {
       'company_join_requests',
       'company_join_events',
       'company_job_peer_acks',
+      'company_job_names',
+      'company_job_name_peer_acks',
     ]) {
       raw.execute('DROP TABLE $table');
     }
@@ -668,8 +670,10 @@ void main() {
       await legacy.close();
     }
   });
-  test('actual schema7 pending local Create migrates to8 and returns its original sealed receipt', () async {
+  test('actual schema7 pending local Create migrates to9 and returns its original sealed receipt', () async {
     await db.customStatement('DROP TABLE company_job_peer_acks');
+    await db.customStatement('DROP TABLE company_job_names');
+    await db.customStatement('DROP TABLE company_job_name_peer_acks');
     await db.customStatement('PRAGMA user_version = 7');
     final action = command(name: 'Created while schema7 is active');
     await expectLater(
@@ -696,7 +700,7 @@ void main() {
       (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
         'user_version',
       ),
-      8,
+      kAppSchemaVersion,
     );
     expect((await db.select(db.companyJobs).get()).single, saved);
     expect(await db.select(db.appSettings).get(), settings);

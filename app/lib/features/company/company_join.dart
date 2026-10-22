@@ -771,6 +771,7 @@ final class CompanyJoin {
           final recipient = request._body;
           final capabilities = <String>[
             if (has(user, 'createJob') && has(issuer, 'createJob')) 'createJob',
+            if (has(user, 'renameJob') && has(issuer, 'renameJob')) 'renameJob',
           ];
           final matches =
               await (db.select(db.companyJoinRequests)..where(

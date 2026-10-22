@@ -195,8 +195,9 @@ void main() {
       namespace: sourceNamespace,
       mutate: (body, payload) {
         for (final key in ['users', 'devices']) {
-          ((body[key] as List).single['capabilities'] as List).remove(
-            'createJob',
+          ((body[key] as List).single['capabilities'] as List).removeWhere(
+            (capability) =>
+                capability == 'createJob' || capability == 'renameJob',
           );
         }
       },
@@ -246,8 +247,34 @@ void main() {
       commands.listJobs(ownerSession: owner),
       throwsA(isA<JobLineRefusal>()),
     );
+    await expectLater(
+      commands.renameJob(
+        RenameJob(
+          companyId: identity.companyId,
+          shopId: identity.shopId,
+          jobId: command.jobId,
+          requestId: const Uuid().v4(),
+          creationDigest: 'f' * 64,
+          observedHeads: const [],
+          name: 'Unavailable rename',
+        ),
+        ownerSession: owner,
+      ),
+      throwsA(
+        isA<JobLineRefusal>().having(
+          (refusal) => refusal.reason,
+          'reason',
+          contains('explicit capability upgrade'),
+        ),
+      ),
+    );
     expect(await targetDb.select(targetDb.jobs).get(), isEmpty);
     expect(await targetDb.select(targetDb.companyJobs).get(), isEmpty);
+    expect(await targetDb.select(targetDb.companyJobNames).get(), isEmpty);
+    expect(
+      await targetDb.select(targetDb.companyJobNamePeerAcks).get(),
+      isEmpty,
+    );
   });
 
   testWidgets(

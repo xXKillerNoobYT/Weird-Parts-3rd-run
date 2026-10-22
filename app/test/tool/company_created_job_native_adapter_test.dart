@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart' as hashes;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:wired_parts/features/company/company_gate.dart';
@@ -18,13 +19,245 @@ import '../../integration_test/company_join_native_test.dart' as adapter;
 import '../../tool/native_nearby_test_commands.dart';
 import 'native_nearby_test_commands_test.dart' as command_test show Fixture;
 import '../features/company/company_join_test.dart'
-    show JoinFixture, JoinTestDiscovery;
+    show JoinFixture, JoinTestDiscovery, activateFixtureB;
+import '../features/company/company_created_job_sync_test.dart'
+    show openSyncPair;
 import '../features/company/company_join_widget_test.dart'
     show joinWidgetSignal;
 
 final _revision = List.filled(40, 'a').join();
 final _tree = List.filled(40, 'b').join();
 final _adapterHash = List.filled(64, 'c').join();
+
+final class _LoopbackHttpOverrides extends HttpOverrides {}
+
+final class _InterruptedFixture {
+  _InterruptedFixture() {
+    parent = Directory(
+      Directory.systemTemp
+          .createTempSync('j61-interrupted-')
+          .resolveSymbolicLinksSync(),
+    );
+    root = Directory(p.join(parent.path, 'fixture'))..createSync();
+    manifestFile = File(p.join(parent.path, 'recovery.json'));
+    addTearDown(() => parent.deleteSync(recursive: true));
+    final header = <String, Object?>{
+      'format': 1,
+      'run': adapter.createdJobNativeRun,
+      'role': 'owner',
+      'root': root.path,
+      'namespace': namespace,
+      'mode': 'created-jobs',
+      'jobNameMode': true,
+      'sourceRevision': origin['revision'],
+      'sourceTree': origin['tree'],
+      'adapterSha256': origin['adapterSha256'],
+      'productRevision': origin['productRevision'],
+    };
+    final views = <Map<String, Object?>>[
+      {
+        'job': job,
+        'creationDigest': 'f' * 64,
+        'heads': [local],
+        'displayName':
+            'Synthetic owner concurrent name ${adapter.createdJobNativeRun}',
+        'resolvedName':
+            'Synthetic owner concurrent name ${adapter.createdJobNativeRun}',
+        'lastAgreedName': 'Original',
+        'hasConflict': false,
+        'candidates': [
+          {
+            'operation': local,
+            'name':
+                'Synthetic owner concurrent name ${adapter.createdJobNativeRun}',
+            'user': identity['user'],
+            'device': identity['device'],
+          },
+        ],
+      },
+      {'job': 'other-job', 'hasConflict': false, 'heads': [], 'candidates': []},
+    ];
+    evidence = <String, Object?>{
+      'identity': identity,
+      'peerIdentity': peerIdentity,
+      'selectedJob': job,
+      'creationDigest': 'f' * 64,
+      'jobHistorySha256': '1' * 64,
+      'nameOperationCount': 2,
+      'nameReceiptCountVerified': 2,
+      'nameAckCount': 1,
+      'nameRecordsSha256': '2' * 64,
+      'nameAckSha256': '3' * 64,
+      'nameViews': views,
+      'sequentialOperation': sequential,
+      'localOperation': local,
+    };
+    records = [
+      {
+        'job': job,
+        'operation': sequential,
+        'parents': <String>[],
+        'creationDigest': 'f' * 64,
+        'originalUser': identity['user'],
+        'originalDevice': identity['device'],
+        'name': 'Synthetic sequential name ${adapter.createdJobNativeRun}',
+      },
+      {
+        'job': job,
+        'operation': local,
+        'parents': [sequential],
+        'creationDigest': 'f' * 64,
+        'originalUser': identity['user'],
+        'originalDevice': identity['device'],
+        'name':
+            'Synthetic owner concurrent name ${adapter.createdJobNativeRun}',
+      },
+    ];
+    write('name-shared-baseline-owner.json', {
+      ...header,
+      'selectedJob': job,
+      'creationDigest': 'f' * 64,
+      'creationHistorySha256': '1' * 64,
+    });
+    write('name-ui-exercise-1-24.json', {
+      ...header,
+      ...evidence,
+      'step': 'renameConcurrent',
+      'observedHeadsBefore': [sequential],
+      'originalCreationBytesUnchanged': true,
+      'savedThroughProductionUi': true,
+      'companyControllerStoppedDuringUi': true,
+      'nameRecords': records,
+      'nameReceiptVerification': 'typed-public-verifier',
+      'creationHistorySha256': '1' * 64,
+    });
+    write('join-exercise-snapshot-1-6.json', {
+      ...header,
+      'identity': identity,
+      'nameOperationCount': 1,
+      'nameReceiptCountVerified': 1,
+      'nameAckCount': 1,
+      'nameReceiptVerification': 'typed-public-verifier',
+      'ackVerification': 'confirmedPeerCounts',
+      'nameAckSha256': '3' * 64,
+    });
+    write('created-local-job.json', {...header, 'identity': identity});
+    write('validation-owner.json', {
+      'format': 1,
+      'run': 'company-${adapter.createdJobNativeRun}',
+      'role': 'sender',
+      'root': root.path,
+      'initialized': true,
+    });
+    Directory(p.join(root.path, 'support')).createSync();
+    File(p.join(root.path, 'support', 'wired_parts.sqlite'))
+        .writeAsBytesSync([1, 2, 3]);
+    manifest = <String, Object?>{
+      'format': 1,
+      'kind': 'j61.interrupted-names.recovery@1',
+      'run': adapter.createdJobNativeRun,
+      'role': 'owner',
+      'root': root.path,
+      'namespace': namespace,
+      'origin': origin,
+      'recovery': {
+        'revision': _revision,
+        'tree': _tree,
+        'adapterSha256': _adapterHash,
+        'productRevision': _revision,
+      },
+      'productFiles': adapter.joinNativeInterruptedProductHashes.entries
+          .map(
+            (e) => {
+              'path': e.key,
+              'originLfSha256': e.value,
+              'recoveryLfSha256': e.value,
+            },
+          )
+          .toList(),
+      'files': root
+          .listSync(recursive: true)
+          .whereType<File>()
+          .map(
+            (f) => {
+              'path': p.relative(f.path, from: root.path).replaceAll('\\', '/'),
+              'bytes': f.lengthSync(),
+              'sha256': hashes.sha256.convert(f.readAsBytesSync()).toString(),
+            },
+          )
+          .toList(),
+      'originFiles': {
+        'baseline': 'name-shared-baseline-owner.json',
+        'nameUi': 'name-ui-exercise-1-24.json',
+        'priorSnapshot': 'join-exercise-snapshot-1-6.json',
+        'localCreation': 'created-local-job.json',
+      },
+      'evidence': evidence,
+    };
+    saveManifest();
+  }
+  late final Directory parent, root;
+  late final File manifestFile;
+  late final Map<String, Object?> manifest, evidence;
+  late final List<Map<String, Object?>> records;
+  static final sequential = 'd' * 64, local = 'e' * 64;
+  static const job = 'selected-job';
+  static final identity = {
+    for (final key in [
+      'installation',
+      'generation',
+      'publicKeySha256',
+      'storeGeneration',
+      'company',
+      'shop',
+      'user',
+      'device',
+    ])
+      key: key == 'publicKeySha256' ? 'a' * 64 : 'own-$key',
+  };
+  static final peerIdentity = {
+    ...identity,
+    'installation': 'peer-installation',
+    'generation': 'peer-generation',
+    'storeGeneration': 'peer-store',
+    'device': 'peer-device',
+    'user': identity['user']!,
+    'publicKeySha256': 'b' * 64,
+  };
+  static final origin = <String, Object?>{
+    'revision': '079baa5b7982a2c1fef1b7b165773cfa73dc5e83',
+    'tree': 'dd529f9b145c15d52fb46a1e0548f3c234580870',
+    'adapterSha256':
+        'c7cd5a3438685b81d0d44f90e03e2bd50c52a6c44947d4b75334d0bf42b896d1',
+    'productRevision': '079baa5b7982a2c1fef1b7b165773cfa73dc5e83',
+  };
+  String get namespace => adapter.joinNativeNamespace(
+    adapter.createdJobNativeRun,
+    'owner',
+    createdMode: true,
+  );
+  void write(String path, Object value) =>
+      File(p.join(root.path, path)).writeAsStringSync(jsonEncode(value));
+  void saveManifest() => manifestFile.writeAsStringSync(jsonEncode(manifest));
+  String get digest =>
+      hashes.sha256.convert(manifestFile.readAsBytesSync()).toString();
+  adapter.JoinNativeRootAdmission admit({
+    bool enabled = true,
+    String? digest,
+  }) => adapter.validateJoinNativeRootAdmission(
+    root,
+    run: adapter.createdJobNativeRun,
+    role: 'owner',
+    revision: _revision,
+    tree: _tree,
+    adapter: _adapterHash,
+    productRevision: _revision,
+    createdMode: true,
+    jobNameMode: true,
+    recoveryManifestPath: enabled ? manifestFile.path : '',
+    recoveryManifestSha256: enabled ? digest ?? this.digest : '',
+  );
+}
 
 final class _HeldStopDiscovery implements NearbyDiscovery {
   final delegate = JoinTestDiscovery();
@@ -98,6 +331,355 @@ void _validate({
 );
 
 void main() {
+  test(
+    'interrupted V19 exact opt-in admits verification without completion',
+    () {
+      final f = _InterruptedFixture();
+      expect(f.admit().stage.name, 'interruptedNames');
+      expect(() => f.admit(enabled: false), throwsA(anything));
+      expect(
+        File(p.join(f.root.path, 'join-exercise.json')).existsSync(),
+        isFalse,
+      );
+      expect(
+        File(p.join(f.root.path, 'join-name-conflict.json')).existsSync(),
+        isFalse,
+      );
+    },
+  );
+  test(
+    'interrupted manifest rejects pins, provenance, products and file changes',
+    () {
+      final f = _InterruptedFixture();
+      expect(() => f.admit(digest: '0' * 64), throwsA(anything));
+      final original = jsonEncode(f.manifest);
+      for (final mutate in <void Function(Map<String, dynamic>)>[
+        (m) => m['role'] = 'member',
+        (m) => (m['origin'] as Map)['revision'] = _revision,
+        (m) => (m['recovery'] as Map)['adapterSha256'] = '0' * 64,
+        (m) => ((m['productFiles'] as List).first as Map)['recoveryLfSha256'] =
+            '0' * 64,
+        (m) => (m['productFiles'] as List).removeLast(),
+        (m) => ((m['files'] as List).first as Map)['path'] = '../escape',
+        (m) => (m['evidence'] as Map)['nameOperationCount'] = 3,
+        (m) => ((m['evidence'] as Map)['peerIdentity'] as Map)['user'] =
+            'wrong-user',
+        (m) => m['secret'] = 'forbidden-extra-field',
+      ]) {
+        final changed = jsonDecode(original) as Map<String, dynamic>;
+        mutate(changed);
+        f.manifestFile.writeAsStringSync(jsonEncode(changed));
+        expect(() => f.admit(), throwsA(anything));
+      }
+      f.manifestFile.writeAsStringSync(original);
+      final admitted = f.admit();
+      File(p.join(f.root.path, 'support', 'wired_parts.sqlite'))
+          .writeAsBytesSync([4, 5, 6]);
+      expect(() => f.admit(), throwsA(anything));
+      expect(
+        () => adapter.verifyJoinNativeInterruptedFiles(
+          f.root,
+          admitted.recoveryManifest!,
+        ),
+        throwsA(anything),
+      );
+      File(p.join(f.root.path, 'support', 'wired_parts.sqlite'))
+          .writeAsBytesSync([1, 2, 3]);
+      f.write('unexpected.json', {'unapproved': true});
+      expect(() => f.admit(), throwsA(anything));
+    },
+  );
+  test('interrupted readback rejects identity, typed counts, ACK and graph mismatch', () {
+    final f = _InterruptedFixture();
+    final manifest = Map<String, dynamic>.from(f.manifest);
+    final actual = <String, Object?>{
+      ...f.evidence,
+      'nameReceiptVerification': 'typed-public-verifier',
+      'ackVerification': 'confirmedPeerCounts',
+      'nameRecords': f.records,
+    };
+    adapter.verifyJoinNativeInterruptedReadback(manifest, actual);
+    final original = jsonEncode(actual);
+    for (final mutate in <void Function(Map<String, dynamic>)>[
+      (m) => (m['identity'] as Map)['installation'] = 'changed',
+      (m) => m['jobHistorySha256'] = '0' * 64,
+      (m) => m['nameReceiptCountVerified'] = 1,
+      (m) => m['nameAckCount'] = 0,
+      (m) => m['ackVerification'] = null,
+      (m) => ((m['nameRecords'] as List).last as Map)['parents'] = ['0' * 64],
+    ]) {
+      final changed = jsonDecode(original) as Map<String, dynamic>;
+      mutate(changed);
+      expect(
+        () => adapter.verifyJoinNativeInterruptedReadback(manifest, changed),
+        throwsA(anything),
+      );
+    }
+  });
+  test('recovery preserves original creation provenance and only permits real checkpoint', () {
+    final f = _InterruptedFixture();
+    final oldHeader = jsonDecode(
+      File(p.join(f.root.path, 'created-local-job.json')).readAsStringSync(),
+    ) as Map<String, dynamic>;
+    void verify({bool recovery = true}) =>
+        adapter.verifyJoinNativeEvidenceProvenance(
+          oldHeader,
+          revision: _revision,
+          tree: _tree,
+          adapter: _adapterHash,
+          productRevision: _revision,
+          recoveryManifest: recovery
+              ? Map<String, dynamic>.from(f.manifest)
+              : null,
+        );
+    verify();
+    expect(() => verify(recovery: false), throwsA(anything));
+    for (final step in NativeJobNameUiStep.values) {
+      expect(
+        adapter.mayExerciseCreatedJobNameUi(
+          restart: true,
+          conflictResume: false,
+          interruptedResume: true,
+          interruptedReadbackVerified: true,
+          step: step,
+        ),
+        step == NativeJobNameUiStep.checkpointConflict,
+      );
+    }
+    expect(
+      adapter.mayExerciseCreatedJobNameUi(
+        restart: true,
+        conflictResume: false,
+        interruptedResume: true,
+        interruptedReadbackVerified: false,
+        step: NativeJobNameUiStep.checkpointConflict,
+      ),
+      isFalse,
+    );
+    expect(
+      adapter.mayFinalizeCreatedJobNameStage(
+        restart: true,
+        conflictResume: false,
+        conflictReadbackVerified: false,
+        syncComplete: true,
+        interruptedResume: true,
+      ),
+      isFalse,
+    );
+  });
+  test('interrupted cold checkpoint retains pinned origin context', () {
+    final f = _InterruptedFixture();
+    final identity = _InterruptedFixture.identity;
+    final conflictViews = [
+      {
+        'job': 'selected-job',
+        'hasConflict': true,
+        'heads': ['A', 'B'],
+        'candidates': [
+          {'operation': 'A', 'name': 'A', 'user': 'u', 'device': 'a'},
+          {'operation': 'B', 'name': 'B', 'user': 'u', 'device': 'b'},
+        ],
+      },
+      {'job': 'other-job', 'hasConflict': false, 'heads': [], 'candidates': []},
+    ];
+    f.write('join-name-conflict.json', {
+      'format': 1,
+      'stage': 'unresolved-name-conflict',
+      'passed': false,
+      'run': adapter.createdJobNativeRun,
+      'role': 'owner',
+      'root': f.root.path,
+      'namespace': f.namespace,
+      'sourceRevision': _revision,
+      'sourceTree': _tree,
+      'adapterSha256': _adapterHash,
+      'productRevision': _revision,
+      'mode': 'created-jobs',
+      'schema': 9,
+      'jobNameMode': true,
+      'createdJobsComplete': false,
+      'jobNamesComplete': false,
+      'locked': true,
+      'syncCompleted': true,
+      'syncStarts': 1,
+      'nearbyControllerRunning': false,
+      'productionJobsPanelRendered': true,
+      'bothAttributedCandidatesRendered': true,
+      'lockedSqlSha256': '4' * 64,
+      'identity': identity,
+      'interruptedRecoverySha256': f.digest,
+      'nameEvidence': {
+        'nameOperationCount': 3,
+        'nameReceiptCountVerified': 3,
+        'nameAckCount': 3,
+        'jobHistorySha256': '1' * 64,
+        'nameRecordsSha256': '2' * 64,
+        'nameAckSha256': '3' * 64,
+        'nameReceiptVerification': 'typed-public-verifier',
+        'ackVerification': 'confirmedPeerCounts',
+        'nameViews': conflictViews,
+      },
+    });
+    final admitted = f.admit();
+    expect(admitted.stage, adapter.JoinNativeRootStage.unresolvedConflict);
+    expect(admitted.recoveryManifest, isNotNull);
+    expect(() => f.admit(enabled: false), throwsA(anything));
+  });
+  test(
+    'interrupted ACK verifier binds real receipt peer key store and signature',
+    () => HttpOverrides.runWithHttpOverrides(() async {
+      final f = await JoinFixture.create(allowOwnerAdditions: true);
+      await activateFixtureB(f);
+      final pair = await openSyncPair(f);
+      try {
+        expect((await pair.a.syncNow()).complete, isTrue);
+        final commands = CompanyJobCommands(enrollment: f.aEnrollment);
+        final view = (await commands.listJobViews(ownerSession: f.owner))
+            .single;
+        final receipt = await commands.renameJob(
+          RenameJob(
+            companyId: f.owner.identity.companyId,
+            shopId: f.owner.identity.shopId,
+            jobId: view.baseJob.id,
+            requestId: '10000000-0000-4000-8000-000000000001',
+            creationDigest: view.creationDigest,
+            observedHeads: [],
+            name: 'Sequential',
+          ),
+          ownerSession: f.owner,
+        );
+        expect((await pair.a.syncNow()).complete, isTrue);
+        final bo = pair.ownerB;
+        await commands.renameJob(
+          RenameJob(
+            companyId: f.owner.identity.companyId,
+            shopId: f.owner.identity.shopId,
+            jobId: view.baseJob.id,
+            requestId: '10000000-0000-4000-8000-000000000002',
+            creationDigest: view.creationDigest,
+            observedHeads: [receipt.operationId],
+            name: 'Unacknowledged concurrent name',
+          ),
+          ownerSession: f.owner,
+        );
+        expect(
+          await commands.nameSyncHoldings(ownerSession: f.owner),
+          hasLength(2),
+        );
+        expect(
+          (await CompanyCreatedJobSync.confirmedPeerCounts(
+            f.aEnrollment,
+            f.owner,
+          ))[view.baseJob.id],
+          0,
+        );
+        final peer = <String, Object?>{
+          'device': bo.identity.deviceId,
+          'user': bo.identity.userId,
+          'installation': f.b.identity!.id.value,
+          'generation': f.b.identity!.generation.value,
+          'storeGeneration': f.b.receivingStoreGeneration!.value,
+          'publicKeySha256': hashes.sha256
+              .convert(f.b.identity!.publicKey)
+              .toString(),
+        };
+        Map<String, dynamic> manifest(Map<String, Object?> p) => {
+          'evidence': {
+            'peerIdentity': p,
+            'sequentialOperation': receipt.operationId,
+          },
+        };
+        await adapter.verifyJoinNativeInterruptedAck(
+          f.aEnrollment,
+          f.owner,
+          manifest(peer),
+        );
+        for (final key in ['publicKeySha256', 'user', 'storeGeneration']) {
+          await expectLater(
+            adapter.verifyJoinNativeInterruptedAck(
+              f.aEnrollment,
+              f.owner,
+              manifest({...peer, key: 'wrong'}),
+            ),
+            throwsA(anything),
+          );
+        }
+        await adapter.verifyJoinNativeRecoveryCustody(f.aStore, f.a.namespace);
+        final state = f.aStore.states.remove(f.a.namespace)!;
+        await expectLater(
+          adapter.verifyJoinNativeRecoveryCustody(f.aStore, f.a.namespace),
+          throwsA(anything),
+        );
+        f.aStore.states[f.a.namespace] = state;
+        await adapter.verifyJoinNativeRecoveryBinding(f.aDb);
+        final original =
+            (await f.aDb.select(f.aDb.companyJobNamePeerAcks).get()).single;
+        final signed = jsonDecode(original.ackBytes) as Map<String, dynamic>;
+        signed['signature'] = base64Encode(List.filled(64, 0));
+        await f.aDb.customStatement(
+          'UPDATE company_job_name_peer_acks SET ack_bytes = ?',
+          [jsonEncode(signed)],
+        );
+        await expectLater(
+          adapter.verifyJoinNativeInterruptedAck(
+            f.aEnrollment,
+            f.owner,
+            manifest(peer),
+          ),
+          throwsA(anything),
+        );
+        await f.aDb.customStatement(
+          'UPDATE company_job_name_peer_acks SET ack_bytes = ?',
+          [original.ackBytes],
+        );
+      } finally {
+        await pair.a.closeAndDrain();
+        await pair.b.closeAndDrain();
+      }
+    }, _LoopbackHttpOverrides()),
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+  test(
+    'Job-name native sync admits either enrolled role only with enabled UI',
+    () {
+      expect(
+        adapter.mayStartCreatedJobNativeSync(
+          owner: false,
+          jobNameMode: true,
+          syncEnabled: true,
+        ),
+        isTrue,
+      );
+      expect(
+        adapter.mayStartCreatedJobNativeSync(
+          owner: false,
+          jobNameMode: false,
+          syncEnabled: true,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayStartCreatedJobNativeSync(
+          owner: true,
+          jobNameMode: false,
+          syncEnabled: true,
+        ),
+        isTrue,
+      );
+      for (final owner in [false, true]) {
+        for (final jobNameMode in [false, true]) {
+          expect(
+            adapter.mayStartCreatedJobNativeSync(
+              owner: owner,
+              jobNameMode: jobNameMode,
+              syncEnabled: false,
+            ),
+            isFalse,
+          );
+        }
+      }
+    },
+  );
   test('native diagnostic retention and evidence writes stay bounded across remounts', () {
     final diagnostics = adapter.CreatedJobNativeSyncDiagnostics();
     var writes = 0;
@@ -884,7 +1466,10 @@ void main() {
     expect(() => _validate(run: 'j61-created-v8'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v9'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v15'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v16'), throwsA(anything));
     expect(() => _validate(run: 'j61-created-v17'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v18'), throwsA(anything));
+    expect(() => _validate(run: 'j61-created-v20'), throwsA(anything));
     expect(() => _validate(productRevision: _tree), throwsA(anything));
     expect(
       () => _validate(revision: 'short', productRevision: 'short'),
@@ -924,7 +1509,7 @@ void main() {
         'owner',
         createdMode: true,
       ),
-      'synthetic.company.created.j61-created-v16.owner',
+      'synthetic.company.created.j61-created-v19.owner',
     );
     expect(
       () => adapter.joinNativeNamespace(
@@ -1023,7 +1608,7 @@ void main() {
         'root': root.path,
         'locked': true,
         'mode': 'created-jobs',
-        'schema': 8,
+        'schema': 9,
         'createdJobsComplete': false,
         'bothJobsRendered': true,
         'receiptCountVerifiedBeforeLock': 2,
@@ -1047,9 +1632,325 @@ void main() {
       receipt['createdJobsComplete'] = true;
       file.writeAsStringSync(jsonEncode(receipt));
       expect(validate(), isTrue);
-      receipt['sourceTree'] = _revision;
+      bool validateNames() => adapter.validateJoinNativeExistingRoot(
+        root,
+        run: adapter.createdJobNativeRun,
+        role: 'owner',
+        revision: _revision,
+        tree: _tree,
+        adapter: _adapterHash,
+        createdMode: true,
+        jobNameMode: true,
+        productRevision: _revision,
+      );
+      expect(validateNames, throwsA(anything));
+      receipt.addAll({
+        'jobNameMode': true,
+        'jobNamesComplete': true,
+        'nameOperationCount': 4,
+        'nameAckCount': 4,
+        'nameReceiptCountVerifiedBeforeLock': 3,
+      });
       file.writeAsStringSync(jsonEncode(receipt));
       expect(validate, throwsA(anything));
+      expect(validateNames, throwsA(anything));
+      receipt['nameReceiptCountVerifiedBeforeLock'] = 4;
+      file.writeAsStringSync(jsonEncode(receipt));
+      expect(validateNames(), isTrue);
+      receipt['schema'] = 8;
+      file.writeAsStringSync(jsonEncode(receipt));
+      expect(validateNames, throwsA(anything));
+      receipt['schema'] = 9;
+      receipt['sourceTree'] = _revision;
+      file.writeAsStringSync(jsonEncode(receipt));
+      expect(validateNames, throwsA(anything));
+    },
+  );
+
+  test(
+    'unresolved Job-name conflict admits only its exact cold checkpoint',
+    () {
+      final root = Directory.systemTemp.createTempSync('j61-name-conflict-');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final identity = {
+        for (final key in [
+          'installation',
+          'generation',
+          'publicKeySha256',
+          'storeGeneration',
+          'company',
+          'shop',
+          'user',
+          'device',
+        ])
+          key: key,
+      };
+      final conflictView = {
+        'job': 'job-1',
+        'hasConflict': true,
+        'heads': ['owner-head', 'member-head'],
+        'candidates': [
+          {
+            'operation': 'owner-head',
+            'name': 'Owner',
+            'user': 'owner',
+            'device': 'device-a',
+          },
+          {
+            'operation': 'member-head',
+            'name': 'Member',
+            'user': 'member',
+            'device': 'device-b',
+          },
+        ],
+      };
+      final checkpoint = <String, Object?>{
+        'format': 1,
+        'stage': 'unresolved-name-conflict',
+        'passed': false,
+        'run': adapter.createdJobNativeRun,
+        'role': 'owner',
+        'namespace': adapter.joinNativeNamespace(
+          adapter.createdJobNativeRun,
+          'owner',
+          createdMode: true,
+        ),
+        'sourceRevision': _revision,
+        'sourceTree': _tree,
+        'adapterSha256': _adapterHash,
+        'productRevision': _revision,
+        'root': root.path,
+        'mode': 'created-jobs',
+        'schema': 9,
+        'jobNameMode': true,
+        'createdJobsComplete': false,
+        'jobNamesComplete': false,
+        'locked': true,
+        'syncCompleted': true,
+        'syncStarts': 1,
+        'nearbyControllerRunning': false,
+        'productionJobsPanelRendered': true,
+        'bothAttributedCandidatesRendered': true,
+        'lockedSqlSha256': 'd' * 64,
+        'identity': identity,
+        'nameEvidence': {
+          'jobHistorySha256': 'a' * 64,
+          'nameOperationCount': 3,
+          'nameReceiptCountVerified': 3,
+          'nameAckCount': 3,
+          'nameRecordsSha256': 'b' * 64,
+          'nameAckSha256': 'c' * 64,
+          'nameReceiptVerification': 'typed-public-verifier',
+          'ackVerification': 'confirmedPeerCounts',
+          'nameViews': [
+            conflictView,
+            {
+              'job': 'job-2',
+              'hasConflict': false,
+              'heads': [],
+              'candidates': [],
+            },
+          ],
+        },
+      };
+      final checkpointFile = File(p.join(root.path, 'join-name-conflict.json'));
+      checkpointFile.writeAsStringSync(jsonEncode(checkpoint));
+      adapter.JoinNativeRootAdmission validate() =>
+          adapter.validateJoinNativeRootAdmission(
+            root,
+            run: adapter.createdJobNativeRun,
+            role: 'owner',
+            revision: _revision,
+            tree: _tree,
+            adapter: _adapterHash,
+            createdMode: true,
+            jobNameMode: true,
+            productRevision: _revision,
+          );
+
+      expect(validate().stage, adapter.JoinNativeRootStage.unresolvedConflict);
+      expect(
+        adapter.validateJoinNativeExistingRoot(
+          root,
+          run: adapter.createdJobNativeRun,
+          role: 'owner',
+          revision: _revision,
+          tree: _tree,
+          adapter: _adapterHash,
+          createdMode: true,
+          jobNameMode: true,
+          productRevision: _revision,
+        ),
+        isFalse,
+      );
+      for (final invalid in [
+        {...checkpoint, 'passed': true},
+        {
+          ...checkpoint,
+          'nameEvidence': {
+            ...(checkpoint['nameEvidence'] as Map),
+            'nameOperationCount': 4,
+          },
+        },
+        {
+          ...checkpoint,
+          'nameEvidence': {
+            ...(checkpoint['nameEvidence'] as Map),
+            'nameAckSha256': 'not-a-digest',
+          },
+        },
+        {
+          ...checkpoint,
+          'nameEvidence': {
+            ...(checkpoint['nameEvidence'] as Map),
+            'nameViews': [conflictView],
+          },
+        },
+      ]) {
+        checkpointFile.writeAsStringSync(jsonEncode(invalid));
+        expect(validate, throwsA(anything));
+      }
+    },
+  );
+
+  test('cold name readback refuses changed identity, history, records, ACKs, or attribution', () {
+    final identity = {
+      for (final key in [
+        'installation',
+        'generation',
+        'publicKeySha256',
+        'storeGeneration',
+        'company',
+        'shop',
+        'user',
+        'device',
+      ])
+        key: key,
+    };
+    final views = [
+      {
+        'job': 'job-1',
+        'hasConflict': true,
+        'heads': ['owner-head', 'member-head'],
+        'candidates': [
+          {
+            'operation': 'owner-head',
+            'name': 'Owner',
+            'user': 'owner',
+            'device': 'device-a',
+          },
+          {
+            'operation': 'member-head',
+            'name': 'Member',
+            'user': 'member',
+            'device': 'device-b',
+          },
+        ],
+      },
+    ];
+    final expected = <String, dynamic>{
+      'identity': identity,
+      'nameEvidence': {
+        'jobHistorySha256': 'a' * 64,
+        'nameOperationCount': 3,
+        'nameReceiptCountVerified': 3,
+        'nameAckCount': 3,
+        'nameRecordsSha256': 'b' * 64,
+        'nameAckSha256': 'c' * 64,
+        'nameReceiptVerification': 'typed-public-verifier',
+        'ackVerification': 'confirmedPeerCounts',
+        'nameViews': views,
+      },
+    };
+    final actual = <String, Object?>{
+      ...(expected['nameEvidence'] as Map<String, Object?>),
+      'identity': identity,
+    };
+    adapter.verifyJoinNativeJobNameReadback(expected, actual);
+    for (final key in [
+      'jobHistorySha256',
+      'nameRecordsSha256',
+      'nameAckSha256',
+    ]) {
+      final changed = {...actual, key: 'd' * 64};
+      expect(
+        () => adapter.verifyJoinNativeJobNameReadback(expected, changed),
+        throwsA(anything),
+      );
+    }
+    expect(
+      () => adapter.verifyJoinNativeJobNameReadback(expected, {
+        ...actual,
+        'identity': {...identity, 'device': 'changed'},
+      }),
+      throwsA(anything),
+    );
+    expect(
+      () => adapter.verifyJoinNativeJobNameReadback(expected, {
+        ...actual,
+        'nameViews': const [],
+      }),
+      throwsA(anything),
+    );
+  });
+
+  test(
+    'name finalization waits for conflict resume Sync after cold readback',
+    () {
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: false,
+          conflictResume: false,
+          conflictReadbackVerified: false,
+          syncComplete: false,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: false,
+          conflictResume: false,
+          conflictReadbackVerified: false,
+          syncComplete: true,
+        ),
+        isTrue,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: true,
+          conflictReadbackVerified: false,
+          syncComplete: true,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: true,
+          conflictReadbackVerified: true,
+          syncComplete: false,
+        ),
+        isFalse,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: true,
+          conflictReadbackVerified: true,
+          syncComplete: true,
+        ),
+        isTrue,
+      );
+      expect(
+        adapter.mayFinalizeCreatedJobNameStage(
+          restart: true,
+          conflictResume: false,
+          conflictReadbackVerified: false,
+          syncComplete: false,
+        ),
+        isTrue,
+      );
     },
   );
 }

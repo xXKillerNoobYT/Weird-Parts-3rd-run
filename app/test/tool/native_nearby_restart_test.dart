@@ -192,7 +192,16 @@ void main() {
     });
   }
 
-  for (final entry in {2: 13, 3: 20, 4: 20, 5: 21, 6: 22, 7: 25}.entries) {
+  for (final entry in {
+    2: 13,
+    3: 20,
+    4: 20,
+    5: 21,
+    6: 22,
+    7: 25,
+    8: 26,
+    9: 28,
+  }.entries) {
     test(
       'schema${entry.key} proof retains its exact table count and cannot relabel current schema',
       () {
@@ -218,9 +227,9 @@ void main() {
     );
   }
 
-  test('unknown schema9 proof refuses without writes', () {
+  test('unknown schema10 proof refuses without writes', () {
     final proof = envelope['proof'] as Map<String, dynamic>;
-    proof['schemaVersion'] = 9;
+    proof['schemaVersion'] = 10;
     proof['tableCount'] = 25;
     save();
     final before = bytes();

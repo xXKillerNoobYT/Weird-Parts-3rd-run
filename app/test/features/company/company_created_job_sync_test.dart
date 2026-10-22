@@ -51,13 +51,15 @@ Future<
 >
 openSyncPair(
   JoinFixture f, {
+  CompanyEnrollment? peerEnrollment,
   int chunkBytes = kCreatedJobSyncChunkBytes,
   void Function(String)? onAStatus,
   void Function(String)? onBStatus,
   void Function(CreatedJobSyncDiagnostic)? onADiagnostic,
   void Function(CreatedJobSyncDiagnostic)? onBDiagnostic,
 }) async {
-  final bo = f.bEnrollment.currentSession ?? await f.bEnrollment.signIn('1234');
+  final peer = peerEnrollment ?? f.bEnrollment;
+  final bo = peer.currentSession ?? await peer.signIn('1234');
   late NearbyController ac, bc;
   final (bChannel, aChannel) = await joinChannels(
     onPaired: (b, a) {
@@ -66,7 +68,7 @@ openSyncPair(
     },
   );
   final aa = CompanyPeerAuthentication(enrollment: f.aEnrollment);
-  final ba = CompanyPeerAuthentication(enrollment: f.bEnrollment);
+  final ba = CompanyPeerAuthentication(enrollment: peer);
   final first = await aa.beginPeerChallenge(
     aChannel,
     (await aa.retainedPeers(session: f.owner))
@@ -93,7 +95,7 @@ openSyncPair(
   );
   final b = CompanyCreatedJobSync(
     availability: await CompanyJobSyncAvailability.open(
-      enrollment: f.bEnrollment,
+      enrollment: peer,
       owner: bo,
       peer: done.membership,
     ),
@@ -112,8 +114,9 @@ Future<Map<String, Object?>> syncAttackWire(
   String recipient,
   String run,
   String action,
-  Object? data,
-) async {
+  Object? data, [
+  String protocol = 'company.job.sync@2',
+]) async {
   final keys = pair.keys;
   final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final join = await kdf.deriveKey(
@@ -142,7 +145,7 @@ Future<Map<String, Object?>> syncAttackWire(
   };
   final body = {
     'v': 1,
-    'protocol': 'company.job.create.sync@1',
+    'protocol': protocol,
     'remaining': pair.remainingReceivedNonces,
     'action': action,
     'run': run,
@@ -986,10 +989,18 @@ void main() {
     expect(remote.pages, 16);
     expect(remote.complete, isTrue);
     expect(aggregate, lessThanOrEqualTo(528 * 1024));
+    final maximumCombinedInventory = CreatedJobHoldingsInventory.remote({
+      'count': 1024,
+      'pages': 32,
+      'digest': digest,
+    });
+    expect(maximumCombinedInventory.count, 1024);
+    expect(maximumCombinedInventory.pages, 32);
+    expect(maximumCombinedInventory.complete, isFalse);
     expect(
       () => CreatedJobHoldingsInventory.remote({
-        'count': 513,
-        'pages': 17,
+        'count': 1025,
+        'pages': 33,
         'digest': digest,
       }),
       throwsA(anything),

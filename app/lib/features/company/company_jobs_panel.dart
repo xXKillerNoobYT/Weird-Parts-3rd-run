@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../data/app_database.dart';
 import '../installation/installation_security.dart';
 import '../job_line_commands/job_line_commands.dart';
 
@@ -20,7 +19,11 @@ class CompanyJobsPanel extends StatefulWidget {
 
 class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   final _name = TextEditingController();
-  List<Job> _jobs = const [];
+  List<CompanyJobView> _jobs = const [];
+  final _editName = TextEditingController();
+  CompanyJobView? _editing;
+  RenameJob? _pendingRename;
+  bool _renameAvailable = false;
   Map<String, int> _confirmedPeers = const {};
   CreateJob? _pending;
   String? _error;
@@ -37,12 +40,16 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   @override
   void dispose() {
     _name.dispose();
+    _editName.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     try {
-      final jobs = await widget.commands.listJobs(ownerSession: widget.owner);
+      final jobs = await widget.commands.listJobViews(
+        ownerSession: widget.owner,
+      );
+      final renameAvailable = await widget.commands.canRenameJobs(widget.owner);
       final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
         widget.commands.enrollment,
         widget.owner,
@@ -50,6 +57,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
         _jobs = jobs;
+        _renameAvailable = renameAvailable;
         _confirmedPeers = confirmed;
         _available = true;
         _loading = false;
@@ -88,7 +96,9 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
     });
     try {
       await widget.commands.createJob(_pending!, ownerSession: widget.owner);
-      final jobs = await widget.commands.listJobs(ownerSession: widget.owner);
+      final jobs = await widget.commands.listJobViews(
+        ownerSession: widget.owner,
+      );
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
         _jobs = jobs;
@@ -115,6 +125,126 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       }
     }
   }
+
+  void _edit(CompanyJobView job, [String? selected]) {
+    if (_busy || _pendingRename != null) return;
+    setState(() {
+      _editing = job;
+      _editName.text = selected ?? job.displayName;
+      _error = null;
+    });
+  }
+
+  Future<void> _saveName() async {
+    if (_busy || _editing == null) return;
+    try {
+      final scope = widget.owner.identity;
+      final job = _editing!;
+      _pendingRename ??= RenameJob(
+        companyId: scope.companyId,
+        shopId: scope.shopId,
+        jobId: job.baseJob.id,
+        requestId: const Uuid().v4(),
+        creationDigest: job.creationDigest,
+        observedHeads: job.nameHeads,
+        name: _editName.text,
+      );
+    } on JobLineRefusal catch (error) {
+      setState(() => _error = error.reason);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.commands.renameJob(
+        _pendingRename!,
+        ownerSession: widget.owner,
+      );
+      final jobs = await widget.commands.listJobViews(
+        ownerSession: widget.owner,
+      );
+      final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
+        widget.commands.enrollment,
+        widget.owner,
+      );
+      if (!mounted || !widget.owner.isValid) return;
+      setState(() {
+        _jobs = jobs;
+        _confirmedPeers = confirmed;
+        _editing = null;
+        _pendingRename = null;
+        _editName.clear();
+      });
+    } on CompanyJobNameCapacityRefusal catch (error) {
+      if (mounted) {
+        setState(() {
+          _pendingRename = null;
+          _editing = null;
+          _error = error.reason;
+        });
+        await _load();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'This name edit may already be saved. Retry the same edit to check its result.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _jobTile(CompanyJobView job) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      ListTile(
+        key: Key('company-job-${job.baseJob.id}'),
+        title: Text(job.displayName),
+        subtitle: Text(
+          'Job ID: ${job.baseJob.id}\n${(_confirmedPeers[job.baseJob.id] ?? 0) > 0 ? 'Last confirmed by ${_confirmedPeers[job.baseJob.id]} retained peer(s)' : 'Peer delivery status unknown'}',
+        ),
+        trailing: !job.hasConflict && _renameAvailable
+            ? TextButton(
+                key: Key('company-job-edit-${job.baseJob.id}'),
+                onPressed: _busy || _pendingRename != null
+                    ? null
+                    : () => _edit(job),
+                child: const Text('Edit name'),
+              )
+            : null,
+      ),
+      if (job.hasConflict)
+        Column(
+          key: Key('company-job-name-conflict-${job.baseJob.id}'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Competing names. Last agreed name: ${job.lastAgreedName}'),
+            for (final candidate in job.candidates)
+              ListTile(
+                key: Key('company-job-name-candidate-${candidate.operationId}'),
+                title: Text(candidate.name),
+                subtitle: Text(
+                  'User: ${candidate.originalUserId}\nDevice: ${candidate.originalDeviceId}\nOperation: ${candidate.operationId}',
+                ),
+                onTap: _renameAvailable && !_busy && _pendingRename == null
+                    ? () => _edit(job, candidate.name)
+                    : null,
+              ),
+            if (_renameAvailable)
+              TextButton(
+                key: Key('company-job-resolve-name-${job.baseJob.id}'),
+                onPressed: _busy || _pendingRename != null
+                    ? null
+                    : () => _edit(job),
+                child: const Text('Resolve competing names'),
+              ),
+          ],
+        ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -150,19 +280,46 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
           const Text(
             'Jobs are saved on this installation. Use Sync Now with a verified retained peer. Confirmations describe the last successful exchange.',
           ),
+          if (!_renameAvailable)
+            const Text(
+              'Name editing requires an explicit company permission upgrade.',
+            ),
+          if (_editing != null) ...[
+            Text(
+              _editing!.hasConflict ? 'Resolve name conflict' : 'Edit Job name',
+            ),
+            TextField(
+              key: const Key('company-job-edit-name'),
+              controller: _editName,
+              enabled: !_busy && _pendingRename == null,
+              maxLength: kCompanyJobNameLimit,
+              decoration: const InputDecoration(labelText: 'New Job name'),
+            ),
+            FilledButton(
+              key: Key(
+                _pendingRename == null
+                    ? 'company-job-save-name'
+                    : 'company-job-retry-name',
+              ),
+              onPressed: _busy ? null : _saveName,
+              child: Text(
+                _busy
+                    ? 'Saving...'
+                    : _pendingRename == null
+                    ? 'Save name'
+                    : 'Retry same name edit',
+              ),
+            ),
+            if (_pendingRename == null)
+              TextButton(
+                onPressed: _busy ? null : () => setState(() => _editing = null),
+                child: const Text('Cancel name edit'),
+              ),
+          ],
           if (_jobs.isEmpty) const Text('No company Jobs yet.'),
           Column(
             key: const Key('company-jobs-list'),
-            children: [
-              for (final job in _jobs)
-                ListTile(
-                  key: Key('company-job-${job.id}'),
-                  title: Text(job.name),
-                  subtitle: Text(
-                    'Job ID: ${job.id}\n${(_confirmedPeers[job.id] ?? 0) > 0 ? 'Last confirmed by ${_confirmedPeers[job.id]} retained peer(s)' : 'Peer delivery status unknown'}',
-                  ),
-                ),
-            ],
+            children: [for (final job in _jobs) _jobTile(job)],
           ),
         ],
         if (_error != null)

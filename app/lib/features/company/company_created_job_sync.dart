@@ -41,8 +41,14 @@ final class CompanyJobSyncAvailability implements NearbyCompanyDisclosure {
 }
 
 const _syncKind = 'created-jobs';
-const _syncProtocol = 'company.job.create.sync@1';
+const _syncProtocol = 'company.job.sync@2';
 const _syncAckDomain = 'wiredpart.company.job.create.ack@1:';
+const _nameSyncAckDomain = 'wiredpart.company.job.name.ack@1:';
+String _ackDomain(Map<String, Object?> d) =>
+    d['kind'] == 'job.name.set@1' ? _nameSyncAckDomain : _syncAckDomain;
+String _ackKind(Map<String, Object?> d) => d['kind'] == 'job.name.set@1'
+    ? 'company.job.name.ack@1'
+    : 'company.job.create.ack@1';
 const kCreatedJobSyncChunkBytes = 24 * 1024;
 
 final class CreatedJobTransferBuffer {
@@ -94,25 +100,63 @@ String _syncDigest(Object? value) => _joinDigest(value);
 String _syncBytesDigest(List<int> bytes) =>
     hashes.sha256.convert(bytes).toString();
 String _descriptorKey(Map<String, Object?> descriptor) =>
-    '${descriptor['origin']}/${descriptor['request']}';
+    '${descriptor['kind'] == 'job.name.set@1' ? 'name/' : ''}${descriptor['origin']}/${descriptor['request']}';
 
-Map<String, Object?> _jobDescriptor(CompanyJob row) {
-  final body = (jsonDecode(row.operationBytes) as Map)['body'] as Map;
+({String operationBytes, String receiptBytes}) _recordBytes(Object row) =>
+    switch (row) {
+      CompanyJob r => (
+        operationBytes: r.operationBytes,
+        receiptBytes: r.receiptBytes,
+      ),
+      CompanyJobName r => (
+        operationBytes: r.operationBytes,
+        receiptBytes: r.receiptBytes,
+      ),
+      _ => throw const CompanyBootstrapRefusal('Unsupported Job record'),
+    };
+
+Map<String, Object?> _jobDescriptor(Object row) {
+  final (origin, request, job, operation, command) = switch (row) {
+    CompanyJob r => (
+      r.originGeneration,
+      r.requestId,
+      r.jobId,
+      r.operationCommitment,
+      r.commandCommitment,
+    ),
+    CompanyJobName r => (
+      r.originGeneration,
+      r.requestId,
+      r.jobId,
+      r.operationCommitment,
+      r.commandCommitment,
+    ),
+    _ => throw const CompanyBootstrapRefusal('Unsupported Job record'),
+  };
+  final bytes = _recordBytes(row).operationBytes;
+  final body = (jsonDecode(bytes) as Map)['body'] as Map;
   return {
-    'origin': row.originGeneration,
-    'request': row.requestId,
-    'job': row.jobId,
+    if (row is CompanyJobName) ...{
+      'kind': 'job.name.set@1',
+      'creation': body['creation'],
+      'parents': body['parents'],
+    },
+    'origin': origin,
+    'request': request,
+    'job': job,
     'author': body['device'],
     'installation': body['installation'],
-    'operation': row.operationCommitment,
-    'command': row.commandCommitment,
-    'digest': _syncBytesDigest(utf8.encode(row.operationBytes)),
-    'length': utf8.encode(row.operationBytes).length,
+    'operation': operation,
+    'command': command,
+    'digest': _syncBytesDigest(utf8.encode(bytes)),
+    'length': utf8.encode(bytes).length,
   };
 }
 
 Map<String, Object?> _parseDescriptor(Object? value) {
+  final name = value is Map && value['kind'] == 'job.name.set@1';
   final result = _joinObject(value, {
+    if (name) ...{'kind', 'creation', 'parents'},
     'origin',
     'request',
     'job',
@@ -129,40 +173,89 @@ Map<String, Object?> _parseDescriptor(Object? value) {
   for (final key in ['operation', 'command', 'digest']) {
     _joinHash(result[key]);
   }
+  if (name) {
+    _joinHash(result['creation']);
+    final parents = result['parents'];
+    if (parents is! List ||
+        parents.length > 32 ||
+        parents.toSet().length != parents.length) {
+      throw const CompanyBootstrapRefusal('Invalid name descriptor parents');
+    }
+    for (final parent in parents) {
+      _joinHash(parent);
+    }
+    final sorted = [...parents.cast<String>()]..sort();
+    if (_securityCanonical(sorted) != _securityCanonical(parents)) {
+      throw const CompanyBootstrapRefusal('Noncanonical name parents');
+    }
+  }
   if (result['length'] is! int ||
       (result['length'] as int) < 1 ||
       (result['length'] as int) > 65536 ||
-      utf8.encode(_securityCanonical(result)).length > 1024) {
+      utf8.encode(_securityCanonical(result)).length > 4096) {
     throw const CompanyBootstrapRefusal('Job descriptor capacity exceeded');
   }
   return result;
 }
 
 final class CreatedJobHoldingsInventory {
-  CreatedJobHoldingsInventory.local(List<CompanyJob> records) {
+  CreatedJobHoldingsInventory.local(List<Object> records) {
     descriptors = records.map(_jobDescriptor).map(_parseDescriptor).toList()
       ..sort((a, b) => _descriptorKey(a).compareTo(_descriptorKey(b)));
-    if (descriptors.length > 512) {
+    if (descriptors.length > 1024) {
       throw const CompanyBootstrapRefusal('Job inventory capacity exceeded');
     }
     count = descriptors.length;
+    var pageBytes = 256, pageItems = 0;
+    for (var i = 0; i < descriptors.length; i++) {
+      final bytes = utf8.encode(_securityCanonical(descriptors[i])).length + 40;
+      if (pageItems == 32 || pageBytes + bytes > 32 * 1024) {
+        _pageEnds.add(i);
+        pageBytes = 256;
+        pageItems = 0;
+      }
+      pageBytes += bytes;
+      pageItems++;
+    }
+    if (pageItems > 0) _pageEnds.add(descriptors.length);
+    _pageCount = _pageEnds.length;
+    _adaptivePages = _pageEnds.asMap().entries.any(
+      (entry) =>
+          entry.key < _pageEnds.length - 1 &&
+          entry.value - (entry.key == 0 ? 0 : _pageEnds[entry.key - 1]) != 32,
+    );
     digest = _syncDigest(descriptors);
     _validateComplete();
   }
   CreatedJobHoldingsInventory.remote(Object? raw) {
-    final meta = _joinObject(raw, {'count', 'pages', 'digest'});
+    final adaptive = raw is Map && raw['packing'] == 'bytes@1';
+    final meta = _joinObject(raw, {
+      'count',
+      'pages',
+      'digest',
+      if (adaptive) 'packing',
+    });
     if (meta['count'] is! int ||
         (meta['count'] as int) < 0 ||
-        (meta['count'] as int) > 512 ||
-        meta['pages'] != ((meta['count'] as int) + 31) ~/ 32) {
+        (meta['count'] as int) > 1024 ||
+        meta['pages'] is! int ||
+        (adaptive
+            ? ((meta['pages'] as int) < ((meta['count'] as int) + 31) ~/ 32 ||
+                  (meta['pages'] as int) > (meta['count'] as int))
+            : meta['pages'] != ((meta['count'] as int) + 31) ~/ 32)) {
       throw const CompanyBootstrapRefusal('Invalid inventory framing');
     }
     _joinHash(meta['digest']);
     count = meta['count'] as int;
+    _pageCount = meta['pages'] as int;
+    _adaptivePages = adaptive;
     digest = meta['digest'] as String;
     descriptors = [];
     if (count == 0) _validateComplete();
   }
+  final List<int> _pageEnds = [];
+  late int _pageCount;
+  bool _adaptivePages = false;
   late List<Map<String, Object?>> descriptors;
   late int count;
   late String digest;
@@ -177,10 +270,11 @@ final class CreatedJobHoldingsInventory {
         : _peerAckStores[index];
   }
 
-  int get pages => (count + 31) ~/ 32;
+  int get pages => _pageCount;
   bool get complete => _validated;
   Map<String, Object?> get meta => {
     'count': count,
+    if (_adaptivePages) 'packing': 'bytes@1',
     'pages': pages,
     'digest': digest,
   };
@@ -188,7 +282,10 @@ final class CreatedJobHoldingsInventory {
     if (ordinal < 0 || ordinal >= pages || !complete) {
       throw const CompanyBootstrapRefusal('Invalid inventory page');
     }
-    return descriptors.skip(ordinal * 32).take(32).toList();
+    return descriptors.sublist(
+      ordinal == 0 ? 0 : _pageEnds[ordinal - 1],
+      _pageEnds[ordinal],
+    );
   }
 
   void acceptPage(Object? raw) {
@@ -220,12 +317,16 @@ final class CreatedJobHoldingsInventory {
     }
     final bytes = utf8.encode(_securityCanonical(page)).length;
     _aggregateBytes += bytes;
-    if (items.length !=
-            (count - descriptors.length > 32
-                ? 32
-                : count - descriptors.length) ||
+    if (items.isEmpty ||
+        items.length > 32 ||
+        descriptors.length + items.length > count ||
+        (!_adaptivePages &&
+            items.length !=
+                (count - descriptors.length > 32
+                    ? 32
+                    : count - descriptors.length)) ||
         bytes > 33 * 1024 ||
-        _aggregateBytes > 528 * 1024) {
+        _aggregateBytes > 4128 * 1024) {
       throw const CompanyBootstrapRefusal(
         'Inventory aggregate capacity exceeded',
       );
@@ -241,7 +342,12 @@ final class CreatedJobHoldingsInventory {
     final sorted = [...keys]..sort();
     if (descriptors.length != count ||
         keys.toSet().length != count ||
-        descriptors.map((d) => d['job']).toSet().length != count ||
+        descriptors
+                .where((d) => d['kind'] == null)
+                .map((d) => d['job'])
+                .toSet()
+                .length !=
+            descriptors.where((d) => d['kind'] == null).length ||
         _securityCanonical(keys) != _securityCanonical(sorted) ||
         _syncDigest(descriptors) != digest) {
       throw const CompanyBootstrapRefusal(
@@ -378,8 +484,11 @@ final class CompanyCreatedJobSync {
     CompanyEnrollment enrollment,
     OwnerSession owner,
   ) async {
-    final records = await CompanyJobCommands(enrollment: enrollment)
-        .syncHoldings(ownerSession: owner);
+    final commands = CompanyJobCommands(enrollment: enrollment);
+    final records = <Object>[
+      ...await commands.syncHoldings(ownerSession: owner),
+      ...await commands.nameSyncHoldings(ownerSession: owner),
+    ];
     final peers = await CompanyPeerAuthentication(enrollment: enrollment)
         .retainedPeers(session: owner);
     final members = {for (final p in peers) p.deviceId: p._membership};
@@ -387,61 +496,81 @@ final class CompanyCreatedJobSync {
       for (final r in records)
         _descriptorKey(_jobDescriptor(r)): _jobDescriptor(r),
     };
-    final rows =
-        await (enrollment.db.select(enrollment.db.companyJobPeerAcks)
-              ..where((t) => t.companyId.equals(owner.identity.companyId))
-              ..limit(65537))
-            .get();
-    if (rows.length > 65536) {
-      throw const CompanyBootstrapRefusal('Job ACK history capacity exceeded');
+    final expected = <String, Set<String>>{};
+    for (final entry in descriptors.entries) {
+      expected
+          .putIfAbsent(entry.value['job'] as String, () => {})
+          .add(entry.key);
+    }
+    final confirmed = <String, Map<String, Set<String>>>{};
+    for (final name in [false, true]) {
+      final table = name
+          ? 'company_job_name_peer_acks'
+          : 'company_job_peer_acks';
+      final rows = await enrollment.db
+          .customSelect(
+            'SELECT * FROM $table WHERE company_id = ? LIMIT 65537',
+            variables: [Variable(owner.identity.companyId)],
+          )
+          .get();
+      if (rows.length > 65536) {
+        throw const CompanyBootstrapRefusal(
+          'Job ACK history capacity exceeded',
+        );
+      }
+      for (final row in rows) {
+        final peer = row.read<String>('peer_device_id');
+        final member = members[peer];
+        final key =
+            '${name ? 'name/' : ''}${row.read<String>('origin_generation')}/${row.read<String>('request_id')}';
+        final descriptor = descriptors[key];
+        if (member == null || descriptor == null) continue;
+        final bytes = row.read<String>('ack_bytes');
+        if (row.read<String>('operation_digest') != descriptor['digest'] ||
+            utf8.encode(bytes).length > 4096) {
+          throw const CompanyBootstrapRefusal('Saved Job ACK differs');
+        }
+        final signed = _joinObject(jsonDecode(bytes), {'body', 'signature'});
+        final body = _joinObject(signed['body'], {
+          'v',
+          'kind',
+          'descriptor',
+          'receiver',
+          'generation',
+          'store',
+          'receipt',
+        });
+        _joinId(body, 'store');
+        _joinHash(body['receipt']);
+        if (body['v'] != 1 ||
+            body['kind'] != _ackKind(descriptor) ||
+            body['receiver'] != member.device['installation'] ||
+            body['generation'] != member.device['generation'] ||
+            _securityCanonical(body['descriptor']) !=
+                _securityCanonical(descriptor)) {
+          throw const CompanyBootstrapRefusal('Saved Job ACK binding differs');
+        }
+        await _joinVerify(
+          body,
+          signed['signature'],
+          member.device['key'],
+          _ackDomain(descriptor),
+        );
+        confirmed
+            .putIfAbsent(descriptor['job'] as String, () => {})
+            .putIfAbsent(peer, () => {})
+            .add(key);
+      }
     }
     final counts = <String, int>{};
-    for (final row in rows) {
-      final member = members[row.peerDeviceId];
-      final descriptor =
-          descriptors['${row.originGeneration}/${row.requestId}'];
-      if (member == null || descriptor == null) continue;
-      if (row.operationDigest != descriptor['digest'] ||
-          utf8.encode(row.ackBytes).length > 4096) {
-        throw const CompanyBootstrapRefusal('Saved Job ACK differs');
-      }
-      final signed = _joinObject(jsonDecode(row.ackBytes), {
-        'body',
-        'signature',
-      });
-      final body = _joinObject(signed['body'], {
-        'v',
-        'kind',
-        'descriptor',
-        'receiver',
-        'generation',
-        'store',
-        'receipt',
-      });
-      _joinId(body, 'store');
-      _joinHash(body['receipt']);
-      if (body['v'] != 1 ||
-          body['kind'] != 'company.job.create.ack@1' ||
-          body['receiver'] != member.device['installation'] ||
-          body['generation'] != member.device['generation'] ||
-          _securityCanonical(body['descriptor']) !=
-              _securityCanonical(descriptor)) {
-        throw const CompanyBootstrapRefusal('Saved Job ACK binding differs');
-      }
-      await _joinVerify(
-        body,
-        signed['signature'],
-        member.device['key'],
-        _syncAckDomain,
-      );
-      counts.update(
-        descriptor['job'] as String,
-        (n) => n + 1,
-        ifAbsent: () => 1,
-      );
+    for (final entry in expected.entries) {
+      counts[entry.key] =
+          confirmed[entry.key]?.values
+              .where((keys) => keys.containsAll(entry.value))
+              .length ??
+          0;
     }
-    await CompanyJobCommands(enrollment: enrollment)
-        .requireSyncPermission(owner);
+    await commands.requireSyncPermission(owner);
     return counts;
   }
 
@@ -685,9 +814,10 @@ final class CompanyCreatedJobSync {
   }
 
   Future<void> _freeze(_CreatedJobRun run) async {
-    final records = await _commands.syncHoldings(
-      ownerSession: availability.owner,
-    );
+    final records = <Object>[
+      ...await _commands.syncHoldings(ownerSession: availability.owner),
+      ...await _commands.nameSyncHoldings(ownerSession: availability.owner),
+    ];
     _requireRun(run);
     final local = CreatedJobHoldingsInventory.local(records);
     final cached = await _readAckCache(records);
@@ -725,48 +855,65 @@ final class CompanyCreatedJobSync {
     return result;
   }
 
-  Future<Map<String, String>> _readAckCache(List<CompanyJob> records) async {
+  Future<Map<String, String>> _readAckCache(List<Object> records) async {
     final expected = {
       for (final row in records)
         _descriptorKey(_jobDescriptor(row)): _jobDescriptor(row),
     };
-    final rows =
-        await (_db.select(_db.companyJobPeerAcks)
-              ..where(
-                (t) =>
-                    t.companyId.equals(availability.owner.identity.companyId) &
-                    t.peerDeviceId.equals(availability.peer.deviceId),
-              )
-              ..limit(513))
-            .get();
-    if (rows.length > 512) {
-      throw const CompanyBootstrapRefusal('Peer ACK capacity exceeded');
-    }
     final result = <String, String>{};
-    for (final row in rows) {
-      final key = '${row.originGeneration}/${row.requestId}';
-      final descriptor = expected[key];
-      if (descriptor == null || row.operationDigest != descriptor['digest']) {
-        throw const CompanyBootstrapRefusal(
-          'Saved ACK has no matching scoped Job',
-        );
+    for (final name in [false, true]) {
+      final table = name
+          ? 'company_job_name_peer_acks'
+          : 'company_job_peer_acks';
+      final rows = await _db
+          .customSelect(
+            'SELECT * FROM $table WHERE company_id = ? AND peer_device_id = ? LIMIT 1025',
+            variables: [
+              Variable(availability.owner.identity.companyId),
+              Variable(availability.peer.deviceId),
+            ],
+          )
+          .get();
+      if (rows.length > 1024) {
+        throw const CompanyBootstrapRefusal('Peer ACK capacity exceeded');
       }
-      final body = await _validatePeerAck(descriptor, jsonDecode(row.ackBytes));
-      result[key] = body['store'] as String;
+      for (final row in rows) {
+        final key =
+            '${name ? 'name/' : ''}${row.read<String>('origin_generation')}/${row.read<String>('request_id')}';
+        final descriptor = expected[key];
+        if (descriptor == null ||
+            row.read<String>('operation_digest') != descriptor['digest']) {
+          throw const CompanyBootstrapRefusal(
+            'Saved ACK has no matching scoped Job',
+          );
+        }
+        final body = await _validatePeerAck(
+          descriptor,
+          jsonDecode(row.read<String>('ack_bytes')),
+        );
+        result[key] = body['store'] as String;
+      }
     }
     return result;
   }
 
-  Future<CompanyJob> _record(Map<String, Object?> descriptor) async {
-    final row = await _commands.verifySyncRecord(
-      descriptor['job'] as String,
-      availability.owner,
-    );
+  Future<({String operationBytes, String receiptBytes})> _record(
+    Map<String, Object?> descriptor,
+  ) async {
+    final Object row = descriptor['kind'] == 'job.name.set@1'
+        ? await _commands.verifyNameSyncRecord(
+            descriptor['operation'] as String,
+            availability.owner,
+          )
+        : await _commands.verifySyncRecord(
+            descriptor['job'] as String,
+            availability.owner,
+          );
     if (_securityCanonical(_jobDescriptor(row)) !=
         _securityCanonical(descriptor)) {
       throw const CompanyBootstrapRefusal('Job changed after inventory');
     }
-    return row;
+    return _recordBytes(row);
   }
 
   Future<Map<String, Object?>> _ack(Map<String, Object?> descriptor) async {
@@ -775,13 +922,13 @@ final class CompanyCreatedJobSync {
     final identity = _installation.identity!;
     final signed = await _signJoin(_installation, {
       'v': 1,
-      'kind': 'company.job.create.ack@1',
+      'kind': _ackKind(descriptor),
       'descriptor': descriptor,
       'receiver': identity.id.value,
       'generation': identity.generation.value,
       'store': _installation.receivingStoreGeneration!.value,
       'receipt': _syncBytesDigest(utf8.encode(row.receiptBytes)),
-    }, _syncAckDomain);
+    }, _ackDomain(descriptor));
     if (utf8.encode(_securityCanonical(signed)).length > 4096) {
       throw const CompanyBootstrapRefusal('Job ACK capacity exceeded');
     }
@@ -810,7 +957,7 @@ final class CompanyCreatedJobSync {
     _joinId(body, 'store');
     _joinHash(body['receipt']);
     if (body['v'] != 1 ||
-        body['kind'] != 'company.job.create.ack@1' ||
+        body['kind'] != _ackKind(descriptor) ||
         body['receiver'] != member.device['installation'] ||
         body['generation'] != member.device['generation'] ||
         _securityCanonical(body['descriptor']) !=
@@ -821,7 +968,7 @@ final class CompanyCreatedJobSync {
       body,
       signed['signature'],
       member.device['key'],
-      _syncAckDomain,
+      _ackDomain(descriptor),
     );
     return body;
   }
@@ -841,34 +988,26 @@ final class CompanyCreatedJobSync {
     final signed = _joinObject(raw, {'body', 'signature'});
     await _record(descriptor);
     await availability.requireCurrent();
-    final next = CompanyJobPeerAck(
-      companyId: availability.owner.identity.companyId,
-      originGeneration: descriptor['origin'] as String,
-      requestId: descriptor['request'] as String,
-      peerDeviceId: availability.peer.deviceId,
-      operationDigest: descriptor['digest'] as String,
-      ackBytes: _securityCanonical(signed),
-    );
+    final table = descriptor['kind'] == 'job.name.set@1'
+        ? 'company_job_name_peer_acks'
+        : 'company_job_peer_acks';
     await _db.transaction(() async {
       await _db.customStatement(
         'UPDATE app_settings SET value = value WHERE key = ?',
         [kInstallationBindingKey],
       );
       await availability.requireCurrent();
-      final prior =
-          await (_db.select(_db.companyJobPeerAcks)..where(
-                (t) =>
-                    t.companyId.equals(next.companyId) &
-                    t.originGeneration.equals(next.originGeneration) &
-                    t.requestId.equals(next.requestId) &
-                    t.peerDeviceId.equals(next.peerDeviceId),
-              ))
-              .getSingleOrNull();
-      if (prior != next) {
-        await _db
-            .into(_db.companyJobPeerAcks)
-            .insertOnConflictUpdate(next.toCompanion(false));
-      }
+      await _db.customStatement(
+        'INSERT INTO $table (company_id,origin_generation,request_id,peer_device_id,operation_digest,ack_bytes) VALUES (?,?,?,?,?,?) ON CONFLICT(company_id,origin_generation,request_id,peer_device_id) DO UPDATE SET operation_digest=excluded.operation_digest,ack_bytes=excluded.ack_bytes',
+        [
+          availability.owner.identity.companyId,
+          descriptor['origin'],
+          descriptor['request'],
+          availability.peer.deviceId,
+          descriptor['digest'],
+          _securityCanonical(signed),
+        ],
+      );
       availability.requireLive();
     });
     _requireRun(run);
@@ -905,15 +1044,17 @@ final class CompanyCreatedJobSync {
     }
     _requireRun(run);
     _requireInventories();
-    final records = await _commands.syncHoldings(
-      ownerSession: availability.owner,
-    );
+    final records = <Object>[
+      ...await _commands.syncHoldings(ownerSession: availability.owner),
+      ...await _commands.nameSyncHoldings(ownerSession: availability.owner),
+    ];
     _requireRun(run);
     final actual = {
       for (final row in records)
         _descriptorKey(_jobDescriptor(row)): _jobDescriptor(row),
     };
     final expected = {..._local!.byKey, ..._remote!.byKey};
+    if (actual.length != expected.length) return false;
     for (final entry in expected.entries) {
       if (_securityCanonical(actual[entry.key]) !=
           _securityCanonical(entry.value)) {
@@ -1054,6 +1195,7 @@ final class CompanyCreatedJobSync {
               : CreatedJobSyncStage.transfer,
         );
         _requireInventories();
+        _dependencyOrder();
         result = await _transfer(action, data, run);
         _requireRun(run);
       }
@@ -1091,6 +1233,138 @@ final class CompanyCreatedJobSync {
       );
     }
     return reply;
+  }
+
+  Future<String> _apply(
+    Map<String, Object?> descriptor,
+    Uint8List bytes, {
+    required OwnerSession ownerSession,
+    required CompanyJobSyncAvailability availability,
+  }) {
+    final body = (jsonDecode(utf8.decode(bytes)) as Map)['body'] as Map;
+    final name = descriptor['kind'] == 'job.name.set@1';
+    final expected = {
+      if (name) ...{
+        'kind': 'job.name.set@1',
+        'creation': body['creation'],
+        'parents': body['parents'],
+      },
+      'origin': body['generation'],
+      'request': body['request'],
+      'job': body['job'],
+      'author': body['device'],
+      'installation': body['installation'],
+      'operation': _syncDigest(body),
+      'command': body['command'],
+      'digest': _syncBytesDigest(bytes),
+      'length': bytes.length,
+    };
+    if (body['contract'] != (name ? 'job.name.set@1' : 'job.create@1') ||
+        _securityCanonical(expected) != _securityCanonical(descriptor)) {
+      throw const CompanyBootstrapRefusal(
+        'Job payload differs from frozen descriptor',
+      );
+    }
+    return name
+        ? _commands.applyIncomingName(
+            bytes,
+            ownerSession: ownerSession,
+            availability: availability,
+          )
+        : _commands.applyIncomingCreate(
+            bytes,
+            ownerSession: ownerSession,
+            availability: availability,
+          );
+  }
+
+  List<Map<String, Object?>> _dependencyOrder() {
+    final all = {..._local!.byKey, ..._remote!.byKey};
+    final byOperation = {
+      for (final d in all.values) d['operation'] as String: d,
+    };
+    if (byOperation.length != all.length) {
+      throw const CompanyBootstrapRefusal('Duplicate Job operation');
+    }
+    final visited = <String>{}, visiting = <String>{};
+    final result = <Map<String, Object?>>[];
+    void visit(Map<String, Object?> d) {
+      final id = d['operation'] as String;
+      if (visited.contains(id)) return;
+      if (!visiting.add(id)) {
+        throw const CompanyBootstrapRefusal('Cyclic name history');
+      }
+      if (d['kind'] == 'job.name.set@1') {
+        final creation = all.values
+            .where((c) => c['kind'] == null && c['digest'] == d['creation'])
+            .firstOrNull;
+        if (creation == null ||
+            creation['kind'] != null ||
+            creation['job'] != d['job']) {
+          throw const CompanyBootstrapRefusal(
+            'Missing name creation dependency',
+          );
+        }
+        visit(creation);
+        for (final parent in d['parents'] as List) {
+          final p = byOperation[parent];
+          if (p == null ||
+              p['kind'] != 'job.name.set@1' ||
+              p['creation'] != d['creation'] ||
+              p['job'] != d['job']) {
+            throw const CompanyBootstrapRefusal(
+              'Missing or foreign name dependency',
+            );
+          }
+          visit(p);
+        }
+      }
+      visiting.remove(id);
+      visited.add(id);
+      result.add(d);
+    }
+
+    final sorted = all.values.toList()
+      ..sort((a, b) => _descriptorKey(a).compareTo(_descriptorKey(b)));
+    for (final d in sorted) {
+      visit(d);
+    }
+    return result;
+  }
+
+  Set<String> _eligibleTransfers(
+    List<Map<String, Object?>> ordered,
+    CreatedJobHoldingsInventory sender,
+    CreatedJobHoldingsInventory receiver,
+    bool Function(Map<String, Object?>) authoredBySender,
+  ) {
+    final available = receiver.byKey.keys.toSet();
+    final operationKeys = {
+      for (final d in ordered) d['operation']: _descriptorKey(d),
+    };
+    final creationKeys = {
+      for (final d in ordered)
+        if (d['kind'] == null) d['digest']: _descriptorKey(d),
+    };
+    final eligible = <String>{};
+    for (final d in ordered) {
+      final key = _descriptorKey(d);
+      if (!sender.byKey.containsKey(key) ||
+          available.contains(key) ||
+          !authoredBySender(d)) {
+        continue;
+      }
+      if (d['kind'] == 'job.name.set@1' &&
+          (!available.contains(creationKeys[d['creation']]) ||
+              !(d['parents'] as List).every(
+                (parent) => available.contains(operationKeys[parent]),
+              ))) {
+        continue;
+      }
+      available.add(key);
+      eligible.add(key);
+    }
+    return eligible;
   }
 
   Future<Map<String, Object?>> _transfer(
@@ -1150,7 +1424,8 @@ final class CompanyCreatedJobSync {
       }
       _incoming!.append(data['offset'], data['bytes']);
       if (_incoming!.complete) {
-        await _commands.applyIncomingCreate(
+        await _apply(
+          descriptor,
           _incoming!.bytes,
           ownerSession: availability.owner,
           availability: availability,
@@ -1247,10 +1522,31 @@ final class CompanyCreatedJobSync {
         _remote!.acceptPage(await _rpc('page', {'ordinal': i}));
       }
       _requireInventories();
-      final ours = _local!.descriptors;
-      final theirs = _remote!.descriptors;
+      final ordered = _dependencyOrder();
+      final ours = ordered
+          .where((d) => _local!.byKey.containsKey(_descriptorKey(d)))
+          .toList();
+      final theirs = ordered
+          .where((d) => _remote!.byKey.containsKey(_descriptorKey(d)))
+          .toList();
       final ourKeys = _local!.byKey;
       final theirKeys = _remote!.byKey;
+      final outgoing = _eligibleTransfers(
+        ordered,
+        _local!,
+        _remote!,
+        _authoredHere,
+      );
+      final member = availability.peer._held.peer._membership;
+      final incoming = _eligibleTransfers(
+        ordered,
+        _remote!,
+        _local!,
+        (d) =>
+            d['author'] == member.device['id'] &&
+            d['installation'] == member.device['installation'] &&
+            d['origin'] == member.device['generation'],
+      );
       stage = CreatedJobSyncStage.transfer;
       for (
         var i = 0;
@@ -1274,8 +1570,8 @@ final class CompanyCreatedJobSync {
               });
               await _saveAck(d, reply['ack']);
             }
-          } else if (_authoredHere(d)) {
-            _status('Sending an offline-created Job to the retained peer.');
+          } else if (outgoing.contains(_descriptorKey(d))) {
+            _status('Sending a Job change to the retained peer.');
             final row = await _record(d);
             final bytes = utf8.encode(row.operationBytes);
             if (!_canExchange(
@@ -1311,10 +1607,7 @@ final class CompanyCreatedJobSync {
         if (i < theirs.length) {
           final d = theirs[i];
           if (ourKeys.containsKey(_descriptorKey(d))) continue;
-          final member = availability.peer._held.peer._membership;
-          if (d['author'] != member.device['id'] ||
-              d['installation'] != member.device['installation'] ||
-              d['origin'] != member.device['generation']) {
+          if (!incoming.contains(_descriptorKey(d))) {
             unsupported++;
             continue;
           }
@@ -1327,7 +1620,7 @@ final class CompanyCreatedJobSync {
             length: d['length'] as int,
             digest: d['digest'] as String,
           );
-          _status('Receiving an offline-created Job from the retained peer.');
+          _status('Receiving a Job change from the retained peer.');
           while (!buffer.complete) {
             final reply = await _rpc('get', {
               'descriptor': d,
@@ -1337,7 +1630,8 @@ final class CompanyCreatedJobSync {
             _joinObject(reply, {'offset', 'bytes'});
             buffer.append(reply['offset'], reply['bytes']);
           }
-          await _commands.applyIncomingCreate(
+          await _apply(
+            d,
             buffer.bytes,
             ownerSession: availability.owner,
             availability: availability,

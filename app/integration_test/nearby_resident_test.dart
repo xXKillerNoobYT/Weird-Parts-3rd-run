@@ -483,6 +483,8 @@ final class _Resident {
         // Remaining alive after this grace is unverified, never an exit pass.
         await Future<void>.delayed(const Duration(seconds: 2));
         rejectNativeTest('exit-unverified');
+      case NativeTestAction.jobNameUi:
+        rejectNativeTest('wrong-phase');
     }
   }
 

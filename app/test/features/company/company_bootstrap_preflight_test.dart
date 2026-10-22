@@ -10,7 +10,7 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/company/company_store_markers.dart';
 
 void main() {
-  test('schema6 mid-DDL upgrade failure rolls back new schema8 and enrollment tables', () async {
+  test('schema6 mid-DDL upgrade failure rolls back new schema9 and enrollment tables', () async {
     final directory = Directory.systemTemp.createTempSync('join-ddl-rollback-');
     addTearDown(() => directory.deleteSync(recursive: true));
     final file = File('${directory.path}/shop.sqlite');
@@ -26,6 +26,7 @@ void main() {
     for (final table in {
       ...companyJoinTableColumns,
       ...companySyncTableColumns,
+      ...companyNameTableColumns,
     }.keys) {
       raw.execute('DROP TABLE "$table"');
     }
@@ -90,6 +91,7 @@ void main() {
   for (final table in {
     ...companyJoinTableColumns,
     ...companySyncTableColumns,
+    ...companyNameTableColumns,
   }.keys) {
     test('orphan $table refuses Create Join and legacy Jobs without mutation', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -97,12 +99,13 @@ void main() {
       final columns = {
         ...companyJoinTableColumns,
         ...companySyncTableColumns,
+        ...companyNameTableColumns,
       }[table]!.toList();
       await db.customStatement(
         'INSERT INTO "$table" (${columns.map((n) => '"$n"').join(',')}) VALUES (${columns.map((_) => '?').join(',')})',
         [
           for (final column in columns)
-            {'ordinal', 'issuer_sequence'}.contains(column)
+            {'ordinal', 'issuer_sequence', 'outgoing'}.contains(column)
                 ? 1
                 : 'synthetic-orphan',
         ],
@@ -128,7 +131,7 @@ void main() {
     });
     for (final malformed in ['missing', 'wrong columns']) {
       test(
-        'schema8 $malformed $table refuses adoption and legacy writes',
+        'schema9 $malformed $table refuses adoption and legacy writes',
         () async {
           final db = AppDatabase.forTesting(NativeDatabase.memory());
           addTearDown(db.close);
@@ -184,7 +187,7 @@ void main() {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 8);
+    expect(version.read<int>('user_version'), kAppSchemaVersion);
     await db.customStatement(
       "INSERT INTO company_bootstrap_witnesses "
       "(company_id, bootstrap_id, facts_commitment, package_id, package_digest, status) "
