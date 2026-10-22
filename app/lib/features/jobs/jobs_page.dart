@@ -60,27 +60,40 @@ class _JobsPageState extends State<JobsPage> {
     );
     if (name == null || name.isEmpty) return;
 
-    final id = await _jobs.createJob(name);
+    late final String id;
+    try {
+      id = await _jobs.createJob(name);
+    } on StateError catch (error) {
+      _showWriteRefusal(error);
+      return;
+    }
     await _reload();
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => JobDetailPage(jobId: id),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => JobDetailPage(jobId: id)));
     await _reload();
   }
 
   Future<void> _archive(Job job) async {
-    await _jobs.archiveJob(job.id);
+    try {
+      await _jobs.archiveJob(job.id);
+    } on StateError catch (error) {
+      _showWriteRefusal(error);
+      return;
+    }
     await _reload();
+  }
+
+  void _showWriteRefusal(StateError error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(error.message.toString())));
   }
 
   Future<void> _openJob(Job job) async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => JobDetailPage(jobId: job.id),
-      ),
+      MaterialPageRoute<void>(builder: (_) => JobDetailPage(jobId: job.id)),
     );
     await _reload();
   }
@@ -109,48 +122,48 @@ class _JobsPageState extends State<JobsPage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : items.isEmpty
-                    ? const Center(child: Text('No active jobs'))
-                    : ListView.builder(
-                        itemCount: items.length,
-                        itemBuilder: (context, index) {
-                          final job = items[index];
-                          return Dismissible(
-                            key: ValueKey(job.id),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              color: Theme.of(context).colorScheme.error,
-                              child: Icon(
-                                Icons.archive,
-                                color: Theme.of(context).colorScheme.onError,
-                              ),
-                            ),
-                            confirmDismiss: (_) async {
-                              await _archive(job);
-                              return false;
-                            },
-                            child: ListTile(
-                              title: Text(job.name),
-                              subtitle: job.jobNumber != null
-                                  ? Text(job.jobNumber!)
-                                  : null,
-                              trailing: PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  if (value == 'archive') _archive(job);
-                                },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'archive',
-                                    child: Text('Archive'),
-                                  ),
-                                ],
-                              ),
-                              onTap: () => _openJob(job),
-                            ),
-                          );
+                ? const Center(child: Text('No active jobs'))
+                : ListView.builder(
+                    itemCount: items.length,
+                    itemBuilder: (context, index) {
+                      final job = items[index];
+                      return Dismissible(
+                        key: ValueKey(job.id),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          color: Theme.of(context).colorScheme.error,
+                          child: Icon(
+                            Icons.archive,
+                            color: Theme.of(context).colorScheme.onError,
+                          ),
+                        ),
+                        confirmDismiss: (_) async {
+                          await _archive(job);
+                          return false;
                         },
-                      ),
+                        child: ListTile(
+                          title: Text(job.name),
+                          subtitle: job.jobNumber != null
+                              ? Text(job.jobNumber!)
+                              : null,
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'archive') _archive(job);
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'archive',
+                                child: Text('Archive'),
+                              ),
+                            ],
+                          ),
+                          onTap: () => _openJob(job),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -207,10 +220,7 @@ class _NewJobNameDialogState extends State<_NewJobNameDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Create'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Create')),
       ],
     );
   }

@@ -116,16 +116,32 @@ void main() {
 
     Future<void> retireCatalogPart(int i, String mode) async {
       final db = fixture.databases[i];
+      // Test-only retirement of already signed catalog facts. Public legacy
+      // DAOs now refuse every mutation once this store has company history.
+      final at = DateTime.utc(2026).millisecondsSinceEpoch ~/ 1000;
       if (mode == 'deleted') {
-        await db.partsDao.softDeletePart(part);
+        await db.transaction(() async {
+          await db.customStatement(
+            'UPDATE supplier_listings SET deleted_at = ?, modified_at = ?, revision = revision + 1 WHERE brand_version_id IN (SELECT id FROM brand_versions WHERE part_id = ?) AND deleted_at IS NULL',
+            [at, at, part],
+          );
+          await db.customStatement(
+            'UPDATE brand_versions SET deleted_at = ?, modified_at = ?, revision = revision + 1 WHERE part_id = ? AND deleted_at IS NULL',
+            [at, at, part],
+          );
+          await db.customStatement(
+            'UPDATE part_devices SET deleted_at = ?, modified_at = ?, revision = revision + 1 WHERE part_id = ? AND deleted_at IS NULL',
+            [at, at, part],
+          );
+          await db.customStatement(
+            'UPDATE parts SET deleted_at = ?, modified_at = ?, revision = revision + 1 WHERE id = ? AND deleted_at IS NULL',
+            [at, at, part],
+          );
+        });
       } else {
-        final current = (await db.partsDao.getPart(part))!;
-        await db.partsDao.updatePart(
-          id: part,
-          name: current.name,
-          description: current.description,
-          uom: current.uom,
-          active: false,
+        await db.customStatement(
+          'UPDATE parts SET active = 0, modified_at = ?, revision = revision + 1 WHERE id = ?',
+          [at, part],
         );
       }
     }
@@ -226,11 +242,18 @@ void main() {
         const c = '10000000-0000-4000-8000-000000000032';
         for (final db in fixture.databases) {
           for (final id in [b, c]) {
-            await db.partsDao.insertGeneralPart(
-              id: id,
-              name: 'Synthetic $id',
-              deviceId: legacyDevice,
-            );
+            final now = DateTime.utc(2026);
+            await db
+                .into(db.parts)
+                .insert(
+                  PartsCompanion.insert(
+                    id: id,
+                    name: 'Synthetic $id',
+                    originDeviceId: legacyDevice,
+                    createdAt: now,
+                    modifiedAt: now,
+                  ),
+                );
           }
         }
         fixture.facts['entities'] = <Object?>[
@@ -828,52 +851,24 @@ void main() {
     });
 
     test(
-      'archive predicate and write exclude adoption on a second connection',
+      'legacy archive refuses company-marked job on a second connection',
       () async {
         await fixture.databases[0].close();
-        final interceptor = FixtureQueryInterceptor();
         final db = AppDatabase.forTesting(
-          NativeDatabase(File('${fixture.directory.path}/0.db'))
-              .interceptWith(interceptor),
+          NativeDatabase(File('${fixture.directory.path}/0.db')),
         );
         fixture.databases[0] = db;
         final other = AppDatabase.forTesting(
           NativeDatabase(File('${fixture.directory.path}/0.db')),
         );
         try {
-          final otherSecurity = InstallationSecurity(
-            store: fixture.secureStores[0],
-            namespace: fixture.installations[0].namespace,
+          final before = businessRows(fixture.files[0], includeHistory: true);
+          await expectLater(
+            db.jobsDao.archiveJob(job),
+            throwsA(isA<StateError>()),
           );
-          await otherSecurity.start(other);
-          final otherService = JobLineCommands(
-            authorization: JobLineAuthorization(
-              db: other,
-              installation: otherSecurity,
-            ),
-          );
-          final command = fixture.command(
-            const JobLinePatch(notes: SetField('Racing adoption')),
-          );
-          final session = await otherService.authorization.verify(
-            command,
-            await fixture.assertion(0, command),
-          );
-          var raced = false;
-          interceptor.afterSelect = (statement) async {
-            if (!statement.contains('job_line_baselines b JOIN job_lines')) {
-              return;
-            }
-            interceptor.afterSelect = null;
-            await expectLater(
-              otherService.patchJobLine(session, command),
-              throwsA(predicate((e) => '$e'.contains('locked'))),
-            );
-            raced = true;
-          };
-          await db.jobsDao.archiveJob(job);
-          expect(raced, isTrue);
-          expect((await db.select(db.jobs).getSingle()).status, 'archived');
+          expect((await db.select(db.jobs).getSingle()).status, 'active');
+          expect(businessRows(fixture.files[0], includeHistory: true), before);
           expect(await fixture.counts(0), [0, 0, 0, 0, 0, 0]);
         } finally {
           await other.close();
@@ -913,7 +908,7 @@ void main() {
             0,
             beforeCommit: () async {
               await expectLater(
-                fixture.installations[0].prepareReset(),
+                fixture.installations[0].prepareReset(fixture.databases[0]),
                 throwsStateError,
               );
               await expectLater(
@@ -1721,7 +1716,7 @@ void main() {
             .select(fixture.databases[0].jobLineReceipts)
             .getSingle();
         await expectLater(
-          fixture.installations[0].prepareReset(),
+          fixture.installations[0].prepareReset(fixture.databases[0]),
           throwsStateError,
         );
         await fixture.reopen(0);

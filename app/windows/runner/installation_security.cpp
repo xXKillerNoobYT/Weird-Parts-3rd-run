@@ -9,6 +9,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,6 +18,7 @@
 
 namespace {
 constexpr size_t kMaximumPayload = 2048;
+constexpr size_t kMaximumRecoveryFile = 65536;
 constexpr char kHeader[] = "WPIS1";
 constexpr size_t kHeaderSize = 5 + 36;
 using Value = flutter::EncodableValue;
@@ -58,7 +60,7 @@ std::string Namespace(const Map& map) {
     if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
           c == '.' || c == '_' || c == '-')) throw Failure("installation_invalid_argument");
   }
-  if (value != "production") {
+  if (value != "production" && value != "production.company-custody") {
     if (value.rfind("synthetic.", 0) != 0 || value.size() <= 10 ||
         !((value[10] >= 'a' && value[10] <= 'z') ||
           (value[10] >= '0' && value[10] <= '9'))) throw Failure("installation_invalid_argument");
@@ -158,6 +160,65 @@ void Write(const std::wstring& target, const std::wstring& sid,
   SecureZeroMemory(wrapped.data(), wrapped.size());
   if (!saved) throw Failure("installation_unavailable");
 }
+
+std::wstring AbsoluteRecoveryPath(const Map& arguments) {
+  const auto utf8_path = RequiredString(arguments, "path");
+  if (utf8_path.empty() || utf8_path.size() > 32767 ||
+      utf8_path.find('\0') != std::string::npos) throw Failure("installation_invalid_argument");
+  const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                       utf8_path.data(), static_cast<int>(utf8_path.size()), nullptr, 0);
+  if (length <= 0) throw Failure("installation_invalid_argument");
+  std::wstring path(length, L'\0');
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8_path.data(),
+                          static_cast<int>(utf8_path.size()), path.data(), length) != length ||
+      !std::filesystem::path(path).is_absolute() ||
+      path.rfind(L"\\\\.\\", 0) == 0 || path.rfind(L"\\\\?\\", 0) == 0) {
+    throw Failure("installation_invalid_argument");
+  }
+  const auto first_colon = path.find(L':');
+  if (first_colon != std::wstring::npos && first_colon != 1) throw Failure("installation_invalid_argument");
+  if (path.find(L':', first_colon == std::wstring::npos ? 0 : first_colon + 1) !=
+      std::wstring::npos) throw Failure("installation_invalid_argument");
+  return path;
+}
+
+void WriteRecoveryFileExclusive(const Map& arguments) {
+  const auto path = AbsoluteRecoveryPath(arguments);
+  const auto* value = Find(arguments, "bytes");
+  const auto* bytes = value == nullptr ? nullptr : std::get_if<std::vector<uint8_t>>(value);
+  if (bytes == nullptr || bytes->empty() || bytes->size() > kMaximumRecoveryFile) {
+    throw Failure("installation_invalid_argument");
+  }
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    if (GetLastError() == ERROR_FILE_EXISTS || GetLastError() == ERROR_ALREADY_EXISTS) {
+      throw Failure("installation_file_exists");
+    }
+    throw Failure("installation_unavailable");
+  }
+  try {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (GetFileType(file) != FILE_TYPE_DISK || !GetFileInformationByHandle(file, &info) ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 || info.nNumberOfLinks != 1) {
+      throw Failure("installation_unavailable");
+    }
+    size_t offset = 0;
+    while (offset < bytes->size()) {
+      DWORD written = 0;
+      if (!WriteFile(file, bytes->data() + offset,
+                     static_cast<DWORD>(bytes->size() - offset), &written, nullptr) || written == 0) {
+        throw Failure("installation_unavailable");
+      }
+      offset += written;
+    }
+    if (!FlushFileBuffers(file)) throw Failure("installation_unavailable");
+  } catch (...) {
+    CloseHandle(file);
+    throw;
+  }
+  CloseHandle(file);
+}
 }  // namespace
 
 void RegisterInstallationSecurity(flutter::BinaryMessenger* messenger) {
@@ -166,12 +227,19 @@ void RegisterInstallationSecurity(flutter::BinaryMessenger* messenger) {
   channel.SetMethodCallHandler([](const flutter::MethodCall<Value>& call,
                                  std::unique_ptr<flutter::MethodResult<Value>> result) {
     try {
-      if (call.method_name() != "readState" && call.method_name() != "compareAndSwapState") {
+      if (call.method_name() != "readState" && call.method_name() != "compareAndSwapState" &&
+          call.method_name() != "writeRecoveryFileExclusive") {
         result->NotImplemented();
         return;
       }
       const auto* arguments = call.arguments() == nullptr ? nullptr : std::get_if<Map>(call.arguments());
       if (arguments == nullptr) throw Failure("installation_invalid_argument");
+      if (call.method_name() == "writeRecoveryFileExclusive") {
+        WriteRecoveryFileExclusive(*arguments);
+        const auto* bytes = std::get_if<std::vector<uint8_t>>(Find(*arguments, "bytes"));
+        result->Success(Value(Map{{Value("written"), Value(static_cast<int>(bytes->size()))}}));
+        return;
+      }
       const auto scope = Namespace(*arguments);
       const std::wstring wide_scope(scope.begin(), scope.end());
       const auto sid = UserSid();

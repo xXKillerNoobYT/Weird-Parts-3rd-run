@@ -689,7 +689,7 @@ void main() {
     await service.start(db);
     final oldIdentity = service.identity!.id;
     await addSecurityFloor(store, service, db);
-    await service.prepareReset();
+    await service.prepareReset(db);
     await db.close();
     await LocalDataReset(
       supportDir: directory,

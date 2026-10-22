@@ -19,7 +19,7 @@ import 'tables/taxonomy.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 4;
+const kAppSchemaVersion = 5;
 
 @DriftDatabase(
   tables: [
@@ -38,6 +38,7 @@ const kAppSchemaVersion = 4;
     Jobs,
     JobLines,
     OrderSplits,
+    CompanyBootstrapWitnesses,
     CompanyAuthorityFacts,
     JobLineBaselines,
     JobLineOperations,
@@ -131,6 +132,9 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(jobLineAudits);
           await m.createTable(jobLineOutgoing);
           await m.createTable(jobLineConflicts);
+        }
+        if (from < 5) {
+          await m.createTable(companyBootstrapWitnesses);
         }
       });
     },

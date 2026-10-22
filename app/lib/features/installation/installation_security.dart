@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:drift/drift.dart';
@@ -10,12 +13,18 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../data/app_database.dart';
+import '../company/company_bootstrap.dart';
+import '../company/company_store_markers.dart';
 import '../job_line_commands/job_line_commands.dart'
     show
+        JobLineCommand,
+        JobLineAuthorization,
         VerifiedJobLineSession,
         VerifiedJobLineReceiptAdmission,
         JobLineCommandReceipt,
         decodeJobLineReceipt;
+
+part '../company/company_protocol.dart';
 
 const kInstallationBindingKey = 'local_installation_binding_v1';
 const kInstallationStateLimit = 2048;
@@ -388,7 +397,14 @@ abstract interface class InstallationSecureStore {
   });
 }
 
-class NativeInstallationSecureStore implements InstallationSecureStore {
+/// Publishes a bounded authority package through one native exclusive file
+/// descriptor. No Dart path reopen is permitted between create and write.
+abstract interface class RecoveryFilePublisher {
+  Future<void> writeRecoveryFileExclusive(String absolutePath, Uint8List bytes);
+}
+
+class NativeInstallationSecureStore
+    implements InstallationSecureStore, RecoveryFilePublisher {
   const NativeInstallationSecureStore();
   static const _channel = MethodChannel('wired_parts/installation_security');
 
@@ -445,11 +461,29 @@ class NativeInstallationSecureStore implements InstallationSecureStore {
     }
     return nextRevision;
   }
+
+  @override
+  Future<void> writeRecoveryFileExclusive(
+    String absolutePath,
+    Uint8List bytes,
+  ) async {
+    if (!p.isAbsolute(absolutePath) || bytes.isEmpty || bytes.length > 65536) {
+      throw ArgumentError('Invalid recovery package destination or size');
+    }
+    final result = await _invoke('writeRecoveryFileExclusive', {
+      'path': absolutePath,
+      'bytes': bytes,
+    });
+    if (result?['written'] != bytes.length) {
+      throw StateError('Recovery package publication was not confirmed');
+    }
+  }
 }
 
 void validateInstallationNamespace(String namespace) {
   if (namespace.length > 64 ||
       !(namespace == 'production' ||
+          namespace == 'production.company-custody' ||
           RegExp(r'^synthetic\.[a-z0-9][a-z0-9._-]*$').hasMatch(namespace))) {
     throw ArgumentError.value(
       namespace,
@@ -457,6 +491,16 @@ void validateInstallationNamespace(String namespace) {
       'Invalid installation namespace',
     );
   }
+}
+
+String companyCustodyNamespace(String baseNamespace) {
+  validateInstallationNamespace(baseNamespace);
+  if (baseNamespace.endsWith('.company-custody')) {
+    throw ArgumentError.value(baseNamespace, 'baseNamespace');
+  }
+  final companion = '$baseNamespace.company-custody';
+  validateInstallationNamespace(companion);
+  return companion;
 }
 
 class InstallationRestoreIntent {
@@ -614,7 +658,12 @@ class InstallationSecurity {
   _InstallationRecord? _record;
 
   // Enrollment is a separate protocol. A ready local key conveys no authority.
-  bool get canUseCompanyOperations => false;
+  // This describes the installed company's active trust; an individual local
+  // command additionally needs a live administrator session.
+  bool get canUseCompanyOperations =>
+      readiness == InstallationReadiness.ready &&
+      _record?.activation == InstallationActivation.active &&
+      _record?.companyTrust != null;
 
   ReceivingStoreGeneration? get receivingStoreGeneration =>
       _record?.storeGeneration;
@@ -633,17 +682,27 @@ class InstallationSecurity {
   Future<Signature> signCompanyOperation(
     AppDatabase db,
     VerifiedJobLineSession session,
-    Uint8List bytes,
-  ) async {
+    Uint8List bytes, {
+    OwnerSession? ownerSession,
+  }) async {
     final operationBytes = Uint8List.fromList(bytes);
     final trust = await readCompanyTrust(db);
     if (trust == null) throw StateError('Company enrollment is unavailable');
+    session.validateLiveOwner(ownerSession);
+    ownerSession?.validateAuthority(trust, knownSecurityFloors);
     session.validateOperationSigningContent(operationBytes, _record!.identity);
     final pair = await Ed25519().newKeyPairFromSeed(_record!.seed);
-    return Ed25519().sign([
+    final signature = await Ed25519().sign([
       ...utf8.encode('wiredpart.job.line.operation@1:'),
       ...operationBytes,
     ], keyPair: pair);
+    final finalTrust = await readCompanyTrust(db);
+    if (finalTrust == null) {
+      throw StateError('Company enrollment is unavailable');
+    }
+    session.validateLiveOwner(ownerSession);
+    ownerSession?.validateAuthority(finalTrust, knownSecurityFloors);
+    return signature;
   }
 
   Future<Signature> signCompanyReceipt(
@@ -896,6 +955,11 @@ class InstallationSecurity {
     if (!await algorithm.verify(challenge, signature: proof)) {
       throw StateError('Installation key proof failed');
     }
+    if (record.companyTrust != null &&
+        !await _companyCustodyReady(this, db, record)) {
+      failure = 'Company bootstrap needs recovery';
+      return;
+    }
     if (record.activation == InstallationActivation.pending) {
       await _write(
         record.withActivation(InstallationActivation.active),
@@ -983,64 +1047,80 @@ class InstallationSecurity {
     failure = null;
   }
 
-  Future<InstallationRestoreIntent?> prepareBusinessRestore(
-    AppDatabase db,
-  ) async {
-    if (readiness == InstallationReadiness.unsupported) return null;
-    if (readiness == InstallationReadiness.unavailable) {
-      throw StateError('Installation security is unavailable');
-    }
-    final protected = await store.readState(namespace);
-    if (protected != null &&
-        _InstallationRecord.decode(protected.bytes).pendingCommand != null) {
-      throw StateError('Finish pending company command before restoring');
-    }
-    await reconcile(db);
-    if (readiness != InstallationReadiness.ready) {
-      throw StateError('Recover installation identity before restoring');
-    }
-    final current = await store.readState(namespace);
-    if (current == null) throw StateError('Protected identity is missing');
-    final record = _InstallationRecord.decode(current.bytes);
-    if (record.activation != InstallationActivation.active ||
-        record.pendingCommand != null ||
-        await db.settingsDao.getSetting(kInstallationBindingKey) !=
-            record.binding) {
-      throw StateError('Installation changed before restore admission');
-    }
-    final next = _InstallationRecord(
-      record.identity,
-      record.seed,
-      InstallationActivation.pending,
-      ReceivingStoreGeneration(const Uuid().v4()),
-      record.floors,
-      previousStoreGeneration: record.storeGeneration,
-      companyTrust: record.companyTrust,
-      storePathFingerprint: record.storePathFingerprint,
-    );
-    await _write(next, expectedRevision: current.revision);
-    readiness = InstallationReadiness.needsRecovery;
-    return InstallationRestoreIntent._(next.binding);
-  }
+  Future<InstallationRestoreIntent?> prepareBusinessRestore(AppDatabase db) =>
+      legacyBusinessWrite(db, () async {
+        if (readiness == InstallationReadiness.unsupported) return null;
+        if (readiness == InstallationReadiness.unavailable) {
+          throw StateError('Installation security is unavailable');
+        }
+        final protected = await store.readState(namespace);
+        final protectedRecord = protected == null
+            ? null
+            : _InstallationRecord.decode(protected.bytes);
+        if (protectedRecord?.pendingCommand != null ||
+            protectedRecord?.companyTrust != null) {
+          throw StateError('Finish pending company command before restoring');
+        }
+        if (await store.readState(companyCustodyNamespace(namespace)) != null) {
+          throw StateError('Company custody prevents business restore');
+        }
+        await reconcile(db);
+        if (readiness != InstallationReadiness.ready) {
+          throw StateError('Recover installation identity before restoring');
+        }
+        final current = await store.readState(namespace);
+        if (current == null) throw StateError('Protected identity is missing');
+        final record = _InstallationRecord.decode(current.bytes);
+        if (record.companyTrust != null ||
+            await store.readState(companyCustodyNamespace(namespace)) != null) {
+          throw StateError('Company authority prevents business restore');
+        }
+        if (record.activation != InstallationActivation.active ||
+            record.pendingCommand != null ||
+            await db.settingsDao.getSetting(kInstallationBindingKey) !=
+                record.binding) {
+          throw StateError('Installation changed before restore admission');
+        }
+        final next = _InstallationRecord(
+          record.identity,
+          record.seed,
+          InstallationActivation.pending,
+          ReceivingStoreGeneration(const Uuid().v4()),
+          record.floors,
+          previousStoreGeneration: record.storeGeneration,
+          companyTrust: record.companyTrust,
+          storePathFingerprint: record.storePathFingerprint,
+        );
+        await _write(next, expectedRevision: current.revision);
+        readiness = InstallationReadiness.needsRecovery;
+        return InstallationRestoreIntent._(next.binding);
+      });
 
-  Future<void> prepareReset() async {
-    if (readiness == InstallationReadiness.unsupported) return;
-    if (readiness == InstallationReadiness.unavailable) {
-      throw StateError('Installation security is unavailable');
-    }
-    final persisted = await store.readState(namespace);
-    if (persisted == null) throw StateError('Protected identity is missing');
-    _persisted = persisted;
-    final previous = _InstallationRecord.decode(persisted.bytes);
-    if (previous.pendingCommand != null) {
-      throw StateError('Finish pending company command before resetting');
-    }
-    await _write(
-      await _newRecord(previous.floors),
-      expectedRevision: persisted.revision,
-    );
-    readiness = InstallationReadiness.needsRecovery;
-  }
+  Future<void> prepareReset(AppDatabase db) => legacyBusinessWrite(
+    db,
+    () async {
+      if (readiness == InstallationReadiness.unsupported) return;
+      if (readiness == InstallationReadiness.unavailable) {
+        throw StateError('Installation security is unavailable');
+      }
+      final persisted = await store.readState(namespace);
+      if (persisted == null) throw StateError('Protected identity is missing');
+      _persisted = persisted;
+      final previous = _InstallationRecord.decode(persisted.bytes);
+      if (previous.companyTrust != null ||
+          await store.readState(companyCustodyNamespace(namespace)) != null) {
+        throw StateError('Company authority prevents local reset');
+      }
+      if (previous.pendingCommand != null) {
+        throw StateError('Finish pending company command before resetting');
+      }
+      await _write(
+        await _newRecord(previous.floors),
+        expectedRevision: persisted.revision,
+      );
+      readiness = InstallationReadiness.needsRecovery;
+    },
+  );
 
   Future<void> completeReset(AppDatabase db) async {
     if (readiness == InstallationReadiness.unsupported) return;

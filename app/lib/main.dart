@@ -23,6 +23,7 @@ Future<void> main() async {
       pin: pin,
       deviceId: deviceId,
       installation: installation,
+      enableCompanyBootstrap: true,
     ),
   );
 }
