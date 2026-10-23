@@ -94,14 +94,16 @@ final class FakeTransport implements NativeTestHostTransport {
 }
 
 final class Fixture {
-  Fixture({this.budget = const Duration(seconds: 3)});
+  Fixture({this.budget = const Duration(seconds: 3), this.elapsed});
   final Duration budget;
+  final Duration Function()? elapsed;
   final transport = FakeTransport();
   late final host = NativeTestHost(
     transport: transport,
     run: run,
     platform: 'windows',
     observeContextBudget: budget,
+    observeContextElapsed: elapsed,
   );
   final session = TestSession(
     epoch: 'epoch-a',
@@ -455,11 +457,18 @@ void main() {
     },
   );
 
-  for (final malformed in [false, true]) {
+  for (final failure in [
+    'transport error',
+    'invalid reply',
+    'expired before second poll',
+  ]) {
     test(
-      'poll ${malformed ? 'invalid reply' : 'transport error'} retains last accepted and bounded failure',
+      'poll $failure retains last accepted and bounded failure',
       () async {
-        final f = Fixture();
+        final exhausted = failure == 'expired before second poll';
+        final malformed = failure != 'transport error';
+        var elapsed = Duration.zero;
+        final f = Fixture(elapsed: () => elapsed);
         await f.ready();
         var count = 0;
         f.transport.onCommand = (_) async {
@@ -467,17 +476,43 @@ void main() {
           if (malformed) return {'raw': canary};
           throw StateError(canary);
         };
-        final output = await f.host.handleRecords(contextRequest(f));
-        expect(output.first, {
-          'outcome': 'command',
-          'value': pendingObservation('accepted'),
-        });
-        expect(output.last, {
-          'outcome': 'failed',
-          'category': malformed ? 'invalidOutput' : 'rpcFailed',
-        });
+        final pollDelays = <Duration>[];
+        final output = await runZoned(
+          () => f.host.handleRecords(contextRequest(f)),
+          zoneSpecification: ZoneSpecification(
+            createTimer: (self, parent, zone, delay, callback) {
+              pollDelays.add(delay);
+              return parent.createTimer(zone, delay, () {
+                elapsed = Duration(milliseconds: exhausted ? 990 : 50);
+                callback();
+              });
+            },
+          ),
+        );
+        expect(output, [
+          {'outcome': 'command', 'value': pendingObservation('accepted')},
+          {
+            'outcome': 'failed',
+            'category': exhausted
+                ? 'rpcTimeout'
+                : malformed
+                ? 'invalidOutput'
+                : 'rpcFailed',
+          },
+        ]);
+        expect(pollDelays, [const Duration(milliseconds: 50)]);
         expect(jsonEncode(output).contains(canary), isFalse);
-        expect(f.transport.calls, ['info', 'command', 'command']);
+        expect(f.transport.calls, [
+          'info',
+          'command',
+          if (!exhausted) 'command',
+        ]);
+        expect(f.transport.timeouts, [
+          const Duration(seconds: 3),
+          const Duration(milliseconds: 990),
+          if (!exhausted) const Duration(milliseconds: 940),
+        ]);
+        expect(count, exhausted ? 1 : 2);
       },
     );
   }
