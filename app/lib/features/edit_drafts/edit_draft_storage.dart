@@ -900,8 +900,9 @@ class EditDrafts {
     return SupplierListingSaved._(
       listing: listing,
       acknowledge: () => _queue(() async {
-        if (_closed || _quiescing)
+        if (_closed || _quiescing) {
           throw StateError('Catalog storage is changing');
+        }
         await _db.transaction(() async {
           final key = '$editDraftPrefix${result['slot']}/control';
           final current = await _read(key);

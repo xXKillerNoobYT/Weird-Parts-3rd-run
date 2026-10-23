@@ -245,10 +245,7 @@ final class CatalogNameSaved extends EditOpening<CatalogNameEditSession> {
 
 final class SupplierListingSaved
     extends EditOpening<SupplierListingEditSession> {
-  SupplierListingSaved._({
-    required this.listing,
-    required Future<void> Function() acknowledge,
-  }) : _acknowledge = acknowledge;
+  SupplierListingSaved._({required this.listing, required this._acknowledge});
   final SupplierListing listing;
   final Future<void> Function() _acknowledge;
   Future<void> acknowledge() => _acknowledge();

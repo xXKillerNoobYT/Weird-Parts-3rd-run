@@ -268,8 +268,9 @@ class SupplierListingEditSession extends _EditSession {
       };
     });
     final raw = await _owner._read(_record.controlKey);
-    if (raw == null)
+    if (raw == null) {
       throw StateError('Saved supplier listing receipt is unavailable');
+    }
     final control = _control(raw);
     if (control['token'] != _record.token ||
         _digest(_strings(control['result'])) != _digest(result)) {
