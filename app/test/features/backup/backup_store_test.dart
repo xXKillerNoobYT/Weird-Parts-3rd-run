@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
 import 'package:wired_parts/features/backup/backup_codec.dart';
@@ -109,18 +110,26 @@ void main() {
   test('codec plus store round-trip a file backup', () async {
     final dir = Directory.systemTemp.createTempSync('wp-bak-rt-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync([4, 5, 6]);
+    final sqlite = await sqliteBytesWithSetting(
+      key: 'marker',
+      value: 'round-trip',
+    );
+    File(p.join(dir.path, kSqliteFileName)).writeAsBytesSync(sqlite);
 
     final store = BackupStore(supportDir: dir);
     final codec = BackupCodec(iterations: 1000);
     final payload = await store.collect(
       sourceDeviceId: 'dev-b',
       createdAt: DateTime.utc(2026, 1, 2, 3, 4),
-      sqliteBytes: Uint8List.fromList([4, 5, 6]),
+      sqliteBytes: sqlite,
     );
     final file = await codec.encrypt(payload, 'pw');
     final restored = await codec.decrypt(file, 'pw');
-    expect(restored.sqliteBytes, [4, 5, 6]);
+    final restoredDir = Directory.systemTemp.createTempSync('wp-bak-rt-read-');
+    addTearDown(() => restoredDir.deleteSync(recursive: true));
+    File(p.join(restoredDir.path, kSqliteFileName))
+        .writeAsBytesSync(restored.sqliteBytes);
+    expect(await readSqliteSetting(restoredDir, 'marker'), 'round-trip');
     expect(restored.sourceDeviceId, 'dev-b');
   });
 
@@ -155,12 +164,46 @@ void main() {
   test('leftover WAL sidecars are deleted around the live swap', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-wal-');
     addTearDown(() => dest.deleteSync(recursive: true));
-    File(p.join(dest.path, kSqliteFileName)).writeAsBytesSync(
+    final source = Directory.systemTemp.createTempSync(
+      'wp-bak-valid-wal-source-',
+    );
+    addTearDown(() => source.deleteSync(recursive: true));
+    final sourceFile = File(p.join(source.path, kSqliteFileName));
+    sourceFile.writeAsBytesSync(
       await sqliteBytesWithSetting(key: 'marker', value: 'old'),
     );
-    File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([4]);
-    File(p.join(dest.path, '$kSqliteFileName-shm')).writeAsBytesSync([5]);
-    File(p.join(dest.path, '$kSqliteFileName-journal')).writeAsBytesSync([6]);
+    final raw = raw_sqlite.sqlite3.open(sourceFile.path);
+    try {
+      raw.execute('PRAGMA journal_mode = WAL');
+      raw.execute('PRAGMA wal_autocheckpoint = 0');
+      raw.execute(
+        "UPDATE app_settings SET value = 'old-in-wal' WHERE key = 'marker'",
+      );
+      for (final suffix in ['', '-wal', '-shm']) {
+        await File('${sourceFile.path}$suffix')
+            .copy(p.join(dest.path, '$kSqliteFileName$suffix'));
+      }
+    } finally {
+      raw.dispose();
+    }
+    expect(
+      File(p.join(dest.path, '$kSqliteFileName-wal')).lengthSync(),
+      greaterThan(32),
+    );
+    final inspect = raw_sqlite.sqlite3.open(
+      p.join(dest.path, kSqliteFileName),
+      mode: raw_sqlite.OpenMode.readOnly,
+    );
+    try {
+      expect(
+        inspect
+            .select("SELECT value FROM app_settings WHERE key = 'marker'")
+            .single['value'],
+        'old-in-wal',
+      );
+    } finally {
+      inspect.dispose();
+    }
 
     final sqlite = await sqliteBytesWithSetting(key: 'marker', value: 'new');
     await BackupStore(supportDir: dest).replaceWithPayload(
@@ -181,6 +224,36 @@ void main() {
       );
     }
   });
+  test(
+    'unreadable current sidecars refuse replacement before touching the shop',
+    () async {
+      final dest = Directory.systemTemp.createTempSync(
+        'wp-bak-corrupt-sidecars-',
+      );
+      addTearDown(() => dest.deleteSync(recursive: true));
+      final file = File(p.join(dest.path, kSqliteFileName));
+      final before = await sqliteBytesWithSetting(key: 'marker', value: 'old');
+      file.writeAsBytesSync(before);
+      File(p.join(dest.path, '$kSqliteFileName-wal')).writeAsBytesSync([4]);
+      File(p.join(dest.path, '$kSqliteFileName-shm')).writeAsBytesSync([5]);
+      File(p.join(dest.path, '$kSqliteFileName-journal')).writeAsBytesSync([6]);
+      final payload = BackupPayload(
+        createdAt: DateTime.utc(2026),
+        sourceDeviceId: 'synthetic',
+        sqliteBytes: await sqliteBytesWithSetting(key: 'marker', value: 'new'),
+        photos: const {},
+      );
+      await expectLater(
+        BackupStore(supportDir: dest).replaceWithPayload(payload: payload),
+        throwsA(isA<raw_sqlite.SqliteException>()),
+      );
+      expect(file.readAsBytesSync(), before);
+      expect(
+        File(p.join(dest.path, '$kSqliteFileName-wal')).readAsBytesSync(),
+        [4],
+      );
+    },
+  );
 
   test('bak cleanup failure does not roll the restored shop back', () async {
     final dest = Directory.systemTemp.createTempSync('wp-bak-cleanup-');

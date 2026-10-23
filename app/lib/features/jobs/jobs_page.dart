@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../data/app_database.dart';
+import '../edit_drafts/edit_drafts.dart';
 import 'job_detail_page.dart';
 import 'jobs_repository.dart';
+import 'new_job_dialog.dart';
 
 class JobsPage extends StatefulWidget {
   const JobsPage({super.key});
@@ -36,6 +38,7 @@ class _JobsPageState extends State<JobsPage> {
   }
 
   Future<void> _reload() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     final all = await _jobs.listActiveJobs();
     if (!mounted) return;
@@ -58,33 +61,54 @@ class _JobsPageState extends State<JobsPage> {
   }
 
   Future<void> _createJob() async {
-    final name = await showDialog<String>(
+    final edits = AppScope.of(context).edits;
+    if (edits == null) {
+      _showWriteRefusal(StateError('Unfinished edits are unavailable'));
+      return;
+    }
+    final created = await showDialog<NewJobCreated>(
       context: context,
-      builder: (ctx) => const _NewJobNameDialog(),
+      barrierDismissible: false,
+      builder: (ctx) => NewJobDialog(edits: edits),
     );
-    if (name == null || name.isEmpty) return;
-
-    final id = await _jobs.createJob(name);
+    if (created == null) return;
+    if (!mounted) return;
     await _reload();
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => JobDetailPage(jobId: id),
-      ),
+    final detailRoute = Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => JobDetailPage(jobId: created.id)),
     );
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      await created.acknowledge();
+    } catch (_) {
+      _showWriteRefusal(
+        StateError('Job saved. Its completion confirmation is still pending.'),
+      );
+    }
+    await detailRoute;
     await _reload();
   }
 
   Future<void> _archive(Job job) async {
-    await _jobs.archiveJob(job.id);
+    try {
+      await _jobs.archiveJob(job.id);
+    } on StateError catch (error) {
+      _showWriteRefusal(error);
+      return;
+    }
     await _reload();
+  }
+
+  void _showWriteRefusal(StateError error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(error.message.toString())));
   }
 
   Future<void> _openJob(Job job) async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => JobDetailPage(jobId: job.id),
-      ),
+      MaterialPageRoute<void>(builder: (_) => JobDetailPage(jobId: job.id)),
     );
     await _reload();
   }
@@ -113,54 +137,54 @@ class _JobsPageState extends State<JobsPage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : items.isEmpty
-                    ? Center(
-                        child: Text(
-                          _searchController.text.trim().isEmpty
-                              ? 'No active jobs'
-                              : 'No jobs match your search',
+                ? Center(
+                    child: Text(
+                      _searchController.text.trim().isEmpty
+                          ? 'No active jobs'
+                          : 'No jobs match your search',
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: items.length,
+                    itemBuilder: (context, index) {
+                      final job = items[index];
+                      return Dismissible(
+                        key: ValueKey(job.id),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          color: Theme.of(context).colorScheme.error,
+                          child: Icon(
+                            Icons.archive,
+                            color: Theme.of(context).colorScheme.onError,
+                          ),
                         ),
-                      )
-                    : ListView.builder(
-                        itemCount: items.length,
-                        itemBuilder: (context, index) {
-                          final job = items[index];
-                          return Dismissible(
-                            key: ValueKey(job.id),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              color: Theme.of(context).colorScheme.error,
-                              child: Icon(
-                                Icons.archive,
-                                color: Theme.of(context).colorScheme.onError,
-                              ),
-                            ),
-                            confirmDismiss: (_) async {
-                              await _archive(job);
-                              return false;
-                            },
-                            child: ListTile(
-                              title: Text(job.name),
-                              subtitle: job.jobNumber != null
-                                  ? Text(job.jobNumber!)
-                                  : null,
-                              trailing: PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  if (value == 'archive') _archive(job);
-                                },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'archive',
-                                    child: Text('Archive'),
-                                  ),
-                                ],
-                              ),
-                              onTap: () => _openJob(job),
-                            ),
-                          );
+                        confirmDismiss: (_) async {
+                          await _archive(job);
+                          return false;
                         },
-                      ),
+                        child: ListTile(
+                          title: Text(job.name),
+                          subtitle: job.jobNumber != null
+                              ? Text(job.jobNumber!)
+                              : null,
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'archive') _archive(job);
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'archive',
+                                child: Text('Archive'),
+                              ),
+                            ],
+                          ),
+                          onTap: () => _openJob(job),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -170,58 +194,6 @@ class _JobsPageState extends State<JobsPage> {
         tooltip: 'New job',
         child: const Icon(Icons.add),
       ),
-    );
-  }
-}
-
-/// Owns its [TextEditingController] so it is not disposed while the dialog
-/// route is still animating out (that corrupts overlays / job detail chrome).
-class _NewJobNameDialog extends StatefulWidget {
-  const _NewJobNameDialog();
-
-  @override
-  State<_NewJobNameDialog> createState() => _NewJobNameDialogState();
-}
-
-class _NewJobNameDialogState extends State<_NewJobNameDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final v = _controller.text.trim();
-    if (v.isEmpty) return;
-    Navigator.of(context).pop(v);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('New job'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(
-          labelText: 'Name',
-          hintText: 'Job name',
-        ),
-        textCapitalization: TextCapitalization.sentences,
-        onSubmitted: (_) => _submit(),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Create'),
-        ),
-      ],
     );
   }
 }

@@ -179,7 +179,10 @@ class _Tile extends StatelessWidget {
       if (view.onRename != null &&
           node.kind != CatalogTreeKind.unassigned &&
           node.kind != CatalogTreeKind.variance)
-        const PopupMenuItem(value: 'rename', child: Text('Rename')),
+        PopupMenuItem(
+          value: 'rename',
+          child: Text(node.kind == CatalogTreeKind.part ? 'Edit part' : 'Rename'),
+        ),
       if (view.onAddChild != null && _canAdd(node.kind))
         PopupMenuItem(value: 'add', child: Text(_addLabel(node.kind))),
       if (view.onRemove != null && _canRemove(node))

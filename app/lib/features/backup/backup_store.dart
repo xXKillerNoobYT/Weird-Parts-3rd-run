@@ -6,15 +6,100 @@ import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 
 import '../../data/app_database.dart';
 import '../../data/sqlite_file.dart';
 import '../reset/local_data_reset.dart';
+import '../installation/installation_security.dart';
+import '../company/company_store_markers.dart';
+import '../warehouse/warehouse_integrity.dart';
 import 'backup_codec.dart';
 
 const kLastBackupAtKey = 'last_backup_at';
 const kLastBackupSourceKey = 'last_backup_source_device';
 const kBackupAlreadyInProgressMessage = 'Backup already in progress';
+
+/// Current whole-shop copy has no company authorization or history recovery
+/// journal. Refuse before close, protected activation, or filesystem replacement.
+Future<void> requireLegacyBusinessStore(AppDatabase db) async {
+  if (await hasCompanyStoreMarkers(db)) {
+    throw const BackupFormatException(
+      'Company history requires a compatible authorized backup or copy. This shop was not replaced.',
+    );
+  }
+}
+
+void requireLegacyBusinessFile(File file) {
+  if (!file.existsSync()) return;
+  final db = raw_sqlite.sqlite3.open(
+    file.path,
+    mode: raw_sqlite.OpenMode.readOnly,
+  );
+  try {
+    final names = db
+        .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .map((row) => row['name'])
+        .toSet();
+    final schema = db.select('PRAGMA user_version').single.values.first as int;
+    if (schema > kAppSchemaVersion ||
+        (schema >= 3 && !priorCompanyMarkerTables.every(names.contains)) ||
+        (schema >= 5 && !names.contains('company_bootstrap_witnesses')) ||
+        (schema >= 6 && !names.contains('company_jobs')) ||
+        (schema >= 7 &&
+            !const {
+              'company_membership_certificates',
+              'company_join_requests',
+              'company_join_events',
+            }.every(names.contains))) {
+      throw const BackupFormatException(
+        'Unsupported or incomplete company database',
+      );
+    }
+    if (schema >= 7) {
+      final expected = {
+        ...companyJoinTableColumns,
+        if (schema >= 8) ...companySyncTableColumns,
+        if (schema >= 9) ...companyNameTableColumns,
+        if (schema >= 10) ...companyDetailsTableColumns,
+        if (schema >= 11) ...companyLifecycleTableColumns,
+      };
+      for (final table in expected.keys) {
+        final columns = db.select('PRAGMA table_info("$table")');
+        final actual = columns.map((r) => r['name'] as String).toSet();
+        if (actual.length != expected[table]!.length ||
+            !actual.containsAll(expected[table]!)) {
+          throw const BackupFormatException(
+            'Unsupported or incomplete company enrollment schema',
+          );
+        }
+      }
+    }
+    for (final table in companyMarkerTables.where(names.contains)) {
+      if (db.select('SELECT 1 FROM $table LIMIT 1').isNotEmpty) {
+        throw const BackupFormatException(
+          'Company history requires a compatible authorized backup or copy. This shop was not replaced.',
+        );
+      }
+    }
+  } finally {
+    db.dispose();
+  }
+}
+
+Future<void> requireLegacyBusinessPayload(BackupPayload payload) async {
+  backupSqliteSchemaVersion(payload.sqliteBytes);
+  final staging = await Directory.systemTemp.createTemp(
+    'wired-parts-copy-preflight-',
+  );
+  try {
+    final file = File(p.join(staging.path, kSqliteFileName));
+    await file.writeAsBytes(payload.sqliteBytes, flush: true);
+    requireLegacyBusinessFile(file);
+  } finally {
+    await staging.delete(recursive: true);
+  }
+}
 
 const _sqliteMagic = [
   0x53,
@@ -34,6 +119,22 @@ const _sqliteMagic = [
   0x33,
   0x00,
 ];
+
+int backupSqliteSchemaVersion(Uint8List bytes) {
+  if (bytes.length < 100) {
+    throw const BackupFormatException('Backup database is damaged');
+  }
+  for (var i = 0; i < _sqliteMagic.length; i++) {
+    if (bytes[i] != _sqliteMagic[i]) {
+      throw const BackupFormatException('Backup database is damaged');
+    }
+  }
+  final version = ByteData.sublistView(bytes).getUint32(60, Endian.big);
+  if (version < 1 || version > kAppSchemaVersion) {
+    throw BackupFormatException('Unsupported backup database schema: $version');
+  }
+  return version;
+}
 
 /// App-level export/restore lock. Page `_busy` dies with [BackupPage]; this
 /// does not, so a second Backup route cannot race the same write.
@@ -283,6 +384,7 @@ class BackupStore {
     this.beforeReplaceLivePhotos,
     this.failSidecarDelete = false,
     this.failStagingDelete = false,
+    this.failDeviceProfileWrite = false,
   });
 
   final Directory? supportDir;
@@ -302,9 +404,13 @@ class BackupStore {
 
   /// Test hook: pretend staging-dir delete failed after the swap.
   final bool failStagingDelete;
+  final bool failDeviceProfileWrite;
 
   Future<Directory> _support() async =>
       supportDir ?? await getApplicationSupportDirectory();
+
+  Future<bool> hasInterruptedRestore() async =>
+      File(p.join((await _support()).path, kRestoreSwapMarkerName)).exists();
 
   Future<Directory> _photos() async {
     if (photosDir != null) return photosDir!;
@@ -324,6 +430,7 @@ class BackupStore {
     required DateTime createdAt,
     required Uint8List sqliteBytes,
   }) async {
+    final businessBytes = await _businessSnapshot(sqliteBytes);
     final photos = <String, Uint8List>{};
     final dir = await _photos();
     if (await dir.exists()) {
@@ -337,13 +444,48 @@ class BackupStore {
     return BackupPayload(
       createdAt: createdAt.toUtc(),
       sourceDeviceId: sourceDeviceId,
-      sqliteBytes: sqliteBytes,
+      sqliteBytes: businessBytes,
       photos: photos,
     );
   }
 
+  Future<Uint8List> _businessSnapshot(Uint8List bytes) async {
+    backupSqliteSchemaVersion(bytes);
+    final staging = await Directory.systemTemp.createTemp(
+      'wired-parts-business-export-',
+    );
+    final file = File(p.join(staging.path, kSqliteFileName));
+    AppDatabase? copy;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      copy = AppDatabase.forTesting(NativeDatabase(file));
+      await requireLegacyBusinessStore(copy);
+      await copy.customStatement('DELETE FROM app_settings WHERE key = ?', [
+        kInstallationBindingKey,
+      ]);
+      await copy.customStatement('VACUUM');
+      await checkpointWalForExport(copy);
+      await copy.close();
+      copy = null;
+      return await file.readAsBytes();
+    } finally {
+      try {
+        await copy?.close();
+      } catch (_) {
+        // Preserve the snapshot failure and still attempt temporary cleanup.
+      }
+      try {
+        await staging.delete(recursive: true);
+      } catch (_) {
+        // Plaintext staging may remain, but must not replace the export result.
+      }
+    }
+  }
+
   Future<void> writePayload(BackupPayload payload) async {
+    await requireLegacyBusinessPayload(payload);
     final dir = await _support();
+    requireLegacyBusinessFile(File(p.join(dir.path, kSqliteFileName)));
     await dir.create(recursive: true);
     final sqlite = File(p.join(dir.path, kSqliteFileName));
     await sqlite.writeAsBytes(payload.sqliteBytes, flush: true);
@@ -363,15 +505,21 @@ class BackupStore {
 
   /// Write the backup to a staging folder, then swap into place so a failed
   /// write cannot leave the live shop wiped.
+  /// Without [localDeviceProfile], this low-level operation keeps the archive's
+  /// profile. Production restore supplies the receiver's exact profile.
   ///
   /// After the live swap commits, leftover Documents sqlite, `.restore-bak`
   /// copies, and the staging directory are best-effort. Those failures must
   /// not roll the restored shop back or report Restore failed.
   Future<void> replaceWithPayload({
     required BackupPayload payload,
+    DeviceProfile? localDeviceProfile,
+    String? localInstallationBinding,
     LocalDataReset reset = const LocalDataReset(),
   }) async {
+    await requireLegacyBusinessPayload(payload);
     final live = await _support();
+    requireLegacyBusinessFile(File(p.join(live.path, kSqliteFileName)));
     await live.create(recursive: true);
     recoverInterruptedRestore(
       supportDir: live,
@@ -412,7 +560,11 @@ class BackupStore {
         supportDir: staging,
         photosDir: Directory(p.join(staging.path, 'part_photos')),
       ).writePayload(payload);
-      await _validateStagedSqlite(File(p.join(staging.path, kSqliteFileName)));
+      await _validateStagedSqlite(
+        File(p.join(staging.path, kSqliteFileName)),
+        localDeviceProfile: localDeviceProfile,
+        localInstallationBinding: localInstallationBinding,
+      );
       await _swapStagingIntoLive(live: live, staging: staging);
     } finally {
       try {
@@ -434,7 +586,11 @@ class BackupStore {
     }
   }
 
-  Future<void> _validateStagedSqlite(File sqlite) async {
+  Future<void> _validateStagedSqlite(
+    File sqlite, {
+    DeviceProfile? localDeviceProfile,
+    String? localInstallationBinding,
+  }) async {
     if (!await sqlite.exists()) {
       throw const BackupFormatException('Backup database is missing');
     }
@@ -481,6 +637,8 @@ class BackupStore {
         'jobs',
         'job_lines',
         'order_splits',
+        'warehouse_locations',
+        'warehouse_counts',
       ];
       for (final name in requiredTables) {
         if (!names.contains(name)) {
@@ -489,6 +647,74 @@ class BackupStore {
           );
         }
       }
+      const warehouseColumns = <String, Set<String>>{
+        'warehouse_locations': {
+          'id',
+          'origin_device_id',
+          'created_at',
+          'modified_at',
+          'revision',
+          'deleted_at',
+          'name',
+          'name_key',
+        },
+        'warehouse_counts': {
+          'id',
+          'location_id',
+          'part_id',
+          'prior_count_id',
+          'ordinal',
+          'quantity',
+          'uom',
+          'observed_at',
+          'recorded_at',
+          'origin_device_id',
+          'note',
+        },
+      };
+      for (final entry in warehouseColumns.entries) {
+        final columns = await db
+            .customSelect('PRAGMA table_info("${entry.key}")')
+            .get();
+        final actual = columns.map((row) => '${row.data['name']}').toSet();
+        if (actual.length != entry.value.length ||
+            !actual.containsAll(entry.value)) {
+          throw const BackupFormatException(
+            'Backup database has an unsupported warehouse schema',
+          );
+        }
+      }
+      final foreignKeyErrors = await db
+          .customSelect('PRAGMA foreign_key_check')
+          .get();
+      if (foreignKeyErrors.isNotEmpty) {
+        throw const BackupFormatException(
+          'Backup database has invalid shop references',
+        );
+      }
+      await validateWarehouseStore(db);
+      await db.customStatement('DELETE FROM app_settings WHERE key = ?', [
+        kInstallationBindingKey,
+      ]);
+      if (localInstallationBinding != null) {
+        await db.settingsDao.setSetting(
+          kInstallationBindingKey,
+          localInstallationBinding,
+        );
+      }
+      if (localDeviceProfile != null) {
+        await db.settingsDao.restoreLocalDeviceProfile(
+          localDeviceProfile,
+          failDeviceProfileWrite: failDeviceProfileWrite,
+        );
+        final restored = await db.select(db.deviceProfiles).getSingle();
+        if (restored != localDeviceProfile) {
+          throw const BackupFormatException(
+            'Staged local device profile differs',
+          );
+        }
+      }
+      await checkpointWalForExport(db);
     } on BackupFormatException {
       rethrow;
     } catch (e) {

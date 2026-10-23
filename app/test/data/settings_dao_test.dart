@@ -23,4 +23,16 @@ void main() {
     await db.settingsDao.keepLocalDeviceId('keep-dest');
     expect(await db.settingsDao.ensureDeviceId(), 'keep-dest');
   });
+
+  test('display name survives keepLocalDeviceId', () async {
+    await db.settingsDao.ensureDeviceId();
+    await db.settingsDao.setDeviceDisplayName('Shop Mac');
+    expect(await db.settingsDao.deviceDisplayName(), 'Shop Mac');
+    await db.settingsDao.keepLocalDeviceId(
+      'keep-dest',
+      displayName: 'Shop Mac',
+    );
+    expect(await db.settingsDao.ensureDeviceId(), 'keep-dest');
+    expect(await db.settingsDao.deviceDisplayName(), 'Shop Mac');
+  });
 }

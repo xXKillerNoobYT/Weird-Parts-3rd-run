@@ -142,6 +142,7 @@ class TaxonomyPickField extends StatelessWidget {
     final resolved = enabled && inItems ? value : null;
     final field = allowNone
         ? DropdownButtonFormField<String?>(
+            isExpanded: true,
             // ignore: deprecated_member_use
             value: resolved,
             decoration: InputDecoration(
@@ -163,6 +164,7 @@ class TaxonomyPickField extends StatelessWidget {
             onChanged: enabled ? onChanged : null,
           )
         : DropdownButtonFormField<String>(
+            isExpanded: true,
             // ignore: deprecated_member_use
             value: resolved,
             decoration: InputDecoration(

@@ -4,21 +4,21 @@ import 'package:flutter/services.dart';
 import '../../app.dart';
 import '../../data/app_database.dart';
 import '../catalog/catalog_repository.dart';
+import '../catalog/catalog_name_dialog.dart';
 import '../catalog/catalog_tree.dart';
 import '../catalog/catalog_tree_picker.dart';
 import '../catalog/part_detail_page.dart';
+import '../catalog/part_details_dialog.dart';
 import '../catalog/tree_edit_prompts.dart';
 import '../maintenance/maintenance_repository.dart';
+import '../edit_drafts/edit_drafts.dart';
+import '../edit_drafts/edit_draft_widgets.dart';
 import '../pin/pin_gate.dart';
 import 'job_line_qty.dart';
 import 'jobs_repository.dart';
 
 class JobLineEditor extends StatefulWidget {
-  const JobLineEditor({
-    required this.jobId,
-    this.lineId,
-    super.key,
-  });
+  const JobLineEditor({required this.jobId, this.lineId, super.key});
 
   final String jobId;
   final String? lineId;
@@ -29,7 +29,7 @@ class JobLineEditor extends StatefulWidget {
 
 class _SplitDraft {
   _SplitDraft({this.supplierId, String qty = ''})
-      : qtyController = TextEditingController(text: qty);
+    : qtyController = TextEditingController(text: qty);
 
   String? supplierId;
   final TextEditingController qtyController;
@@ -56,6 +56,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   String? _partId;
   String? _brandVersionId;
+  String? _customNotes;
+  String? _uom;
+  String? _notes;
   String _pickLabel = 'Pick from catalog tree';
   final List<_SplitDraft> _splits = [];
 
@@ -66,7 +69,204 @@ class _JobLineEditorState extends State<JobLineEditor> {
   bool _initialized = false;
   String? _lineId;
 
+  EditDrafts? _edits;
+  JobLineEditSession? _session;
+  EditOpening<JobLineEditSession>? _opening;
+  JobLinePromoted? _promotionReceipt;
+  bool _applyingInput = false;
+  bool _allowPop = false;
+  String? _catalogNameNotice;
+
   bool get _isEditing => _lineId != null;
+
+  void _capture() {
+    if (_loading || _applyingInput) return;
+    _session?.replace(
+      JobLineInput(
+        useCustom: _useCustom,
+        partId: _partId,
+        brandVersionId: _brandVersionId,
+        customNameText: _customNameController.text,
+        neededText: _neededController.text,
+        pullText: _pullController.text,
+        customNotes: _customNotes,
+        uom: _uom,
+        notes: _notes,
+        splits: [
+          for (final split in _splits)
+            SplitInput(
+              supplierId: split.supplierId,
+              quantityText: split.qtyController.text,
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _change(VoidCallback change) {
+    setState(change);
+    _capture();
+  }
+
+  _SplitDraft _watchSplit(_SplitDraft split) {
+    split.qtyController.addListener(_capture);
+    return split;
+  }
+
+  Future<void> _useSession(JobLineEditSession session) async {
+    if (!mounted) {
+      await session.leave(LeaveIntent.back);
+      return;
+    }
+    final input = session.initial;
+    setState(() {
+      _session = session;
+      _opening = null;
+    });
+    _applyRaw(input);
+    final partId = input.partId;
+    final storedPart = partId == null
+        ? null
+        : await _catalog.getPart(partId, includeDeleted: true);
+    final versions = partId == null
+        ? <BrandVersion>[]
+        : await _catalog.listBrandVersionsForPart(
+            partId,
+            includeDeleted: storedPart?.deletedAt != null,
+          );
+    if (!mounted) return;
+    setState(() {
+      _brandVersions = versions;
+      _catalogPartMissing =
+          partId != null &&
+          (storedPart == null || storedPart.deletedAt != null);
+      _refreshPickLabel();
+    });
+    await _refreshSupplierChoices(preserveExistingSplits: true);
+  }
+
+  void _applyRaw(JobLineInput input) {
+    _applyingInput = true;
+    setState(() {
+      _useCustom = input.useCustom;
+      _partId = input.partId;
+      _brandVersionId = input.brandVersionId;
+      _customNameController.text = input.customNameText;
+      _neededController.text = input.neededText;
+      _pullController.text = input.pullText;
+      _customNotes = input.customNotes;
+      _uom = input.uom;
+      _notes = input.notes;
+      for (final split in _splits) {
+        split.dispose();
+      }
+      _splits
+        ..clear()
+        ..addAll(
+          input.splits.map(
+            (split) => _watchSplit(
+              _SplitDraft(
+                supplierId: split.supplierId,
+                qty: split.quantityText,
+              ),
+            ),
+          ),
+        );
+    });
+    _applyingInput = false;
+  }
+
+  Future<void> _presentPromotion(JobLinePromoted receipt) async {
+    if (!mounted) return;
+    setState(() {
+      _saving = true;
+      _loading = false;
+      _session = null;
+      _opening = null;
+      _promotionReceipt = receipt;
+      _lineId = receipt.lineId;
+      _pickLabel = receipt.name;
+    });
+    _applyRaw(receipt.continuation);
+    try {
+      final parts = await _catalog.listParts(
+        activeOnly: false,
+        includeDeleted: true,
+      );
+      final tree = buildCatalogTree(
+        await _catalog.loadTreeSnapshot(activeOnly: true),
+      );
+      if (!mounted) return;
+      setState(() {
+        _parts = parts;
+        _tree = tree;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final session = await receipt.acknowledgeAndContinue();
+      if (!mounted) {
+        await session.leave(LeaveIntent.back);
+        return;
+      }
+      await _useSession(session);
+      if (mounted) {
+        setState(() => _promotionReceipt = null);
+        _toast('On this job as a catalog part. Back out when you are done.');
+      }
+    } catch (error) {
+      if (mounted) _toast('Part saved. Could not continue editing. $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openDraft() async {
+    final edits = _edits;
+    if (edits == null) return;
+    if (mounted) setState(() => _loading = true);
+    final opening = await edits.openJobLine(widget.jobId, lineId: _lineId);
+    if (!mounted) {
+      if (opening is FreshEdit<JobLineEditSession>) {
+        await opening.session.leave(LeaveIntent.back);
+      }
+      return;
+    }
+    if (opening is FreshEdit<JobLineEditSession>) {
+      await _useSession(opening.session);
+    } else if (opening is JobLinePromoted) {
+      await _presentPromotion(opening);
+    } else {
+      setState(() => _opening = opening);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _discardRecovery() async {
+    switch (_opening) {
+      case RecoverableEdit<JobLineEditSession> opening:
+        await opening.discard();
+      case BlockedEdit<JobLineEditSession> opening:
+        await opening.discard();
+      default:
+        return;
+    }
+    await _openDraft();
+  }
+
+  Future<void> _leave(LeaveIntent intent) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _session?.leave(intent);
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (mounted) _toast('Could not leave. $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -74,6 +274,14 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (_initialized) return;
     _initialized = true;
     final scope = AppScope.of(context);
+    _edits = scope.edits;
+    for (final controller in [
+      _customNameController,
+      _neededController,
+      _pullController,
+    ]) {
+      controller.addListener(_capture);
+    }
     _db = scope.db;
     _jobs = JobsRepository(scope.db, scope.deviceId);
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
@@ -139,6 +347,9 @@ class _JobLineEditorState extends State<JobLineEditor> {
         brandVersionId = line.brandVersionId;
         useCustom = line.partId == null;
         customName = line.customName ?? '';
+        _customNotes = line.customNotes;
+        _uom = line.uom;
+        _notes = line.notes;
         needed = _qtyText(line.neededQty);
         pull = _qtyText(line.shopPullQty);
         final existing = await _jobs.orderSplitsForLine(line.id);
@@ -186,11 +397,12 @@ class _JobLineEditorState extends State<JobLineEditor> {
       _brandVersions = versions;
       _splits
         ..clear()
-        ..addAll(splitDrafts);
-      _loading = false;
+        ..addAll(splitDrafts.map(_watchSplit));
+      _loading = _edits != null;
     });
     _refreshPickLabel();
     await _refreshSupplierChoices(preserveExistingSplits: true);
+    await _openDraft();
   }
 
   void _refreshPickLabel() {
@@ -228,7 +440,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _applyPick(CatalogTreePick pick) async {
     final versions = await _catalog.listBrandVersionsForPart(pick.partId);
     if (!mounted) return;
-    setState(() {
+    _change(() {
       _useCustom = false;
       _partId = pick.partId;
       _brandVersionId = pick.brandVersionId;
@@ -253,11 +465,10 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _refreshSupplierChoices({
     bool preserveExistingSplits = false,
   }) async {
-    final keepSplits = preserveExistingSplits || _catalogPartMissing;
+    final keepSplits =
+        _edits != null || preserveExistingSplits || _catalogPartMissing;
     List<Supplier> choices;
     if (_catalogPartMissing) {
-      // Tombstoned listings are gone from the live picker. Keep every live
-      // supplier so saved splits stay visible and Add supplier still works.
       choices = List.of(_allSuppliers);
     } else if (_brandVersionId != null) {
       final listings = await _catalog.listingsForBrandVersion(_brandVersionId!);
@@ -296,45 +507,97 @@ class _JobLineEditorState extends State<JobLineEditor> {
   }
 
   void _addSplit() {
-    setState(() => _splits.add(_SplitDraft()));
+    _change(() => _splits.add(_watchSplit(_SplitDraft())));
   }
 
   Future<void> _addSupplierForSplit(_SplitDraft split) async {
     final scope = AppScope.of(context);
     if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
-    final name = await promptName(context, title: 'Add supplier');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await _maintenance.createSupplier(name);
-      // Brand-version splits only list suppliers with a listing on that
-      // version. Hang an empty-SKU listing so Add supplier stays selectable
-      // after refresh / reopen. Custom / general-part / deleted-part lines
-      // skip this — do not write a listing onto a tombstoned variance.
-      if (_brandVersionId != null && !_catalogPartMissing) {
-        await _catalog.createSupplierListing(
-          brandVersionId: _brandVersionId!,
-          supplierId: id,
-          sku: '',
+    final session = _session;
+    final partId = _partId;
+    final versionId = _brandVersionId;
+    final useCustom = _useCustom;
+    final partMissing = _catalogPartMissing;
+    final lineId = _lineId;
+    void requireConsumer() {
+      if (!mounted ||
+          _loading ||
+          _saving ||
+          _opening != null ||
+          session == null ||
+          !identical(_session, session) ||
+          session.status.value.phase == EditPhase.closed ||
+          !_splits.contains(split) ||
+          _partId != partId ||
+          _brandVersionId != versionId ||
+          _useCustom != useCustom ||
+          _catalogPartMissing != partMissing ||
+          _lineId != lineId) {
+        throw StateError(
+          'The supplier split consumer changed or is unavailable',
         );
       }
-      final suppliers = await _db.taxonomyDao.listSuppliers();
-      if (!mounted) return;
-      _allSuppliers = suppliers;
-      await _refreshSupplierChoices();
-      if (!mounted) return;
-      if (!_supplierChoices.any((s) => s.id == id)) {
-        _toast('That supplier is not on this brand version yet');
-        return;
-      }
-      setState(() => split.supplierId = id);
-    } on StateError catch (e) {
-      if (mounted) _toast(e.message);
+    }
+
+    try {
+      requireConsumer();
+      setState(() => _catalogNameNotice = null);
+      await showCatalogNameDialog(
+        context,
+        target: !useCustom && versionId != null && !partMissing
+            ? CatalogNameTarget.newSupplierForVersion(versionId)
+            : CatalogNameTarget.newSupplier(),
+        title: 'Add supplier',
+        onSaved: (saved) async {
+          requireConsumer();
+          final activeSession = session!;
+          final suppliers = await _db.taxonomyDao.listSuppliers();
+          requireConsumer();
+          if (saved.kind != CatalogNameKind.supplier ||
+              !suppliers.any(
+                (supplier) =>
+                    supplier.id == saved.id && supplier.name == saved.name,
+              )) {
+            throw StateError('The saved supplier is not in the refreshed list');
+          }
+          _allSuppliers = suppliers;
+          await _refreshSupplierChoices();
+          requireConsumer();
+          if (!_supplierChoices.any(
+            (supplier) =>
+                supplier.id == saved.id && supplier.name == saved.name,
+          )) {
+            throw StateError(
+              'The saved supplier is not selectable for this split',
+            );
+          }
+          _change(() => split.supplierId = saved.id);
+          final index = _splits.indexOf(split);
+          if (activeSession.initial.splits.length != _splits.length ||
+              activeSession.initial.splits[index].supplierId != saved.id) {
+            throw StateError('The supplier selection was not captured');
+          }
+          await activeSession.flush();
+          requireConsumer();
+          final status = activeSession.status.value;
+          if (status.phase != EditPhase.durable ||
+              status.durableSequence != status.latestSequence ||
+              activeSession.initial.splits[index].supplierId != saved.id) {
+            throw StateError('The supplier split selection is not durable yet');
+          }
+        },
+        onNotice: (message) {
+          if (mounted) setState(() => _catalogNameNotice = message);
+        },
+      );
+    } catch (error) {
+      if (mounted) setState(() => _catalogNameNotice = '$error');
     }
   }
 
   void _removeSplit(int index) {
     if (_splits.length <= 1) return;
-    setState(() {
+    _change(() {
       _splits.removeAt(index).dispose();
     });
   }
@@ -361,8 +624,14 @@ class _JobLineEditorState extends State<JobLineEditor> {
     if (confirmed != true || !mounted) return;
     setState(() => _saving = true);
     try {
-      await _jobs.removeLine(_lineId!);
+      final session = _session;
+      if (session == null) {
+        await _jobs.removeLine(_lineId!);
+      } else {
+        await session.remove();
+      }
       if (!mounted) return;
+      setState(() => _allowPop = true);
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -371,17 +640,46 @@ class _JobLineEditorState extends State<JobLineEditor> {
     }
   }
 
-  Future<void> _save() async {
+  ({
+    double neededQty,
+    double shopPullQty,
+    List<({String supplierId, double qty})> splits,
+  })?
+  _validatedQuantities() {
     final needed = double.tryParse(_neededController.text.trim());
     final pull = double.tryParse(_pullController.text.trim());
-    if (needed == null || needed < 0) {
+    if (needed == null || !needed.isFinite || needed < 0) {
       _toast('Enter a valid requested quantity');
-      return;
+      return null;
     }
-    if (pull == null || pull < 0) {
+    if (pull == null || !pull.isFinite || pull < 0) {
       _toast('Enter a valid shop quantity');
-      return;
+      return null;
     }
+
+    final splits = <({String supplierId, double qty})>[];
+    for (final draft in _splits) {
+      final qtyText = draft.qtyController.text.trim();
+      if (draft.supplierId == null && qtyText.isEmpty) continue;
+      if (draft.supplierId == null) {
+        _toast('Each order split needs a supplier');
+        return null;
+      }
+      final qty = double.tryParse(qtyText);
+      if (qty == null || !qty.isFinite || qty <= 0) {
+        _toast('Each order split needs a quantity > 0');
+        return null;
+      }
+      splits.add((supplierId: draft.supplierId!, qty: qty));
+    }
+
+    return (neededQty: needed, shopPullQty: pull, splits: splits);
+  }
+
+  Future<void> _save() async {
+    if (_saving || _loading) return;
+    final quantities = _validatedQuantities();
+    if (quantities == null) return;
 
     String? partId;
     String? brandVersionId;
@@ -402,47 +700,37 @@ class _JobLineEditorState extends State<JobLineEditor> {
       brandVersionId = _brandVersionId;
     }
 
-    final splits = <({String supplierId, double qty})>[];
-    for (final draft in _splits) {
-      final qtyText = draft.qtyController.text.trim();
-      if (draft.supplierId == null && qtyText.isEmpty) continue;
-      if (draft.supplierId == null) {
-        _toast('Each order split needs a supplier');
-        return;
-      }
-      final qty = double.tryParse(qtyText);
-      if (qty == null || qty <= 0) {
-        _toast('Each order split needs a quantity > 0');
-        return;
-      }
-      splits.add((supplierId: draft.supplierId!, qty: qty));
-    }
-
     setState(() => _saving = true);
     try {
-      late final String lineId;
-      if (_isEditing) {
-        lineId = _lineId!;
+      final session = _session;
+      if (session != null) {
+        _lineId = await session.save();
+      } else if (_isEditing) {
         await _jobs.updateLine(
-          lineId: lineId,
+          lineId: _lineId!,
           partId: partId,
           brandVersionId: brandVersionId,
           customName: customName,
-          neededQty: needed,
-          shopPullQty: pull,
+          customNotes: _customNotes,
+          uom: _uom,
+          notes: _notes,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
         );
       } else {
-        lineId = await _jobs.addLine(
+        await _jobs.addLine(
           jobId: widget.jobId,
           partId: partId,
           brandVersionId: brandVersionId,
           customName: customName,
-          neededQty: needed,
-          shopPullQty: pull,
+          neededQty: quantities.neededQty,
+          shopPullQty: quantities.shopPullQty,
+          splits: quantities.splits,
         );
       }
-      await _jobs.replaceOrderSplits(lineId, splits);
       if (!mounted) return;
+      setState(() => _allowPop = true);
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -453,100 +741,38 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   Future<void> _promoteToCatalog() async {
     if (_saving || _loading) return;
-    final name = _customNameController.text.trim();
-    if (name.isEmpty) {
+    _capture();
+    if (_customNameController.text.trim().isEmpty) {
       _toast('Custom name is required');
       return;
     }
-
+    if (_validatedQuantities() == null) return;
+    final session = _session;
+    if (session == null) {
+      _toast(
+        'Unfinished edits are unavailable. Your input remains in this form.',
+      );
+      return;
+    }
     final scope = AppScope.of(context);
     if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
-
-    final result = await showDialog<_PromoteResult>(
-      context: context,
-      builder: (ctx) => _PromoteDialog(
-        initialName: name,
-        maintenance: _maintenance,
-      ),
-    );
-    if (result == null || !mounted) return;
-
-    setState(() => _saving = true);
     try {
-      final partId = await _catalog.createGeneralPart(
-        name: result.name,
-        categoryId: result.categoryId,
-        styleId: result.styleId,
-        typeId: result.typeId,
-        requireNestedTaxonomy: true,
-      );
-      final needed = double.tryParse(_neededController.text.trim()) ?? 1.0;
-      final pull = double.tryParse(_pullController.text.trim()) ?? 0.0;
-      final neededQty = needed < 0 ? 1.0 : needed;
-      final shopPullQty = pull < 0 ? 0.0 : pull;
-      final splits = _previewSplits();
-      if (_lineId != null) {
-        await _jobs.attachCatalogPart(
-          lineId: _lineId!,
-          partId: partId,
-          neededQty: neededQty,
-          shopPullQty: shopPullQty,
-          splits: splits,
-        );
-      } else {
-        _lineId = await _jobs.addLine(
-          jobId: widget.jobId,
-          partId: partId,
-          neededQty: neededQty,
-          shopPullQty: shopPullQty,
-        );
-        await _jobs.replaceOrderSplits(_lineId!, splits);
-      }
-
-      final versions = await _catalog.listBrandVersionsForPart(partId);
-      final parts = await _catalog.listParts(
-        activeOnly: false,
-        includeDeleted: true,
-      );
-      final tree = buildCatalogTree(
-        await _catalog.loadTreeSnapshot(activeOnly: true),
-      );
+      final promotion = await session.openPromotion();
       if (!mounted) return;
-      setState(() {
-        _useCustom = false;
-        _partId = partId;
-        _brandVersionId = null;
-        _brandVersions = versions;
-        _parts = parts;
-        _tree = tree;
-        _catalogPartMissing = false;
-        _customNameController.clear();
-      });
-      _refreshPickLabel();
-      await _refreshSupplierChoices();
-      if (!mounted) return;
-      _toast('On this job as a catalog part. Back out when you are done.');
-    } on StateError catch (e) {
-      if (mounted) _toast(e.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      final result = await showJobLinePromotionDialog(
+        context,
+        promotion: promotion,
+        maintenance: _maintenance,
+      );
+      if (result != null && mounted) await _presentPromotion(result);
+    } catch (error) {
+      if (mounted) _toast('Could not open promotion. $error');
     }
-  }
-
-  List<({String supplierId, double qty})> _previewSplits() {
-    final splits = <({String supplierId, double qty})>[];
-    for (final draft in _splits) {
-      final qty = double.tryParse(draft.qtyController.text.trim());
-      if (draft.supplierId == null || qty == null || qty <= 0) continue;
-      splits.add((supplierId: draft.supplierId!, qty: qty));
-    }
-    return splits;
   }
 
   void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   String _brandVersionLabel(BrandVersion bv) {
@@ -563,518 +789,311 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit line' : 'Add line'),
-        actions: [
-          if (_isEditing)
-            TextButton(
-              onPressed: _saving || _loading ? null : _removeLine,
-              child: const Text('Remove'),
-            ),
-          TextButton(
-            onPressed: _saving || _loading ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Save'),
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: false, label: Text('Catalog part')),
-                    ButtonSegment(value: true, label: Text('Custom')),
-                  ],
-                  selected: {_useCustom},
-                  onSelectionChanged: _saving
-                      ? null
-                      : (sel) async {
-                    final custom = sel.first;
-                    setState(() {
-                      _useCustom = custom;
-                      if (custom) {
-                        _partId = null;
-                        _brandVersionId = null;
-                        _brandVersions = [];
-                        _catalogPartMissing = false;
-                      } else {
-                        _customNameController.clear();
-                      }
-                    });
-                    await _refreshSupplierChoices();
-                  },
+    return PopScope<void>(
+      canPop: _edits == null || _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave(LeaveIntent.back);
+      },
+      child: Scaffold(
+        bottomNavigationBar: _catalogNameNotice == null
+            ? null
+            : SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(_catalogNameNotice!),
+                  ),
                 ),
-                const SizedBox(height: 16),
-                if (_useCustom) ...[
-                  TextField(
-                    controller: _customNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Custom name',
-                      border: OutlineInputBorder(),
-                    ),
-                    textCapitalization: TextCapitalization.sentences,
+              ),
+        appBar: AppBar(
+          title: Text(_isEditing ? 'Edit line' : 'Add line'),
+          actions: [
+            if (_session != null)
+              TextButton(
+                onPressed: _saving ? null : () => _leave(LeaveIntent.discard),
+                child: const Text('Discard'),
+              ),
+            if (_isEditing && _opening == null && _promotionReceipt == null)
+              TextButton(
+                onPressed: _saving || _loading ? null : _removeLine,
+                child: const Text('Remove'),
+              ),
+            if (_opening == null && _promotionReceipt == null)
+              TextButton(
+                onPressed: _saving || _loading ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Save'),
+              ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _opening != null
+            ? EditOpeningPanel<JobLineEditSession>(
+                opening: _opening!,
+                onResume: _useSession,
+                onDiscard: _discardRecovery,
+              )
+            : _promotionReceipt != null
+            ? Column(
+                children: [
+                  Text('Part saved: ${_promotionReceipt!.name}'),
+                  Text(
+                    'Requested: ${_neededController.text}, From shop: ${_pullController.text}',
                   ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: _saving || _loading ? null : _promoteToCatalog,
-                      icon: const Icon(Icons.upgrade),
-                      label: const Text('Promote to catalog'),
-                    ),
+                  FilledButton(
+                    onPressed: _saving
+                        ? null
+                        : () => _presentPromotion(_promotionReceipt!),
+                    child: const Text('Continue editing'),
                   ),
-                  const Text(
-                    'PIN required. Puts this name on the catalog tree and on this job.',
-                  ),
-                ] else ...[
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Catalog part'),
-                    subtitle: Text(_pickLabel),
-                    trailing: const Icon(Icons.account_tree_outlined),
-                    onTap: _saving ? null : _pickFromTree,
-                  ),
-                  if (_partId != null && !_catalogPartMissing)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: _saving
-                            ? null
-                            : () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) =>
-                                        PartDetailPage(partId: _partId!),
-                                  ),
-                                );
-                              },
-                        child: const Text('Open catalog part'),
-                      ),
-                    ),
                 ],
-                const SizedBox(height: 16),
-                Row(
+              )
+            : AbsorbPointer(
+                absorbing: _saving,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _neededController,
+                    if (_session case final session?)
+                      EditStatusBanner(status: session.status),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          label: Text('Catalog part'),
+                        ),
+                        ButtonSegment(value: true, label: Text('Custom')),
+                      ],
+                      selected: {_useCustom},
+                      onSelectionChanged: _saving
+                          ? null
+                          : (sel) async {
+                              final custom = sel.first;
+                              _change(() {
+                                _useCustom = custom;
+                                if (custom) {
+                                  _partId = null;
+                                  _brandVersionId = null;
+                                  _brandVersions = [];
+                                  _catalogPartMissing = false;
+                                } else {
+                                  _customNameController.clear();
+                                }
+                              });
+                              await _refreshSupplierChoices();
+                            },
+                    ),
+                    const SizedBox(height: 16),
+                    if (_useCustom) ...[
+                      TextField(
+                        controller: _customNameController,
                         decoration: const InputDecoration(
-                          labelText: 'Requested',
+                          labelText: 'Custom name',
                           border: OutlineInputBorder(),
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9.]'),
-                          ),
-                        ],
-                        onChanged: (_) => setState(() {}),
+                        textCapitalization: TextCapitalization.sentences,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: _pullController,
-                        decoration: const InputDecoration(
-                          labelText: 'Shop',
-                          border: OutlineInputBorder(),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _saving || _loading
+                              ? null
+                              : _promoteToCatalog,
+                          icon: const Icon(Icons.upgrade),
+                          label: const Text('Promote to catalog'),
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9.]'),
-                          ),
-                        ],
-                        onChanged: (_) => setState(() {}),
                       ),
+                      const Text(
+                        'PIN required. Puts this name on the catalog tree and on this job.',
+                      ),
+                    ] else ...[
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Catalog part'),
+                        subtitle: Text(_pickLabel),
+                        trailing: const Icon(Icons.account_tree_outlined),
+                        onTap: _saving ? null : _pickFromTree,
+                      ),
+                      if (_partId != null && !_catalogPartMissing)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _saving
+                                ? null
+                                : () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            PartDetailPage(partId: _partId!),
+                                      ),
+                                    );
+                                  },
+                            child: const Text('Open catalog part'),
+                          ),
+                        ),
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _neededController,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9.]'),
+                              ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Requested',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _pullController,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9.]'),
+                              ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Shop',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Left to Pull/Order ${formatQty(_previewQty.leftToPullOrder)}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Split: ${_previewQty.splitSummary}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 24),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
+                    const SizedBox(height: 12),
                     Text(
-                      'Split — suppliers',
+                      'Left to Pull/Order ${formatQty(_previewQty.leftToPullOrder)}',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    TextButton.icon(
-                      onPressed: _addSplit,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add split'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Split: ${_previewQty.splitSummary}',
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                  ],
-                ),
-                const Text(
-                  'Shop is the shop slice. Each row is one supplier. Add a supplier on this row if it is not in the list. Empty is OK.',
-                ),
-                const SizedBox(height: 8),
-                ...List.generate(_splits.length, (index) {
-                  final split = _splits[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Column(
+                    const SizedBox(height: 24),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        TaxonomyPickField(
-                          label: 'Supplier',
-                          value: split.supplierId,
-                          allowNone: true,
-                          addLabel: 'Add supplier',
-                          items: [
-                            for (final s in _supplierChoices)
-                              DropdownMenuItem(
-                                value: s.id,
-                                child: Text(s.name),
-                              ),
-                          ],
-                          onChanged: (v) {
-                            setState(() => split.supplierId = v);
-                          },
-                          onAdd: _saving
-                              ? null
-                              : () => _addSupplierForSplit(split),
+                        Text(
+                          'Split — suppliers',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: split.qtyController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Qty',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'[0-9.]'),
-                                  ),
-                                ],
-                                onChanged: (_) => setState(() {}),
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: _splits.length <= 1
-                                  ? null
-                                  : () => _removeSplit(index),
-                              icon: const Icon(Icons.remove_circle_outline),
-                              tooltip: 'Remove split',
-                            ),
-                          ],
+                        TextButton.icon(
+                          onPressed: _addSplit,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add split'),
                         ),
                       ],
                     ),
-                  );
-                }),
-                const SizedBox(height: 16),
-                Text(
-                  'Delivered and Brought to the Job — later.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-    );
-  }
-
-  static String _qtyText(double v) {
-    if (v == v.roundToDouble()) return v.toInt().toString();
-    return v.toString();
-  }
-}
-
-class _PromoteResult {
-  const _PromoteResult({
-    required this.name,
-    required this.categoryId,
-    required this.styleId,
-    required this.typeId,
-  });
-
-  final String name;
-  final String categoryId;
-  final String styleId;
-  final String typeId;
-}
-
-class _PromoteDialog extends StatefulWidget {
-  const _PromoteDialog({
-    required this.initialName,
-    required this.maintenance,
-  });
-
-  final String initialName;
-  final MaintenanceRepository maintenance;
-
-  @override
-  State<_PromoteDialog> createState() => _PromoteDialogState();
-}
-
-class _PromoteDialogState extends State<_PromoteDialog> {
-  late final TextEditingController _name;
-  List<Category> _categories = [];
-  List<Style> _styles = [];
-  List<Type> _variants = [];
-  String? _categoryId;
-  String? _styleId;
-  String? _typeId;
-  String? _error;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _name = TextEditingController(text: widget.initialName);
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  List<Style> get _typesForCat => _styles
-      .where((s) => _categoryId != null && s.categoryId == _categoryId)
-      .toList();
-
-  List<Type> get _variantsForType => _variants
-      .where((t) => _styleId != null && t.styleId == _styleId)
-      .toList();
-
-  Future<bool> _gate() async {
-    final scope = AppScope.of(context);
-    return ensurePinUnlocked(context, scope.pin);
-  }
-
-  Future<void> _load() async {
-    final cats = await widget.maintenance.listCategories();
-    final styles = await widget.maintenance.listStyles();
-    final variants = await widget.maintenance.listTypes();
-    if (!mounted) return;
-    setState(() {
-      _categories = cats;
-      _styles = styles;
-      _variants = variants;
-      _loading = false;
-    });
-  }
-
-  Future<void> _addCategory() async {
-    if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add category');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await widget.maintenance.createCategory(name);
-      await _load();
-      if (!mounted) return;
-      setState(() {
-        _categoryId = id;
-        _styleId = null;
-        _typeId = null;
-        _error = null;
-      });
-    } on StateError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    }
-  }
-
-  Future<void> _addType() async {
-    if (_categoryId == null) {
-      setState(() => _error = 'Set Category first');
-      return;
-    }
-    if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add type');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await widget.maintenance.createStyle(
-        categoryId: _categoryId!,
-        name: name,
-      );
-      await _load();
-      if (!mounted) return;
-      setState(() {
-        _styleId = id;
-        _typeId = null;
-        _error = null;
-      });
-    } on StateError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    }
-  }
-
-  Future<void> _addVariant() async {
-    if (_styleId == null) {
-      setState(() => _error = 'Set Type first');
-      return;
-    }
-    if (!await _gate() || !mounted) return;
-    final name = await promptName(context, title: 'Add variant');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await widget.maintenance.createType(
-        styleId: _styleId!,
-        name: name,
-      );
-      await _load();
-      if (!mounted) return;
-      setState(() {
-        _typeId = id;
-        _error = null;
-      });
-    } on StateError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    }
-  }
-
-  void _submit() {
-    final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = 'Part name is required');
-      return;
-    }
-    if (_categoryId == null || _styleId == null || _typeId == null) {
-      setState(() => _error = 'Category, Type, and Variant are required');
-      return;
-    }
-    Navigator.pop(
-      context,
-      _PromoteResult(
-        name: name,
-        categoryId: _categoryId!,
-        styleId: _styleId!,
-        typeId: _typeId!,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Promote to catalog'),
-      content: SizedBox(
-        width: 420,
-        child: _loading
-            ? const SizedBox(
-                height: 120,
-                child: Center(child: CircularProgressIndicator()),
-              )
-            : SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
                     const Text(
-                      'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.',
+                      'Shop is the shop slice. Each row is one supplier. Add a supplier on this row if it is not in the list. Empty is OK.',
                     ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                    const SizedBox(height: 8),
+                    ...List.generate(_splits.length, (index) {
+                      final split = _splits[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Column(
+                          children: [
+                            TaxonomyPickField(
+                              label: 'Supplier',
+                              value: split.supplierId,
+                              allowNone: true,
+                              addLabel: 'Add supplier',
+                              items: [
+                                if (split.supplierId != null &&
+                                    !_supplierChoices.any(
+                                      (s) => s.id == split.supplierId,
+                                    ))
+                                  DropdownMenuItem(
+                                    value: split.supplierId,
+                                    child: Text(
+                                      'Unavailable supplier (${split.supplierId})',
+                                    ),
+                                  ),
+                                for (final s in _supplierChoices)
+                                  DropdownMenuItem(
+                                    value: s.id,
+                                    child: Text(s.name),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                _change(() => split.supplierId = v);
+                              },
+                              onAdd: _saving
+                                  ? null
+                                  : () => _addSupplierForSplit(split),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: split.qtyController,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'[0-9.]'),
+                                      ),
+                                    ],
+                                    decoration: const InputDecoration(
+                                      labelText: 'Qty',
+                                      border: OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    onChanged: (_) => setState(() {}),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: _splits.length <= 1
+                                      ? null
+                                      : () => _removeSplit(index),
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                  tooltip: 'Remove split',
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _name,
-                      decoration: const InputDecoration(
-                        labelText: 'Part name',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TaxonomyPickField(
-                      label: 'Category',
-                      value: _categoryId,
-                      addLabel: 'Add Category',
-                      items: [
-                        for (final c in _categories)
-                          DropdownMenuItem(value: c.id, child: Text(c.name)),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _categoryId = v;
-                        _styleId = null;
-                        _typeId = null;
-                        _error = null;
-                      }),
-                      onAdd: _addCategory,
-                    ),
-                    TaxonomyPickField(
-                      label: 'Type',
-                      value: _styleId,
-                      enabled: _categoryId != null,
-                      addLabel: 'Add Type',
-                      items: [
-                        for (final s in _typesForCat)
-                          DropdownMenuItem(value: s.id, child: Text(s.name)),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _styleId = v;
-                        _typeId = null;
-                        _error = null;
-                      }),
-                      onAdd: _addType,
-                    ),
-                    TaxonomyPickField(
-                      label: 'Variant',
-                      value: _typeId,
-                      enabled: _styleId != null,
-                      addLabel: 'Add Variant',
-                      items: [
-                        for (final t in _variantsForType)
-                          DropdownMenuItem(value: t.id, child: Text(t.name)),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _typeId = v;
-                        _error = null;
-                      }),
-                      onAdd: _addVariant,
+                      );
+                    }),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Delivered and Brought to the Job — later.',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
               ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _loading ? null : _submit,
-          child: const Text('Promote'),
-        ),
-      ],
     );
   }
+
+  static String _qtyText(double v) => formatQty(v);
 }

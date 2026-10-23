@@ -1,0 +1,41 @@
+# Synthetic Nearby native acceptance
+
+This adapter redirects every path-provider directory into a dedicated OS temporary directory, then starts the real `WiredPartsApp(enableCompanyBootstrap: true)` with the same database, installation-security startup, device identity, and PIN sequence as production. It uses `NativeInstallationSecureStore` with a synthetic protected namespace. It never calls the production entrypoint or opens its `production` protected namespace. No production source, Nearby protocol, company enrollment, or permission guard is changed. The adapter does not automatically match, send, or accept a shop.
+
+Run identifiers remain 1-48 lowercase letters, digits, or hyphens, starting with a letter or digit. Roles are exactly `sender` and `receiver`. Before creating any workspace or sidecar lock, the adapter validates both the installation namespace and its company-custody companion against the native 64-character limit. The namespace is `synthetic.lan.<role>.<digest>`, where `digest` is the first 24 lowercase hexadecimal characters of SHA-256 over the UTF-8 run identifier. The longest base is 47 characters and its `.company-custody` companion is 63. Changing either run or role selects a separate synthetic protected state. Reopening the same run, role, and native bundle identity uses the same isolated files and protected state. The printed namespace is a public validation identifier. No protected state, key, PIN, PIN hash, or match code is printed.
+
+The preserved fixture contains legacy Parts and Jobs while company state stays empty. The real company gate therefore follows its existing automatic local-shop route after the nonempty-shop preflight. The company gate remains mounted, but this seeded adapter does not display the fresh empty-shop `Continue local shop` choice. Do not create, recover, enroll, or join a company. This fixture cannot prove first-ever empty-catalog native startup.
+
+Build from `app` with the same run identifier on both hosts. Use a new identifier for each fresh experiment, including the first launch of this adapter revision. Roots initialized by the older launcher under the production protected namespace are not migration targets; keep them untouched. Roles are exactly `sender` and `receiver`.
+
+```sh
+flutter build macos --release --no-pub -t tool/nearby_lan_validation.dart --dart-define=LAN_VALIDATION_RUN=local-parts-20261020a --dart-define=LAN_VALIDATION_ROLE=sender
+```
+
+```powershell
+flutter build windows --release --no-pub -t tool/nearby_lan_validation.dart --dart-define=LAN_VALIDATION_RUN=local-parts-20261020a --dart-define=LAN_VALIDATION_ROLE=receiver
+```
+
+The Release outputs are `build/macos/Build/Products/Release/wired_parts.app` and `build/windows/x64/runner/Release/wired_parts.exe`, relative to `app`. These commands only build the adapter. Native launch, signing, and acceptance must be recorded separately; a successful build does not prove any UI outcome.
+
+For isolated local Parts/Jobs acceptance, use a fresh run identifier, launch only the designated synthetic executable, and record the printed root, namespace, source revision, and initial receipt. Confirm the seeded role-specific shop and local Catalog/Jobs UI. Use normal controls to create and edit a part, its Specifications, a Job line, and supplier splits, including promotion. Record their IDs and metadata. Quit through the normal desktop app action, then reopen the exact same executable with the same run and role. Compare the new receipt and visible records for unchanged IDs, relationships, Specifications, quantities, splits, and photos. Do not use Nearby, create a company, or touch a real shop during this local acceptance. Preserve both receipts and operator observations. Keep the existing roots and protected namespaces; do not delete or reuse another run as cleanup.
+
+On Mac, copy the built app to the designated synthetic test location and use the independently verified sandbox identity `com.weirdtoo.wiredparts.lanvalidation.mac20260922`. Verify that copied app's signature, bundle identifier and sandbox/network entitlements before launch. Do not launch a build from the normal application location. On Windows, launch the validation executable from its dedicated build location. Record command, exit status, source revision, executable path, network interface and local LAN address per host.
+
+The runner derives its root from the native OS temporary directory plus `wired-parts-lan-<run>-<role>`. It accepts no custom storage root. It refuses pre-existing directories without a matching initialized ownership marker, interrupted initialization and symlinks. It acquires a sidecar process lock before inspecting or initializing the root and holds it while the app runs. The sidecar remains for safe lock identity across launches. Do not delete roots to retry. Use a fresh run identifier. A stopped app's original run/role can be relaunched to read the same fixture. Keep the same native bundle identity across launches. OS temporary storage is suitable only for this bounded validation, not long-term archives.
+
+Each role starts with its own synthetic job with a job number, a soft-deleted job, Category, Type, Variant, part, brand, supplier, supplier listing, job line, order split, compatibility relation and locally generated PNG. The deleted job retains its deletion timestamp, revision and origin-device provenance in receipt content while staying out of the active Jobs list. Fixture IDs include the role, so receiver replacement is distinguishable from a merge. The fixed role-specific device ID remains local. The ownership marker and receipts live outside the shop's support directory and survive a shop replacement.
+
+1. Launch both validation builds. Record their printed synthetic roots and initial receipts. In the normal application UI, set a synthetic catalog PIN on each device. Do not record PIN values or hashes. Close and relaunch both apps to obtain PIN-configured baseline receipts and clear the in-memory unlock grant.
+2. Confirm each screen shows its role-specific synthetic shop. Open More, then Nearby. Verify discovery on the house Wi-Fi using UDP 41000. Compare the six-digit Match code on both screens manually. Record only that the comparison passed, never the code or PIN.
+3. Use normal Match, Send this shop and Accept shop controls. Record that the receiver displayed the PIN prompt and accepted its synthetic PIN. Confirm the replacement warning applies to the synthetic receiver shop. Do not select any real shop, backup or photo.
+4. Record both devices' visible transfer result. Close and relaunch each same validation executable. Each launch writes a new JSON receipt under the printed root's `receipts` directory. These receipts contain queried database values, local device IDs and actual photo-byte SHA-256 hashes. They omit the PIN hash and code.
+5. Copy the four operator-selected receipts into the evidence folder and compare them using the command below. Preserve operator evidence for the interface/IP, both-screen Match comparison, PIN prompt, warning and transfer result separately. The comparison proves persisted content and identity; it cannot prove which physical devices or network carried the transfer.
+
+```sh
+python3 tool/verify_nearby_lan_receipts.py source-before.json source-after.json receiver-before.json receiver-after.json
+```
+
+The verifier requires configured PINs, unchanged sender fixture data and photos, replaced receiver sentinel, identical copied content and photo hashes, and stable receiver identity. The readback occurs before validation application startup, after reopening the persisted database. Receipts are validation artifacts, not Phase 5 two-way synchronization proof. No merge authority is granted by this target.
+
+Format 2 receipts compare every row and column in all shop tables, including relationships and sync metadata. App settings are excluded except the fixture marker and PIN-configured boolean; transfer/backup history is expected to differ. Device profiles are checked separately for local identity. No PIN value or hash is recorded. The verifier uses explicit validation errors even under optimized Python. Runner concurrency tests require Python on the host.

@@ -5,6 +5,8 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/new_id.dart';
+
 /// Compress and store part photos under Application Support.
 class PartPhotoStore {
   const PartPhotoStore();
@@ -40,9 +42,20 @@ class PartPhotoStore {
     final compressed = await compute(compress, bytes);
     final dir = root ?? await photosDirectory();
     await dir.create(recursive: true);
-    final name = '$partId-${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final name = '$partId-${newId()}.jpg';
     final file = File(p.join(dir.path, name));
-    await file.writeAsBytes(compressed, flush: true);
+    try {
+      await file.writeAsBytes(compressed, flush: true);
+    } catch (_) {
+      try {
+        if (await file.exists()) await file.delete();
+      } on FileSystemException catch (error) {
+        debugPrint(
+          'Part photo partial-file cleanup failed, OS code ${error.osError?.errorCode ?? 'unknown'}.',
+        );
+      }
+      rethrow;
+    }
     return name;
   }
 

@@ -4,6 +4,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../data/sqlite_file.dart';
+import '../backup/backup_store.dart' show requireLegacyBusinessFile;
+
+final class LocalDataResetNoEffectFailure implements Exception {
+  const LocalDataResetNoEffectFailure._(this.cause, this.stackTrace);
+  final Object cause;
+  final StackTrace stackTrace;
+}
 
 /// Deletes the on-disk sqlite file (plus WAL/SHM), part photos, and restore
 /// leftovers (marker, staging, `.restore-bak`) so reopen cannot promote a
@@ -47,8 +54,33 @@ class LocalDataReset {
     }
   }
 
-  Future<void> wipeFiles() async {
+  /// Check every store reset may delete before rotating installation identity.
+  Future<void> preflight() async {
     final dir = await _support();
+    requireLegacyBusinessFile(File(p.join(dir.path, kSqliteFileName)));
+    final documents = await _documents();
+    if (documents != null) {
+      requireLegacyBusinessFile(File(p.join(documents.path, kSqliteFileName)));
+    }
+  }
+
+  Future<void> wipeFiles() async {
+    late Directory dir;
+    late Directory? documents;
+    late Directory photos;
+    try {
+      dir = await _support();
+      documents = await _documents();
+      photos = photosDir ?? Directory(p.join(dir.path, 'part_photos'));
+      requireLegacyBusinessFile(File(p.join(dir.path, kSqliteFileName)));
+      if (documents != null) {
+        requireLegacyBusinessFile(
+          File(p.join(documents.path, kSqliteFileName)),
+        );
+      }
+    } catch (error, stack) {
+      throw LocalDataResetNoEffectFailure._(error, stack);
+    }
     final marker = File(p.join(dir.path, kRestoreSwapMarkerName));
     if (await marker.exists()) {
       await marker.delete();
@@ -68,9 +100,10 @@ class LocalDataReset {
       await bakPhotos.delete(recursive: true);
     }
     await _deleteSqliteIn(dir);
-    await clearDocumentsLeftover();
-    final photos =
-        photosDir ?? Directory(p.join(dir.path, 'part_photos'));
+    if (documents != null &&
+        p.canonicalize(documents.path) != p.canonicalize(dir.path)) {
+      await _deleteSqliteIn(documents);
+    }
     if (await photos.exists()) {
       await photos.delete(recursive: true);
     }

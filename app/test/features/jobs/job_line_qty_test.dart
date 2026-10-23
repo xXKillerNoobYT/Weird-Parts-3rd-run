@@ -2,6 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/features/jobs/job_line_qty.dart';
 
 void main() {
+  test('large finite and nonfinite preview results format without integer conversion', () {
+    expect(formatQty(1e20), '100000000000000000000');
+    expect(formatQty(1e308), '1e+308');
+    expect(formatQty(double.infinity), 'Infinity');
+    expect(formatQty(double.negativeInfinity), '-Infinity');
+    expect(formatQty(double.nan), 'NaN');
+  });
   test('requested 10, shop 4, A 3, B 3 → left 0', () {
     const qty = JobLineQty(
       requested: 10,
@@ -82,9 +89,7 @@ void main() {
     const qty = JobLineQty(
       requested: 10,
       shop: 4,
-      supplierSplits: [
-        JobSupplierSplit(supplierName: 'A', qty: 7),
-      ],
+      supplierSplits: [JobSupplierSplit(supplierName: 'A', qty: 7)],
     );
     expect(qty.leftToPullOrder, -1);
     expect(qty.listSubtitle, contains('Left to Pull/Order -1'));
