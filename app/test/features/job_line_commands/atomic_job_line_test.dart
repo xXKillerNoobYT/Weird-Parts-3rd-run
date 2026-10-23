@@ -1367,6 +1367,31 @@ void main() {
             .get(),
         hasLength(2),
       );
+      for (var i = 0; i < 2; i++) {
+        final db = fixture.databases[i];
+        final before = businessRows(fixture.files[i], includeHistory: true);
+        final incoming = i == 0 ? b : a;
+        final receipt = await fixture.commands(i).applyIncoming(
+          incoming.operationBytes,
+        );
+        expect(receipt.status, 'conflict');
+        final persisted = await db.select(db.jobLineConflicts).getSingle();
+        await fixture.reopen(i);
+        final reopened = fixture.databases[i];
+        expect(
+          (await reopened.select(reopened.jobLineConflicts).getSingle()).toJson(),
+          persisted.toJson(),
+        );
+        expect((await fixture.row(i)).notes, 'Old note');
+        expect(
+          (await fixture.commands(i).applyIncoming(incoming.operationBytes)).bytes,
+          receipt.bytes,
+        );
+        expect(
+          businessRows(fixture.files[i], includeHistory: true),
+          before,
+        );
+      }
     });
     test('two deletes and one edit retain a single complete lifecycle candidate set', () async {
       final a = await fixture.commit(0, fixture.command(const DeleteJobLine()));
