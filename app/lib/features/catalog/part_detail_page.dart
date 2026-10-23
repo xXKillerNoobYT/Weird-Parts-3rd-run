@@ -760,6 +760,9 @@ class _PartDetailPageState extends State<PartDetailPage> {
       return;
     }
     var selectedBrand = brandId;
+    if (selectedBrand != null && !_brands.any((b) => b.id == selectedBrand)) {
+      selectedBrand = null;
+    }
     selectedBrand ??= _brands.isEmpty ? null : _brands.first.id;
     final result = await showDialog<VarianceCreated>(
       context: context,
