@@ -238,6 +238,48 @@ abstract class _EditSession {
   }
 }
 
+class SupplierListingEditSession extends _EditSession {
+  SupplierListingEditSession._(super.owner, super.record);
+  SupplierListingInput get initial => _record.input as SupplierListingInput;
+  String get listingId => _record.target['reserved']!;
+  void replace(SupplierListingInput input) => _replace(input);
+
+  Future<SupplierListingSaved> save() async {
+    final result = await _settle('supplier-listing-create', () async {
+      final supplierId = initial.supplierId;
+      if (supplierId == null || supplierId.trim().isEmpty) {
+        throw StateError('Select a Supplier');
+      }
+      await CatalogRepository(
+        _owner._db,
+        _owner._pin,
+        _owner._deviceId,
+      ).createSupplierListing(
+        brandVersionId: _record.target['listingVersion']!,
+        supplierId: supplierId,
+        sku: initial.skuText.trim(),
+        reservedId: listingId,
+      );
+      return {
+        'id': listingId,
+        'row': _digest(await _owner._row('supplier_listings', listingId)),
+        'slot': _record.slot,
+        'target': jsonEncode(_record.target),
+      };
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) {
+      throw StateError('Saved supplier listing receipt is unavailable');
+    }
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer supplier listing edit replaced this receipt');
+    }
+    return _owner._savedSupplierListing(raw, _record.target);
+  }
+}
+
 class CatalogNameEditSession extends _EditSession {
   CatalogNameEditSession._(super.owner, super.record);
   CatalogNameInput get initial => _record.input as CatalogNameInput;
