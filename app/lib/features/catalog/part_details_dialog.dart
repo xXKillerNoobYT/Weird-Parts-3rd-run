@@ -11,19 +11,18 @@ import '../pin/pin_gate.dart';
 import 'catalog_name_dialog.dart';
 import 'tree_edit_prompts.dart';
 
-class PartDetails {
-  const PartDetails({
-    required this.name,
-    required this.categoryId,
-    required this.styleId,
-    required this.typeId,
-  });
-
-  final String name;
-  final String categoryId;
-  final String styleId;
-  final String typeId;
-}
+Future<JobLinePromoted?> showJobLinePromotionDialog(
+  BuildContext context, {
+  required JobLinePromotion promotion,
+  required MaintenanceRepository maintenance,
+}) => showDialog<JobLinePromoted>(
+  context: context,
+  barrierDismissible: false,
+  builder: (_) => PartDetailsDialog.promotion(
+    promotion: promotion,
+    maintenance: maintenance,
+  ),
+);
 
 Future<NewPartCreated?> showNewPartDialog(
   BuildContext context, {
@@ -53,18 +52,20 @@ final class _NewPartPurpose {
 }
 
 class PartDetailsDialog extends StatefulWidget {
-  const PartDetailsDialog({
-    this.initialName = '',
-    this.initialCategoryId,
-    this.initialStyleId,
-    this.initialTypeId,
-    this.title = 'New part',
-    this.submitLabel = 'Save',
-    this.introduction =
-        'Choose a Category, Type, and Variant before saving the part.',
+  PartDetailsDialog.promotion({
+    required JobLinePromotion promotion,
     required this.maintenance,
     super.key,
-  }) : _newPart = null;
+  }) : _promotion = promotion,
+       _newPart = null,
+       initialName = promotion.initial.nameText,
+       initialCategoryId = promotion.initial.categoryId,
+       initialStyleId = promotion.initial.styleId,
+       initialTypeId = promotion.initial.typeId,
+       title = 'Promote to catalog',
+       submitLabel = 'Promote',
+       introduction =
+           'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.';
 
   PartDetailsDialog._newPart({
     required this.maintenance,
@@ -72,7 +73,8 @@ class PartDetailsDialog extends StatefulWidget {
     this.initialCategoryId,
     this.initialStyleId,
     this.initialTypeId,
-  }) : initialName = '',
+  }) : _promotion = null,
+       initialName = '',
        title = 'New part',
        submitLabel = 'Save',
        introduction =
@@ -80,6 +82,7 @@ class PartDetailsDialog extends StatefulWidget {
        _newPart = _NewPartPurpose(edits);
 
   final _NewPartPurpose? _newPart;
+  final JobLinePromotion? _promotion;
   final String initialName;
   final String? initialCategoryId;
   final String? initialStyleId;
@@ -139,14 +142,14 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
 
   void _capture() {
     if (_applyingInput) return;
-    _session?.replace(
-      NewPartInput(
-        nameText: _name.text,
-        categoryId: _categoryId,
-        styleId: _styleId,
-        typeId: _typeId,
-      ),
+    final input = NewPartInput(
+      nameText: _name.text,
+      categoryId: _categoryId,
+      styleId: _styleId,
+      typeId: _typeId,
     );
+    _session?.replace(input);
+    widget._promotion?.replace(input);
   }
 
   Future<void> _openDraft() async {
@@ -216,7 +219,14 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      if (_session case final session?) {
+      if (widget._promotion case final promotion?) {
+        _capture();
+        if (intent == LeaveIntent.discard) {
+          await promotion.cancel();
+        } else {
+          await promotion.flush();
+        }
+      } else if (_session case final session?) {
         await session.leave(intent);
       } else if (intent == LeaveIntent.discard && _saved == null) {
         switch (_opening) {
@@ -281,17 +291,6 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
       _categories = cats;
       _styles = styles;
       _variants = variants;
-      if (widget._newPart == null) {
-        if (!cats.any((c) => c.id == _categoryId)) _categoryId = null;
-        if (!styles.any(
-          (s) => s.id == _styleId && s.categoryId == _categoryId,
-        )) {
-          _styleId = null;
-        }
-        if (!variants.any((t) => t.id == _typeId && t.styleId == _styleId)) {
-          _typeId = null;
-        }
-      }
       _loading = false;
     });
   }
@@ -363,6 +362,7 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
           });
           _capture();
           await _session?.flush();
+          await widget._promotion?.flush();
         },
         onNotice: (message) {
           if (mounted) setState(() => _notice = message);
@@ -407,21 +407,28 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
       }
       return;
     }
-    Navigator.pop(
-      context,
-      PartDetails(
-        name: name,
-        categoryId: _categoryId!,
-        styleId: _styleId!,
-        typeId: _typeId!,
-      ),
-    );
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final saved = await widget._promotion!.promote();
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop<JobLinePromoted>(saved);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error is StateError ? error.message : '$error');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope<Object?>(
-      canPop: widget._newPart == null || _allowPop,
+      canPop: _allowPop,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _leave(LeaveIntent.back);
       },
@@ -434,11 +441,16 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
             if (_notice != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    _notice!,
-                    style: Theme.of(context).textTheme.bodyMedium,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 120),
+                  child: SingleChildScrollView(
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _notice!,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -469,9 +481,16 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
                     children: [
                       if (_session case final session?)
                         EditStatusBanner(status: session.status),
+                      if (widget._promotion case final promotion?)
+                        EditStatusBanner(status: promotion.status),
                       Text(widget.introduction),
-                      if (widget._newPart != null && _hierarchyError != null)
+                      if (_hierarchyError != null) ...[
                         Text(_hierarchyError!),
+                        if (widget._promotion != null)
+                          Text(
+                            'Category ID: $_categoryId, Type ID: $_styleId, Variant ID: $_typeId',
+                          ),
+                      ],
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -553,8 +572,6 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
           TextButton(
             onPressed: _busy || _loading
                 ? null
-                : widget._newPart == null
-                ? () => Navigator.pop(context)
                 : () => _leave(
                     _saved == null ? LeaveIntent.discard : LeaveIntent.back,
                   ),

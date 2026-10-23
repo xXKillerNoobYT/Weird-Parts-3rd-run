@@ -35,17 +35,24 @@ Future<void> _openEditor(
   required String jobId,
   String? lineId,
   EditDrafts? edits,
+  bool enableEditDrafts = false,
 }) async {
   tester.view.physicalSize = const Size(1000, 1400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+  final pin = PinService(db.settingsDao);
+  final owner =
+      edits ??
+      (enableEditDrafts
+          ? EditDrafts(db: db, pin: pin, deviceId: deviceId)
+          : null);
   await tester.pumpWidget(
     AppScope(
       db: db,
-      pin: PinService(db.settingsDao),
+      pin: pin,
       deviceId: deviceId,
-      edits: edits,
+      edits: owner,
       wipeLocalData: () async {},
       restoreFromBackup: (_, _) async {},
       child: MaterialApp(
@@ -122,6 +129,7 @@ void main() {
           deviceId: deviceId,
           jobId: jobId,
           lineId: lineId,
+          enableEditDrafts: true,
         );
         if (!editing) {
           await tester.tap(find.text('Custom'));
@@ -149,9 +157,6 @@ void main() {
         expect(await db.select(db.orderSplits).get(), originalSplits);
         expect(failure, isNull);
         await db.customStatement('DROP TRIGGER reject_promotion_split');
-        await tester.tap(find.text('Promote to catalog'));
-        await tester.pumpAndSettle();
-        await _selectPromotionHierarchy(tester);
         await tester.tap(find.text('Promote'));
         await tester.pumpAndSettle();
         final part = (await db.partsDao.listParts()).single;
@@ -186,7 +191,13 @@ void main() {
       );
       await maintenance.createType(styleId: style, name: 'Synthetic variant');
       final jobId = await jobs.createJob('Stopped promotion');
-      await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+      await _openEditor(
+        tester,
+        db: db,
+        deviceId: deviceId,
+        jobId: jobId,
+        enableEditDrafts: true,
+      );
       await tester.tap(find.text('Custom'));
       await tester.pumpAndSettle();
       await tester.enterText(_field('Custom name'), 'Unsaved catalog part');
@@ -370,6 +381,46 @@ void main() {
       ),
       contains('  Unfinished supplier  '),
     );
+  });
+
+  testWidgets('promotion without durable edits retains valid input', (
+    tester,
+  ) async {
+    final jobId = await jobs.createJob('Unavailable promotion');
+    final originalJob = await jobs.getJob(jobId);
+    final originalParts = await db.select(db.parts).get();
+    final originalLines = await db.select(db.jobLines).get();
+    final originalSplits = await db.select(db.orderSplits).get();
+    await _openEditor(tester, db: db, deviceId: deviceId, jobId: jobId);
+    await tester.tap(find.text('Custom'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_field('Custom name'), '  Unsaved promotion  ');
+    await tester.enterText(_field('Requested'), '6.00');
+    await tester.enterText(_field('Shop'), '2.0');
+    await tester.tap(find.text('Promote to catalog'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Unfinished edits are unavailable. Your input remains in this form.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<TextField>(_field('Custom name')).controller!.text,
+      '  Unsaved promotion  ',
+    );
+    expect(
+      tester.widget<TextField>(_field('Requested')).controller!.text,
+      '6.00',
+    );
+    expect(tester.widget<TextField>(_field('Shop')).controller!.text, '2.0');
+    expect(find.byType(JobLineEditor), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+    expect(await jobs.getJob(jobId), originalJob);
+    expect(await db.select(db.parts).get(), originalParts);
+    expect(await db.select(db.jobLines).get(), originalLines);
+    expect(await db.select(db.orderSplits).get(), originalSplits);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

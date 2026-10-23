@@ -273,26 +273,58 @@ void main() {
     expect((await maintenance.listCategories()).single.name, 'Reusable folder');
   });
 
-  testWidgets('stale initial hierarchy clears dependent choices', (
+  testWidgets('stale promotion hierarchy is retained and refuses submission', (
     tester,
   ) async {
     final h = await hierarchy();
-    await mount(
-      tester,
-      PartDetailsDialog(
-        maintenance: maintenance,
-        initialCategoryId: 'missing-category',
-        initialStyleId: h.style,
-        initialTypeId: h.variant,
+    final job = await JobsRepository(db, device).createJob('Stale promotion');
+    final parent =
+        (await edits.openJobLine(job) as FreshEdit<JobLineEditSession>).session;
+    parent.replace(
+      JobLineInput(
+        useCustom: true,
+        partId: null,
+        brandVersionId: null,
+        customNameText: 'Parent',
+        neededText: '09.50',
+        pullText: '02.0',
+        customNotes: null,
+        uom: null,
+        notes: null,
+        splits: const [],
       ),
     );
-    final picks = tester.widgetList<DropdownButtonFormField<String>>(
-      find.byType(DropdownButtonFormField<String>),
+    final promotion = await parent.openPromotion();
+    promotion.replace(
+      NewPartInput(
+        nameText: 'Nested',
+        categoryId: 'missing-category',
+        styleId: h.style,
+        typeId: h.variant,
+      ),
     );
-    expect(picks.map((p) => p.initialValue), [null, null, null]);
-    await selectHierarchy(tester);
-    expect(tester.takeException(), isNull);
+    await promotion.flush();
+    await mount(
+      tester,
+      PartDetailsDialog.promotion(
+        maintenance: maintenance,
+        promotion: promotion,
+      ),
+    );
+    expect(
+      find.textContaining('selected Category is unavailable'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Promote'));
+    await tester.pumpAndSettle();
+    expect(promotion.initial.categoryId, 'missing-category');
+    expect(promotion.initial.styleId, h.style);
+    expect(promotion.initial.typeId, h.variant);
     expect(await catalog.listParts(), isEmpty);
+    expect(tester.takeException(), isNull);
+    await selectHierarchy(tester);
+    expect(promotion.initial.categoryId, h.category);
+    expect(parent.initial.neededText, '09.50');
   });
 
   testWidgets(

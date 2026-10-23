@@ -16,7 +16,6 @@ import '../edit_drafts/edit_draft_widgets.dart';
 import '../pin/pin_gate.dart';
 import 'job_line_qty.dart';
 import 'jobs_repository.dart';
-import 'catalog_promotion.dart';
 
 class JobLineEditor extends StatefulWidget {
   const JobLineEditor({required this.jobId, this.lineId, super.key});
@@ -40,7 +39,6 @@ class _SplitDraft {
 
 class _JobLineEditorState extends State<JobLineEditor> {
   late final JobsRepository _jobs;
-  late final CatalogPromotion _promotion;
   late final CatalogRepository _catalog;
   late final MaintenanceRepository _maintenance;
   late final AppDatabase _db;
@@ -74,6 +72,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   EditDrafts? _edits;
   JobLineEditSession? _session;
   EditOpening<JobLineEditSession>? _opening;
+  JobLinePromoted? _promotionReceipt;
   bool _applyingInput = false;
   bool _allowPop = false;
   String? _catalogNameNotice;
@@ -119,11 +118,36 @@ class _JobLineEditorState extends State<JobLineEditor> {
       await session.leave(LeaveIntent.back);
       return;
     }
-    _applyingInput = true;
     final input = session.initial;
     setState(() {
       _session = session;
       _opening = null;
+    });
+    _applyRaw(input);
+    final partId = input.partId;
+    final storedPart = partId == null
+        ? null
+        : await _catalog.getPart(partId, includeDeleted: true);
+    final versions = partId == null
+        ? <BrandVersion>[]
+        : await _catalog.listBrandVersionsForPart(
+            partId,
+            includeDeleted: storedPart?.deletedAt != null,
+          );
+    if (!mounted) return;
+    setState(() {
+      _brandVersions = versions;
+      _catalogPartMissing =
+          partId != null &&
+          (storedPart == null || storedPart.deletedAt != null);
+      _refreshPickLabel();
+    });
+    await _refreshSupplierChoices(preserveExistingSplits: true);
+  }
+
+  void _applyRaw(JobLineInput input) {
+    _applyingInput = true;
+    setState(() {
       _useCustom = input.useCustom;
       _partId = input.partId;
       _brandVersionId = input.brandVersionId;
@@ -150,25 +174,50 @@ class _JobLineEditorState extends State<JobLineEditor> {
         );
     });
     _applyingInput = false;
-    final partId = input.partId;
-    final storedPart = partId == null
-        ? null
-        : await _catalog.getPart(partId, includeDeleted: true);
-    final versions = partId == null
-        ? <BrandVersion>[]
-        : await _catalog.listBrandVersionsForPart(
-            partId,
-            includeDeleted: storedPart?.deletedAt != null,
-          );
+  }
+
+  Future<void> _presentPromotion(JobLinePromoted receipt) async {
     if (!mounted) return;
     setState(() {
-      _brandVersions = versions;
-      _catalogPartMissing =
-          partId != null &&
-          (storedPart == null || storedPart.deletedAt != null);
-      _refreshPickLabel();
+      _saving = true;
+      _loading = false;
+      _session = null;
+      _opening = null;
+      _promotionReceipt = receipt;
+      _lineId = receipt.lineId;
+      _pickLabel = receipt.name;
     });
-    await _refreshSupplierChoices(preserveExistingSplits: true);
+    _applyRaw(receipt.continuation);
+    try {
+      final parts = await _catalog.listParts(
+        activeOnly: false,
+        includeDeleted: true,
+      );
+      final tree = buildCatalogTree(
+        await _catalog.loadTreeSnapshot(activeOnly: true),
+      );
+      if (!mounted) return;
+      setState(() {
+        _parts = parts;
+        _tree = tree;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final session = await receipt.acknowledgeAndContinue();
+      if (!mounted) {
+        await session.leave(LeaveIntent.back);
+        return;
+      }
+      await _useSession(session);
+      if (mounted) {
+        setState(() => _promotionReceipt = null);
+        _toast('On this job as a catalog part. Back out when you are done.');
+      }
+    } catch (error) {
+      if (mounted) _toast('Part saved. Could not continue editing. $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _openDraft() async {
@@ -184,6 +233,8 @@ class _JobLineEditorState extends State<JobLineEditor> {
     }
     if (opening is FreshEdit<JobLineEditSession>) {
       await _useSession(opening.session);
+    } else if (opening is JobLinePromoted) {
+      await _presentPromotion(opening);
     } else {
       setState(() => _opening = opening);
     }
@@ -233,7 +284,6 @@ class _JobLineEditorState extends State<JobLineEditor> {
     }
     _db = scope.db;
     _jobs = JobsRepository(scope.db, scope.deviceId);
-    _promotion = CatalogPromotion(scope.db, scope.pin, scope.deviceId);
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
     _maintenance = MaintenanceRepository(scope.db, scope.pin, scope.deviceId);
     _lineId = widget.lineId;
@@ -419,8 +469,6 @@ class _JobLineEditorState extends State<JobLineEditor> {
         _edits != null || preserveExistingSplits || _catalogPartMissing;
     List<Supplier> choices;
     if (_catalogPartMissing) {
-      // Tombstoned listings are gone from the live picker. Keep every live
-      // supplier so saved splits stay visible and Add supplier still works.
       choices = List.of(_allSuppliers);
     } else if (_brandVersionId != null) {
       final listings = await _catalog.listingsForBrandVersion(_brandVersionId!);
@@ -693,97 +741,32 @@ class _JobLineEditorState extends State<JobLineEditor> {
 
   Future<void> _promoteToCatalog() async {
     if (_saving || _loading) return;
-    final name = _customNameController.text.trim();
-    if (name.isEmpty) {
+    _capture();
+    if (_customNameController.text.trim().isEmpty) {
       _toast('Custom name is required');
       return;
     }
-
-    final quantities = _validatedQuantities();
-    if (quantities == null) return;
+    if (_validatedQuantities() == null) return;
+    final session = _session;
+    if (session == null) {
+      _toast(
+        'Unfinished edits are unavailable. Your input remains in this form.',
+      );
+      return;
+    }
     final scope = AppScope.of(context);
     if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
-
-    final result = await showDialog<PartDetails>(
-      context: context,
-      builder: (ctx) => PartDetailsDialog(
-        initialName: name,
-        title: 'Promote to catalog',
-        submitLabel: 'Promote',
-        introduction: 'Turns this custom name into a catalog part and hangs it on the tree. Category is a folder, not a part.',
-        maintenance: _maintenance,
-      ),
-    );
-    if (result == null || !mounted) return;
-
-    setState(() => _saving = true);
     try {
-      final String partId;
-      final String lineId;
-      final session = _session;
-      if (session != null) {
-        final promotion = await session.promote(result);
-        if (!mounted) return;
-        partId = promotion.partId;
-        lineId = promotion.lineId;
-        _lineId = lineId;
-        await _useSession(promotion.session);
-      } else {
-        final promotion = await _promotion.promote(
-          jobId: widget.jobId,
-          lineId: _lineId,
-          name: result.name,
-          categoryId: result.categoryId,
-          styleId: result.styleId,
-          typeId: result.typeId,
-          neededQty: quantities.neededQty,
-          shopPullQty: quantities.shopPullQty,
-          splits: quantities.splits,
-        );
-        partId = promotion.partId;
-        lineId = promotion.lineId;
-      }
+      final promotion = await session.openPromotion();
       if (!mounted) return;
-      _applyingInput = true;
-      setState(() {
-        _lineId = lineId;
-        _useCustom = false;
-        _partId = partId;
-        _brandVersionId = null;
-        _brandVersions = [];
-        _pickLabel = result.name;
-        _catalogPartMissing = false;
-        _customNameController.clear();
-      });
-      _applyingInput = false;
-      try {
-        final versions = await _catalog.listBrandVersionsForPart(partId);
-        final parts = await _catalog.listParts(
-          activeOnly: false,
-          includeDeleted: true,
-        );
-        final tree = buildCatalogTree(
-          await _catalog.loadTreeSnapshot(activeOnly: true),
-        );
-        if (!mounted) return;
-        setState(() {
-          _brandVersions = versions;
-          _parts = parts;
-          _tree = tree;
-        });
-        _refreshPickLabel();
-        await _refreshSupplierChoices();
-        if (!mounted) return;
-        _toast('On this job as a catalog part. Back out when you are done.');
-      } catch (_) {
-        if (mounted) _toast('Catalog part saved. Reopen this line to refresh.');
-      }
-    } on StateError catch (e) {
-      if (mounted) _toast(e.message);
-    } catch (_) {
-      if (mounted) _toast('Promotion failed. Changes were not saved.');
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      final result = await showJobLinePromotionDialog(
+        context,
+        promotion: promotion,
+        maintenance: _maintenance,
+      );
+      if (result != null && mounted) await _presentPromotion(result);
+    } catch (error) {
+      if (mounted) _toast('Could not open promotion. $error');
     }
   }
 
@@ -831,12 +814,12 @@ class _JobLineEditorState extends State<JobLineEditor> {
                 onPressed: _saving ? null : () => _leave(LeaveIntent.discard),
                 child: const Text('Discard'),
               ),
-            if (_isEditing && _opening == null)
+            if (_isEditing && _opening == null && _promotionReceipt == null)
               TextButton(
                 onPressed: _saving || _loading ? null : _removeLine,
                 child: const Text('Remove'),
               ),
-            if (_opening == null)
+            if (_opening == null && _promotionReceipt == null)
               TextButton(
                 onPressed: _saving || _loading ? null : _save,
                 child: _saving
@@ -856,6 +839,21 @@ class _JobLineEditorState extends State<JobLineEditor> {
                 opening: _opening!,
                 onResume: _useSession,
                 onDiscard: _discardRecovery,
+              )
+            : _promotionReceipt != null
+            ? Column(
+                children: [
+                  Text('Part saved: ${_promotionReceipt!.name}'),
+                  Text(
+                    'Requested: ${_neededController.text}, From shop: ${_pullController.text}',
+                  ),
+                  FilledButton(
+                    onPressed: _saving
+                        ? null
+                        : () => _presentPromotion(_promotionReceipt!),
+                    child: const Text('Continue editing'),
+                  ),
+                ],
               )
             : AbsorbPointer(
                 absorbing: _saving,

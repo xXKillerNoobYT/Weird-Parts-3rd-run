@@ -2,6 +2,51 @@ part of 'edit_drafts.dart';
 
 const _rowLimit = 256 * 1024;
 const _splitLimit = 512;
+const _promotionResultFields = {
+  'slot',
+  'target',
+  'token',
+  'generation',
+  'part',
+  'line',
+  'device',
+  'createdAt',
+  'lineDevice',
+  'lineCreatedAt',
+  'name',
+  'category',
+  'style',
+  'type',
+  'input',
+  'continuation',
+  'base',
+  'continuationToken',
+};
+
+JobLineInput _lineInput(Object input) => switch (input) {
+  _JobLineDraftInput value => value.line,
+  JobLineInput value => value,
+  _ => throw StateError('Invalid Job-line input'),
+};
+
+void _lineTarget(Map<String, String> target) {
+  final expected = {
+    'kind',
+    'job',
+    'reserved',
+    if (target.containsKey('line')) 'line',
+  };
+  if (target['kind'] != 'line' ||
+      target.length != expected.length ||
+      !expected.every(target.containsKey) ||
+      target.values.any((value) => value.trim().isEmpty) ||
+      (target.containsKey('line') && target['line'] != target['reserved'])) {
+    throw const FormatException('Invalid Job-line target');
+  }
+}
+
+String _promotionCommand(_DraftRecord record) =>
+    'line-promote-v2/${_digest([record.target, record.token, record.origin, _inputJson(record.input)])}';
 
 void _varianceTarget(Map<String, String> target) {
   const fields = {'kind', 'part', 'reserved'};
@@ -210,6 +255,8 @@ Map<String, Object?> _control(String raw) {
         ? {'id', 'row', 'slot', 'target'}
         : command == 'line-save' || command == 'line-remove'
         ? {'line'}
+        : command.startsWith('line-promote-v2/')
+        ? _promotionResultFields
         : command.startsWith('line-promote/')
         ? {'part', 'line'}
         : <String>{};
@@ -261,6 +308,17 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
     'type': p.typeId,
     'supplier': p.defaultSupplierId,
     'active': p.active,
+  },
+  _JobLineDraftInput j => {
+    'line': _inputJson(j.line),
+    'promotion': j.promotion == null
+        ? null
+        : {
+            'generation': j.promotion!.generation,
+            'part': j.promotion!.partId,
+            'details': _inputJson(j.promotion!.details),
+            'references': j.promotion!.references,
+          },
   },
   JobLineInput j => {
     'custom': j.useCustom,
@@ -355,6 +413,45 @@ Object _parseInput(String kind, Object? value) {
       active: _boolean(m['active']),
     );
   }
+  if (m.containsKey('line')) {
+    _keys(m, {'line', 'promotion'});
+    if (_map(m['line']).containsKey('line')) {
+      throw const FormatException('Invalid nested Job-line input');
+    }
+    final line = _lineInput(_parseInput('line', m['line']));
+    _PendingPromotion? promotion;
+    if (m['promotion'] != null) {
+      final pending = _map(m['promotion']);
+      _keys(pending, {'generation', 'part', 'details', 'references'});
+      final generation = _text(pending['generation']);
+      final part = _text(pending['part']);
+      if (generation.trim().isEmpty || part.trim().isEmpty) {
+        throw const FormatException('Invalid pending promotion identity');
+      }
+      final details =
+          _parseInput('part-new', pending['details']) as NewPartInput;
+      final references = _strings(pending['references']);
+      final expected = {
+        if (details.categoryId != null) 'categories/${details.categoryId}',
+        if (details.styleId != null) 'styles/${details.styleId}',
+        if (details.typeId != null) 'types/${details.typeId}',
+      };
+      if (references.length != expected.length ||
+          !expected.every(references.containsKey) ||
+          references.values.any(
+            (value) => !RegExp(r'^[a-f0-9]{64}$').hasMatch(value),
+          )) {
+        throw const FormatException('Invalid promotion references');
+      }
+      promotion = _PendingPromotion(
+        generation: generation,
+        partId: part,
+        details: details,
+        references: references,
+      );
+    }
+    return _JobLineDraftInput(line, promotion);
+  }
   _keys(m, {
     'custom',
     'part',
@@ -371,17 +468,19 @@ Object _parseInput(String kind, Object? value) {
   if (values is! List || values.length > _splitLimit) {
     throw const FormatException('Invalid unfinished supplier splits');
   }
-  return JobLineInput(
-    useCustom: _boolean(m['custom']),
-    partId: _nullable(m['part']),
-    brandVersionId: _nullable(m['brandVersion']),
-    customNameText: _text(m['name']),
-    neededText: _text(m['needed']),
-    pullText: _text(m['pull']),
-    customNotes: _nullable(m['customNotes']),
-    uom: _nullable(m['uom']),
-    notes: _nullable(m['notes']),
-    splits: [for (final v in values) _parseSplit(v)],
+  return _JobLineDraftInput(
+    JobLineInput(
+      useCustom: _boolean(m['custom']),
+      partId: _nullable(m['part']),
+      brandVersionId: _nullable(m['brandVersion']),
+      customNameText: _text(m['name']),
+      neededText: _text(m['needed']),
+      pullText: _text(m['pull']),
+      customNotes: _nullable(m['customNotes']),
+      uom: _nullable(m['uom']),
+      notes: _nullable(m['notes']),
+      splits: [for (final v in values) _parseSplit(v)],
+    ),
   );
 }
 
@@ -778,6 +877,7 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _references(Object input) async {
+    if (input is _JobLineDraftInput) return _references(input.line);
     final ids = <String, String>{};
     void add(String table, String? id) {
       if (id != null) ids['$table/$id'] = table;
@@ -884,7 +984,8 @@ class EditDrafts {
         }
       }
     }
-    if (record.input case JobLineInput j) {
+    if (record.input is JobLineInput || record.input is _JobLineDraftInput) {
+      final j = _lineInput(record.input);
       if (j.brandVersionId != null) {
         final brand = await _row('brand_versions', j.brandVersionId!);
         if (brand != null && brand['part_id'] != j.partId) {
@@ -1597,6 +1698,215 @@ class EditDrafts {
           active: p.active,
         );
       }, (r) => PartEditSession._(this, r));
+  Future<JobLinePromoted> _savedPromotion(
+    String raw,
+    Map<String, String> wanted,
+  ) async {
+    if (_closed || _quiescing) throw StateError('Job-line storage is changing');
+    final control = _control(raw);
+    if (control['phase'] != 'committed' ||
+        !_text(control['command']).startsWith('line-promote-v2/')) {
+      throw const FormatException(
+        'Unsupported promotion receipt. The saved evidence is preserved.',
+      );
+    }
+    final result = _strings(control['result']);
+    final target = _strings(jsonDecode(result['target']!));
+    _lineTarget(target);
+    final sourceSlot = _slot(target);
+    if (result['slot'] != sourceSlot ||
+        sourceSlot != _slot(wanted) ||
+        result['token'] != control['token'] ||
+        result['line'] != target['reserved'] ||
+        !['kind', 'job', 'line'].every((key) => target[key] == wanted[key])) {
+      throw const FormatException('Promotion receipt target mismatch');
+    }
+    final input =
+        _parseInput('line', jsonDecode(result['input']!)) as _JobLineDraftInput;
+    final pending = input.promotion;
+    if (pending == null ||
+        !input.line.useCustom ||
+        pending.generation != result['generation'] ||
+        pending.partId != result['part'] ||
+        pending.details.nameText.trim() != result['name'] ||
+        pending.details.categoryId != result['category'] ||
+        pending.details.styleId != result['style'] ||
+        pending.details.typeId != result['type']) {
+      throw const FormatException('Promotion receipt input mismatch');
+    }
+    final proof = _DraftRecord(
+      target: target,
+      origin: _parseOrigin(control['origin']),
+      base: {},
+      references: {},
+      token: result['token']!,
+      input: input,
+    );
+    if (control['command'] != _promotionCommand(proof)) {
+      throw const FormatException('Promotion command does not match its input');
+    }
+    final continuation = _parseInput(
+      'line',
+      jsonDecode(result['continuation']!),
+    ) as _JobLineDraftInput;
+    final original = input.line;
+    final expected = _JobLineDraftInput(
+      JobLineInput(
+        useCustom: false,
+        partId: result['part'],
+        brandVersionId: null,
+        customNameText: '',
+        neededText: original.neededText,
+        pullText: original.pullText,
+        customNotes: original.customNotes,
+        uom: original.uom,
+        notes: original.notes,
+        splits: original.splits,
+      ),
+    );
+    if (_digest(_inputJson(continuation)) != _digest(_inputJson(expected)) ||
+        result['continuationToken']!.trim().isEmpty ||
+        result['continuationToken'] == result['token']) {
+      throw const FormatException('Invalid promotion continuation');
+    }
+    final base = _strings(jsonDecode(result['base']!));
+    if (base.length != 3 ||
+        !{'job', 'line', 'splits'}.every(base.containsKey) ||
+        base.values.any(
+          (value) => !RegExp(r'^[a-f0-9]{64}$').hasMatch(value),
+        )) {
+      throw const FormatException('Invalid promotion continuation base');
+    }
+    DateTime timestamp(String field) {
+      final value = result[field]!;
+      final parsed = DateTime.tryParse(value);
+      if (parsed == null || parsed.toUtc().toIso8601String() != value) {
+        throw const FormatException('Invalid promotion creation identity');
+      }
+      return parsed;
+    }
+
+    final created = timestamp('createdAt');
+    final lineCreated = timestamp('lineCreatedAt');
+    final destination = {
+      'kind': 'line',
+      'job': target['job']!,
+      'line': result['line']!,
+      'reserved': result['line']!,
+    };
+    final destinationSlot = _slot(destination);
+    final sourceInput = '$editDraftPrefix$sourceSlot/input';
+    final sourceControl = '$editDraftPrefix$sourceSlot/control';
+    final destinationInput = '$editDraftPrefix$destinationSlot/input';
+    final destinationControl = '$editDraftPrefix$destinationSlot/control';
+    Future<void> validate() async {
+      if (_digest(_origin()) != _digest(control['origin']) ||
+          result['device'] != _deviceId) {
+        throw StateError('Saved promotion belongs to another installation');
+      }
+      final part = await (_db.select(
+        _db.parts,
+      )..where((table) => table.id.equals(result['part']!))).getSingleOrNull();
+      final line = await (_db.select(
+        _db.jobLines,
+      )..where((table) => table.id.equals(result['line']!))).getSingleOrNull();
+      if (part == null ||
+          part.deletedAt != null ||
+          part.originDeviceId != result['device'] ||
+          part.createdAt.toUtc() != created ||
+          line == null ||
+          line.deletedAt != null ||
+          line.jobId != target['job'] ||
+          line.originDeviceId != result['lineDevice'] ||
+          line.createdAt.toUtc() != lineCreated) {
+        throw StateError(
+          'The promoted Part or original Job line is unavailable',
+        );
+      }
+    }
+
+    await validate();
+    return JobLinePromoted._(
+      partId: result['part']!,
+      lineId: result['line']!,
+      name: result['name']!,
+      categoryId: result['category']!,
+      styleId: result['style']!,
+      typeId: result['type']!,
+      continuation: continuation.line,
+      acknowledgeAndContinue: () => _queue(() async {
+        if (_closed || _quiescing) {
+          throw StateError('Job-line storage is changing');
+        }
+        JobLineEditSession? next;
+        await _db.transaction(() async {
+          await validate();
+          final currentSource = await _read(sourceControl);
+          if (currentSource != raw) {
+            final active = _active[destinationSlot];
+            final currentDestination = await _read(destinationControl);
+            final editing = currentDestination == null
+                ? null
+                : _control(currentDestination);
+            if (active is JobLineEditSession &&
+                active._live &&
+                !active._sealed &&
+                active._record.token == result['continuationToken'] &&
+                editing?['phase'] == 'editing' &&
+                editing?['token'] == result['continuationToken'] &&
+                await _read(destinationInput) == active._persistedInput &&
+                (sourceSlot == destinationSlot ||
+                    (currentSource == null &&
+                        await _read(sourceInput) == null))) {
+              next = active;
+              return;
+            }
+            throw StateError('A newer edit replaced this promotion receipt');
+          }
+          if (await _read(sourceInput) != null ||
+              _active.containsKey(destinationSlot)) {
+            throw StateError(
+              'Another unfinished edit blocks promotion continuation',
+            );
+          }
+          if (sourceSlot != destinationSlot &&
+              (await _read(destinationInput) != null ||
+                  await _read(destinationControl) != null)) {
+            throw StateError(
+              'Another unfinished line blocks promotion continuation',
+            );
+          }
+          if (_digest(await _base(destination)) != _digest(base)) {
+            throw StateError(
+              'The saved Job line changed. Its promotion receipt is preserved.',
+            );
+          }
+          final record = _DraftRecord(
+            target: destination,
+            origin: _parseOrigin(control['origin']),
+            base: base,
+            references: await _references(continuation),
+            token: result['continuationToken']!,
+            input: continuation,
+            sequence: 1,
+          );
+          final encoded = _encoded(record.toJson());
+          await _db.settingsDao.setSetting(destinationInput, encoded);
+          await _set(destinationControl, {
+            'phase': 'editing',
+            'token': record.token,
+          });
+          if (sourceSlot != destinationSlot) await _delete(sourceControl);
+          next = JobLineEditSession._(this, record)
+            .._admitted = true
+            .._persistedInput = encoded;
+        });
+        _active[destinationSlot] = next!;
+        return next!;
+      }),
+    );
+  }
+
   Future<EditOpening<JobLineEditSession>> openJobLine(
     String jobId, {
     String? lineId,
@@ -1617,35 +1927,47 @@ class EditDrafts {
           : await _db.jobsDao.orderSplitsForLine(line.id);
       String qty(double n) =>
           n == n.roundToDouble() ? n.toInt().toString() : n.toString();
-      return JobLineInput(
-        useCustom: line != null && line.partId == null,
-        partId: line?.partId,
-        brandVersionId: line?.brandVersionId,
-        customNameText: line?.customName ?? '',
-        neededText: line == null ? '1' : qty(line.neededQty),
-        pullText: line == null ? '0' : qty(line.shopPullQty),
-        customNotes: line?.customNotes,
-        uom: line?.uom,
-        notes: line?.notes,
-        splits: splits.isEmpty
-            ? const [SplitInput(supplierId: null, quantityText: '')]
-            : [
-                for (final s in splits)
-                  SplitInput(
-                    supplierId: s.supplierId,
-                    quantityText: qty(s.quantity),
-                  ),
-              ],
+      return _JobLineDraftInput(
+        JobLineInput(
+          useCustom: line != null && line.partId == null,
+          partId: line?.partId,
+          brandVersionId: line?.brandVersionId,
+          customNameText: line?.customName ?? '',
+          neededText: line == null ? '1' : qty(line.neededQty),
+          pullText: line == null ? '0' : qty(line.shopPullQty),
+          customNotes: line?.customNotes,
+          uom: line?.uom,
+          notes: line?.notes,
+          splits: splits.isEmpty
+              ? const [SplitInput(supplierId: null, quantityText: '')]
+              : [
+                  for (final s in splits)
+                    SplitInput(
+                      supplierId: s.supplierId,
+                      quantityText: qty(s.quantity),
+                    ),
+                ],
+        ),
       );
     },
     (r) => JobLineEditSession._(this, r),
+    onCommitted: (raw) async {
+      final command = _text(_control(raw)['command']);
+      if (command == 'line-save' || command == 'line-remove') return null;
+      return _savedPromotion(raw, {
+        'kind': 'line',
+        'job': jobId,
+        'line': ?lineId,
+        'reserved': lineId ?? 'unused',
+      });
+    },
   );
 
   Future<EditOpening<S>> _open<S extends _EditSession>(
     Map<String, String> target,
     Future<Object> Function() initial,
     S Function(_DraftRecord) create, {
-    Future<EditOpening<S>> Function(String raw)? onCommitted,
+    Future<EditOpening<S>?> Function(String raw)? onCommitted,
   }) => _queue(() async {
     final slot = _slot(target);
     final inputKey = '$editDraftPrefix$slot/input';
@@ -1728,7 +2050,10 @@ class EditDrafts {
         if (control['phase'] != 'committed') {
           throw const FormatException('Unfinished edit input is missing');
         }
-        if (onCommitted != null) return await onCommitted(rawControl);
+        if (onCommitted != null) {
+          final opening = await onCommitted(rawControl);
+          if (opening != null) return opening;
+        }
       } catch (e) {
         return BlockedEdit<S>(
           reason: e.toString(),
@@ -1761,7 +2086,7 @@ class EditDrafts {
         }
         return record;
       });
-      final session = create(record);
+      final session = create(record).._admissionControl = rawControl;
       if (originError != null) {
         session._status(EditPhase.recoveryBlocked, error: originError);
       }

@@ -499,10 +499,11 @@ void main() {
       expect(await jobs.orderSplitsForLine(line), originalSplits);
       final parentKey =
           'local_edit_v1/job-line/${Uri.encodeComponent(job)}/${Uri.encodeComponent(line)}/input';
-      final input =
+      final draftInput =
           (jsonDecode((await db.settingsDao.getSetting(parentKey))!)
                   as Map)['input']
               as Map;
+      final input = draftInput['line'] as Map;
       expect(
         ((input['splits'] as List).single as Map)['supplier'],
         supplier.id,
@@ -623,10 +624,11 @@ void main() {
       expect(await jobs.orderSplitsForLine(line), originalSplits);
       final parentKey =
           'local_edit_v1/job-line/${Uri.encodeComponent(job)}/${Uri.encodeComponent(line)}/input';
-      final input =
+      final draftInput =
           (jsonDecode((await db.settingsDao.getSetting(parentKey))!)
                   as Map)['input']
               as Map;
+      final input = draftInput['line'] as Map;
       expect(
         ((input['splits'] as List).single as Map)['supplier'],
         supplier.id,

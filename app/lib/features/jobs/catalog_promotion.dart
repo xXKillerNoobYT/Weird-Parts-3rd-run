@@ -18,6 +18,7 @@ class CatalogPromotion {
     required String jobId,
     String? lineId,
     String? reservedNewLineId,
+    String? reservedPartId,
     required String name,
     required String categoryId,
     required String styleId,
@@ -36,7 +37,15 @@ class CatalogPromotion {
       if (lineId != null && (line == null || line.jobId != jobId)) {
         throw StateError('Job line no longer belongs to this job');
       }
+      if (reservedPartId != null &&
+          await (_db.select(_db.parts)
+                    ..where((row) => row.id.equals(reservedPartId)))
+                  .getSingleOrNull() !=
+              null) {
+        throw StateError('Reserved Part ID is already in use');
+      }
       final partId = await _catalog.createGeneralPart(
+        reservedId: reservedPartId,
         name: name,
         categoryId: categoryId,
         styleId: styleId,

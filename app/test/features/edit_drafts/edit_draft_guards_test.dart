@@ -7,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
-import 'package:wired_parts/features/catalog/part_details_dialog.dart';
 import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/company/company_bootstrap.dart';
@@ -300,18 +299,22 @@ void main() {
     final j = await line();
     j.replace(input());
     await j.flush();
-    const details = PartDetails(
-      name: 'Promoted outlet',
-      categoryId: 'c',
-      styleId: 's',
-      typeId: 't',
+    final promotion = await j.openPromotion();
+    promotion.replace(
+      const NewPartInput(
+        nameText: 'Promoted outlet',
+        categoryId: 'c',
+        styleId: 's',
+        typeId: 't',
+      ),
     );
-    final result = await j.promote(details);
-    expect((await j.promote(details)).lineId, result.lineId);
+    final result = await promotion.promote();
+    expect((await promotion.promote()).lineId, result.lineId);
+    final continuation = await result.acknowledgeAndContinue();
     expect((await db.select(db.jobLines).get()).length, 1);
     expect((await db.select(db.parts).get()).length, 2);
-    expect(result.session.initial.partId, result.partId);
-    result.session.replace(
+    expect(continuation.initial.partId, result.partId);
+    continuation.replace(
       JobLineInput(
         useCustom: false,
         partId: result.partId,
@@ -325,8 +328,8 @@ void main() {
         splits: const [],
       ),
     );
-    await result.session.flush();
-    await result.session.save();
+    await continuation.flush();
+    await continuation.save();
     expect(
       (await JobsRepository(db, device).getJobLine(result.lineId))!.neededQty,
       12,

@@ -11,6 +11,7 @@ import 'package:wired_parts/features/catalog/part_detail_page.dart';
 import 'package:wired_parts/features/catalog/part_details_dialog.dart';
 import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
 import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
+import 'package:wired_parts/features/jobs/jobs_repository.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 import '../warehouse/warehouse_test_support.dart';
@@ -415,6 +416,28 @@ void main() {
         deviceId: fixture.device,
       );
       addTearDown(fixture.db.close);
+      final job = await JobsRepository(
+        fixture.db,
+        fixture.device,
+      ).createJob('Taxonomy promotion');
+      final parent = (await edits.openJobLine(
+        job,
+      ) as FreshEdit<JobLineEditSession>).session;
+      parent.replace(
+        JobLineInput(
+          useCustom: true,
+          partId: null,
+          brandVersionId: null,
+          customNameText: 'Parent',
+          neededText: '09.50',
+          pullText: '02.0',
+          customNotes: null,
+          uom: null,
+          notes: null,
+          splits: const [],
+        ),
+      );
+      final promotion = await parent.openPromotion();
       await tester.pumpWidget(
         AppScope(
           db: fixture.db,
@@ -424,7 +447,8 @@ void main() {
           wipeLocalData: () async {},
           restoreFromBackup: (_, _) async {},
           child: MaterialApp(
-            home: PartDetailsDialog(
+            home: PartDetailsDialog.promotion(
+              promotion: promotion,
               maintenance: MaintenanceRepository(
                 fixture.db,
                 fixture.pin,
@@ -474,6 +498,19 @@ void main() {
           rawPartName,
         );
       }
+      expect(promotion.initial.nameText, rawPartName);
+      expect(parent.initial.neededText, '09.50');
+      await promotion.flush();
+      final parentRows = await fixture.db
+          .customSelect(
+            "SELECT value FROM app_settings WHERE key LIKE 'local_edit_v1/job-line-new/%/input'",
+          )
+          .get();
+      final persisted =
+          jsonDecode(parentRows.single.read<String>('value')) as Map;
+      final nested = (persisted['input'] as Map)['promotion'] as Map;
+      expect((nested['details'] as Map)['name'], rawPartName);
+      expect((nested['details'] as Map)['type'], promotion.initial.typeId);
       expect(
         find.text('Variant saved: Part dialog variant').hitTestable(),
         findsOneWidget,
@@ -562,6 +599,109 @@ void main() {
         ),
         hasLength(1),
       );
+    },
+  );
+  testWidgets(
+    'failed promotion taxonomy adoption preserves its independent completion until durable retry',
+    (tester) async {
+      final fixture = await WarehouseFixture.create();
+      addTearDown(fixture.db.close);
+      final edits = EditDrafts(
+        db: fixture.db,
+        pin: fixture.pin,
+        deviceId: fixture.device,
+      );
+      final job = await JobsRepository(
+        fixture.db,
+        fixture.device,
+      ).createJob('Taxonomy retry');
+      final parent = (await edits.openJobLine(
+        job,
+      ) as FreshEdit<JobLineEditSession>).session;
+      parent.replace(
+        JobLineInput(
+          useCustom: true,
+          partId: null,
+          brandVersionId: null,
+          customNameText: 'Parent',
+          neededText: '09.50',
+          pullText: '02.0',
+          customNotes: null,
+          uom: null,
+          notes: null,
+          splits: const [],
+        ),
+      );
+      final promotion = await parent.openPromotion();
+      await tester.pumpWidget(
+        AppScope(
+          db: fixture.db,
+          pin: fixture.pin,
+          deviceId: fixture.device,
+          edits: edits,
+          wipeLocalData: () async {},
+          restoreFromBackup: (_, _) async {},
+          child: MaterialApp(
+            home: PartDetailsDialog.promotion(
+              promotion: promotion,
+              maintenance: MaintenanceRepository(
+                fixture.db,
+                fixture.pin,
+                fixture.device,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add Category'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is TextField && widget.decoration?.labelText == 'Name',
+        ),
+        'Independent saved category',
+      );
+      await fixture.db.customStatement(
+        "CREATE TRIGGER reject_adoption BEFORE UPDATE ON app_settings WHEN NEW.key LIKE 'local_edit_v1/job-line%/input' BEGIN SELECT RAISE(ABORT, 'adoption failure'); END",
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+      await tester.pumpAndSettle();
+      final saved = (await fixture.db.taxonomyDao.listCategories()).singleWhere(
+        (row) => row.name == 'Independent saved category',
+      );
+      const key = 'local_edit_v1/catalog-name-new/category/control';
+      final receipt = await fixture.db.settingsDao.getSetting(key);
+      expect(receipt, isNotNull);
+      expect((jsonDecode(receipt!) as Map)['phase'], 'committed');
+      expect(find.textContaining('Refresh pending'), findsOneWidget);
+      expect(parent.initial.neededText, '09.50');
+      await fixture.db.customStatement('DROP TRIGGER reject_adoption');
+      await tester.ensureVisible(find.text('Add Category'));
+      await tester.tap(find.text('Add Category'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'Done'));
+      await tester.pumpAndSettle();
+      expect(promotion.initial.categoryId, saved.id);
+      expect(await fixture.db.settingsDao.getSetting(key), isNull);
+      final parentRows = await fixture.db
+          .customSelect(
+            "SELECT value FROM app_settings WHERE key LIKE 'local_edit_v1/job-line-new/%/input'",
+          )
+          .get();
+      final raw = jsonDecode(parentRows.single.read<String>('value')) as Map;
+      final nested = (raw['input'] as Map)['promotion'] as Map;
+      expect((nested['details'] as Map)['category'], saved.id);
+      await promotion.cancel();
+      expect(
+        (await fixture.db.taxonomyDao.listCategories()).any(
+          (row) => row.id == saved.id,
+        ),
+        true,
+      );
+      expect(parent.initial.neededText, '09.50');
+      expect(tester.takeException(), isNull);
     },
   );
 }

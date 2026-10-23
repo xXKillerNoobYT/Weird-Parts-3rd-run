@@ -14,11 +14,13 @@ abstract class _EditSession {
   final ValueNotifier<EditStatus> _statusValue;
   ValueListenable<EditStatus> get status => _statusValue;
   bool _admitted = false;
+  String? _admissionControl;
   String? _persistedInput;
   bool _sealed = false;
   Object? _lastError;
   String? _operation;
   Map<String, String>? _committed;
+  bool get _exactInput => false;
   bool get _live => !_owner._closed && _owner._active[_record.slot] == this;
   void _status(EditPhase phase, {int? durableSequence, Object? error}) {
     _statusValue.value = EditStatus(
@@ -55,10 +57,18 @@ abstract class _EditSession {
     if (_record.sequence == 0) return;
     final sequence = _record.sequence;
     final input = _record.input;
-    if (input case JobLineInput j when j.splits.length > _splitLimit) {
+    final line = input is _JobLineDraftInput ? input.line : input;
+    if (line case JobLineInput j when j.splits.length > _splitLimit) {
       throw StateError(
         'There are too many unfinished supplier splits. Your input remains in the form.',
       );
+    }
+    if (input case _JobLineDraftInput(promotion: final pending?)) {
+      final current = await _owner._references(pending.details);
+      pending.references.removeWhere((key, _) => !current.containsKey(key));
+      for (final entry in current.entries) {
+        pending.references.putIfAbsent(entry.key, () => entry.value);
+      }
     }
     final refs = await _owner._references(input);
     _record.references.removeWhere((key, _) => !refs.containsKey(key));
@@ -86,25 +96,32 @@ abstract class _EditSession {
         if (existing != null) {
           throw StateError('Another unfinished edit already exists');
         }
+        if (_exactInput &&
+            await _owner._read(_record.controlKey) != _admissionControl) {
+          throw StateError('This unfinished editing session was replaced');
+        }
         await _owner._set(_record.controlKey, {
           'phase': 'editing',
           'token': _record.token,
         });
         await _owner._db.settingsDao.setSetting(_record.inputKey, encoded);
       } else {
-        final control = _map(
-          jsonDecode(await _owner._read(_record.controlKey) ?? 'null'),
-        );
+        final rawControl = await _owner._read(_record.controlKey) ?? 'null';
+        final control = _exactInput
+            ? _control(rawControl)
+            : _map(jsonDecode(rawControl));
         if (control['phase'] != 'editing' ||
             control['token'] != _record.token) {
           throw StateError('This unfinished editing session was replaced');
         }
-        if ((_record.input is NewPartInput || _record.input is VarianceInput) &&
+        if ((_record.input is NewPartInput ||
+                _record.input is VarianceInput ||
+                _exactInput) &&
             await _owner._read(_record.inputKey) != _persistedInput) {
           throw StateError(
             _record.input is NewPartInput
                 ? 'This unfinished Part input was replaced'
-                : 'This unfinished variance input was replaced',
+                : 'This unfinished input was replaced',
           );
         }
         final changed = await _owner._db.customUpdate(
@@ -155,12 +172,17 @@ abstract class _EditSession {
       try {
         if (_admitted) {
           await _owner._db.transaction(() async {
-            final control = _map(
-              jsonDecode(await _owner._read(_record.controlKey) ?? 'null'),
-            );
+            final rawControl = await _owner._read(_record.controlKey) ?? 'null';
+            final control = _exactInput
+                ? _control(rawControl)
+                : _map(jsonDecode(rawControl));
             if (control['phase'] != 'editing' ||
                 control['token'] != _record.token) {
               throw StateError('Unfinished edits changed before Discard');
+            }
+            if (_exactInput &&
+                await _owner._read(_record.inputKey) != _persistedInput) {
+              throw StateError('Unfinished input changed before Discard');
             }
             await _owner._delete(_record.inputKey);
             await _owner._delete(_record.controlKey);
@@ -211,12 +233,17 @@ abstract class _EditSession {
         return legacyBusinessWrite(_owner._db, () async {
           await _owner._check(_record);
           await _owner._requireReferences(_record);
-          final control = _map(
-            jsonDecode(await _owner._read(_record.controlKey) ?? 'null'),
-          );
+          final rawControl = await _owner._read(_record.controlKey) ?? 'null';
+          final control = _exactInput
+              ? _control(rawControl)
+              : _map(jsonDecode(rawControl));
           if (control['phase'] != 'editing' ||
               control['token'] != _record.token) {
             throw StateError('Unfinished edit session changed before Save');
+          }
+          if (_exactInput &&
+              await _owner._read(_record.inputKey) != _persistedInput) {
+            throw StateError('Unfinished input changed before Save');
           }
           final result = await mutate();
           await _owner._delete(_record.inputKey);
@@ -227,6 +254,12 @@ abstract class _EditSession {
             'result': result,
             'origin': _record.origin,
           });
+          if (operation.startsWith('line-promote-v2/')) {
+            await _owner._savedPromotion(
+              (await _owner._read(_record.controlKey))!,
+              _record.target,
+            );
+          }
           return result;
         });
       });
@@ -765,8 +798,136 @@ class _PhotoCompanion implements PartWriteCompanion {
 
 class JobLineEditSession extends _EditSession {
   JobLineEditSession._(super.owner, super.record);
-  JobLineInput get initial => _record.input as JobLineInput;
-  void replace(JobLineInput input) => _replace(input);
+  JobLineInput get initial => _lineInput(_record.input);
+  _PendingPromotion? get _promotion =>
+      (_record.input as _JobLineDraftInput).promotion;
+  bool _promotionCas = false;
+  @override
+  bool get _exactInput => _promotionCas || _promotion != null;
+  void replace(JobLineInput input) =>
+      _replace(_JobLineDraftInput(input, _promotion));
+
+  _PendingPromotion _pending(String generation) {
+    final pending = _promotion;
+    if (pending == null || pending.generation != generation) {
+      throw StateError('This promotion was replaced or canceled');
+    }
+    return pending;
+  }
+
+  void _requirePromotionEditing() {
+    if (!_live || _sealed || _owner._quiescing) {
+      throw StateError('This editor is no longer active');
+    }
+  }
+
+  Future<JobLinePromotion> openPromotion() async {
+    _requirePromotionEditing();
+    if (!initial.useCustom) {
+      throw StateError('Promotion requires a Custom line');
+    }
+    _promotionCas = true;
+    if (_promotion == null) {
+      _replace(
+        _JobLineDraftInput(
+          initial,
+          _PendingPromotion(
+            generation: newId(),
+            partId: newId(),
+            details: NewPartInput(
+              nameText: initial.customNameText.trim(),
+              categoryId: null,
+              styleId: null,
+              typeId: null,
+            ),
+            references: {},
+          ),
+        ),
+      );
+    }
+    await flush();
+    return JobLinePromotion._(this, _promotion!.generation);
+  }
+
+  void _replacePromotion(String generation, NewPartInput input) {
+    _requirePromotionEditing();
+    if (!initial.useCustom) {
+      throw StateError('Promotion requires a Custom line');
+    }
+    final pending = _pending(generation);
+    _replace(
+      _JobLineDraftInput(
+        initial,
+        _PendingPromotion(
+          generation: generation,
+          partId: pending.partId,
+          details: input,
+          references: Map.of(pending.references),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _flushPromotion(String generation) async {
+    _requirePromotionEditing();
+    _pending(generation);
+    await flush();
+  }
+
+  Future<void> _cancelPromotion(String generation) async {
+    _requirePromotionEditing();
+    _pending(generation);
+    _sealed = true;
+    try {
+      await _owner._queue(() async {
+        final pending = _pending(generation);
+        final references = await _owner._references(initial);
+        final next = _DraftRecord(
+          target: _record.target,
+          origin: _record.origin,
+          base: _record.base,
+          references: {
+            for (final entry in references.entries)
+              entry.key: _record.references[entry.key] ?? entry.value,
+          },
+          token: _record.token,
+          input: _JobLineDraftInput(initial),
+          sequence: _record.sequence + 1,
+        );
+        final encoded = _encoded(next.toJson());
+        await _owner._db.transaction(() async {
+          if (!_live || _owner._quiescing || _pending(generation) != pending) {
+            throw StateError('This promotion is no longer active');
+          }
+          final control = _control(
+            await _owner._read(_record.controlKey) ?? 'null',
+          );
+          if (control['phase'] != 'editing' ||
+              control['token'] != _record.token ||
+              await _owner._read(_record.inputKey) != _persistedInput) {
+            throw StateError('Unfinished promotion changed before Cancel');
+          }
+          await _owner._check(_record);
+          await _owner._db.settingsDao.setSetting(_record.inputKey, encoded);
+        });
+        _record.input = next.input;
+        _record.sequence = next.sequence;
+        _record.references
+          ..clear()
+          ..addAll(next.references);
+        _persistedInput = encoded;
+        _lastError = null;
+        _promotionCas = true;
+      });
+      _sealed = false;
+      _status(EditPhase.durable, durableSequence: _record.sequence);
+    } catch (error) {
+      _sealed = false;
+      _status(EditPhase.storageFailed, error: error);
+      rethrow;
+    }
+  }
+
   ({double needed, double pull, List<({String supplierId, double qty})> splits})
   _quantities() {
     double number(String raw, String label, {bool positive = false}) {
@@ -848,47 +1009,111 @@ class JobLineEditSession extends _EditSession {
     return result['line']!;
   }
 
-  JobLinePromoted? _promoted;
-  Future<JobLinePromoted> promote(PartDetails details) async {
-    final result = await _settle(
-      'line-promote/${_digest([details.name, details.categoryId, details.styleId, details.typeId])}',
-      () async {
-        final q = _quantities();
-        final promoted =
-            await CatalogPromotion(
-              _owner._db,
-              _owner._pin,
-              _owner._deviceId,
-            ).promote(
-              jobId: _record.target['job']!,
-              lineId: _record.target['line'],
-              reservedNewLineId: _record.target.containsKey('line')
-                  ? null
-                  : _record.target['reserved'],
-              name: details.name,
-              categoryId: details.categoryId,
-              styleId: details.styleId,
-              typeId: details.typeId,
-              neededQty: q.needed,
-              shopPullQty: q.pull,
-              splits: q.splits,
-            );
-        return {'part': promoted.partId, 'line': promoted.lineId};
-      },
-    );
-    if (_promoted case final saved?) return saved;
-    final next = await _owner.openJobLine(
-      _record.target['job']!,
-      lineId: result['line']!,
-    );
-    if (next is! FreshEdit<JobLineEditSession>) {
-      throw StateError('Part promoted. Reopen the line to continue editing.');
+  Future<JobLinePromoted> _promote(String generation) async {
+    if (_committed == null) await _flushPromotion(generation);
+    final pending = _pending(generation);
+    if (!initial.useCustom) {
+      throw StateError('Promotion requires a Custom line');
     }
-    return _promoted = JobLinePromoted(
-      partId: result['part']!,
-      lineId: result['line']!,
-      session: next.session,
-    );
+    final command = _promotionCommand(_record);
+    final result = await _settle(command, () async {
+      final details = pending.details;
+      if (details.categoryId == null ||
+          details.styleId == null ||
+          details.typeId == null) {
+        throw StateError('Category, Type, and Variant are required');
+      }
+      final child = _DraftRecord(
+        target: _record.target,
+        origin: _record.origin,
+        base: _record.base,
+        references: pending.references,
+        token: _record.token,
+        input: details,
+      );
+      final current = await _owner._references(details);
+      if (current.length != pending.references.length ||
+          current.entries.any(
+            (entry) => pending.references[entry.key] != entry.value,
+          )) {
+        throw StateError(
+          'Promotion hierarchy changed. Your selection is preserved.',
+        );
+      }
+      await _owner._requireReferences(child);
+      final q = _quantities();
+      final promoted =
+          await CatalogPromotion(
+            _owner._db,
+            _owner._pin,
+            _owner._deviceId,
+          ).promote(
+            jobId: _record.target['job']!,
+            lineId: _record.target['line'],
+            reservedNewLineId: _record.target.containsKey('line')
+                ? null
+                : _record.target['reserved'],
+            reservedPartId: pending.partId,
+            name: details.nameText,
+            categoryId: details.categoryId!,
+            styleId: details.styleId!,
+            typeId: details.typeId!,
+            neededQty: q.needed,
+            shopPullQty: q.pull,
+            splits: q.splits,
+          );
+      final part = (await _owner._db.partsDao.getPart(promoted.partId))!;
+      final line = (await _owner._db.jobsDao.getJobLine(promoted.lineId))!;
+      final p = initial;
+      final continuation = JobLineInput(
+        useCustom: false,
+        partId: part.id,
+        brandVersionId: null,
+        customNameText: '',
+        neededText: p.neededText,
+        pullText: p.pullText,
+        customNotes: p.customNotes,
+        uom: p.uom,
+        notes: p.notes,
+        splits: p.splits,
+      );
+      final target = {
+        'kind': 'line',
+        'job': _record.target['job']!,
+        'line': line.id,
+        'reserved': line.id,
+      };
+      return {
+        'slot': _record.slot,
+        'target': jsonEncode(_record.target),
+        'token': _record.token,
+        'generation': generation,
+        'part': part.id,
+        'line': line.id,
+        'device': part.originDeviceId,
+        'createdAt': part.createdAt.toUtc().toIso8601String(),
+        'lineDevice': line.originDeviceId,
+        'lineCreatedAt': line.createdAt.toUtc().toIso8601String(),
+        'name': part.name,
+        'category': part.categoryId!,
+        'style': part.styleId!,
+        'type': part.typeId!,
+        'input': jsonEncode(_inputJson(_record.input)),
+        'continuation': jsonEncode(
+          _inputJson(_JobLineDraftInput(continuation)),
+        ),
+        'base': jsonEncode(await _owner._base(target)),
+        'continuationToken': newId(),
+      };
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) throw StateError('Promotion receipt is unavailable');
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer Job-line edit replaced this promotion receipt');
+    }
+    return _owner._savedPromotion(raw, _record.target);
   }
 
   Future<void> remove() async {
