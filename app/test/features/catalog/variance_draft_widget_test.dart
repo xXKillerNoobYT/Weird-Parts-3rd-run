@@ -6,6 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
@@ -245,7 +246,10 @@ void main() {
                 .where(
                   (image) =>
                       image.image is FileImage &&
-                      (image.image as FileImage).file.path == photo.path,
+                      p.equals(
+                        (image.image as FileImage).file.path,
+                        photo.path,
+                      ),
                 ),
             hasLength(1),
           );
