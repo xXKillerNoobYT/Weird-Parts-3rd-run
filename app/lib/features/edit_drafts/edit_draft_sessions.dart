@@ -257,6 +257,21 @@ class CatalogNameEditSession extends _EditSession {
         _owner._deviceId,
       );
       switch (kind) {
+        case CatalogNameKind.supplier:
+          if (isRename) throw StateError('Supplier rename is unsupported');
+          await repo.createSupplier(name, reservedId: recordId);
+          if (_record.target['listingVersion'] case final version?) {
+            await CatalogRepository(
+              _owner._db,
+              _owner._pin,
+              _owner._deviceId,
+            ).createSupplierListing(
+              brandVersionId: version,
+              supplierId: recordId,
+              sku: '',
+              reservedId: _record.target['listingReserved']!,
+            );
+          }
         case CatalogNameKind.brand:
           if (isRename) {
             await repo.renameBrand(recordId, name);
@@ -295,6 +310,13 @@ class CatalogNameEditSession extends _EditSession {
         kind,
         _catalogNameParent(kind, row),
       );
+      final listingContext = await _owner._supplierListingContext(
+        _record.target,
+      );
+      final listingId = _record.target['listingReserved'];
+      final listing = listingId == null
+          ? null
+          : await _owner._row('supplier_listings', listingId);
       return {
         'entity': kind.name,
         'id': recordId,
@@ -304,6 +326,11 @@ class CatalogNameEditSession extends _EditSession {
         'target': jsonEncode(_record.target),
         for (final entry in ancestors.entries)
           entry.key: _text(entry.value['id']),
+        if (listingId != null) ...{
+          'listing': listingId,
+          'listingRow': _digest(listing),
+          'listingPart': _text(listingContext['Part']!['id']),
+        },
       };
     });
     final raw = await _owner._read(_record.controlKey);

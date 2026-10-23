@@ -189,6 +189,12 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         _pendingRename = null;
         _editName.clear();
       });
+    } on CompanyJobNameContextRefusal catch (error) {
+      if (mounted) {
+        setState(() => _pendingRename = null);
+        await _load();
+        if (mounted) setState(() => _error = error.reason);
+      }
     } on CompanyJobNameCapacityRefusal catch (error) {
       if (mounted) {
         setState(() {

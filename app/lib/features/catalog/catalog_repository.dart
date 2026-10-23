@@ -290,10 +290,14 @@ class CatalogRepository {
     required String brandVersionId,
     required String supplierId,
     required String sku,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
+    if (reservedId != null && reservedId.trim().isEmpty) {
+      throw StateError('Reserved supplier listing ID must not be empty');
+    }
     return _db.partsDao.insertSupplierListing(
-      id: newId(),
+      id: reservedId ?? newId(),
       brandVersionId: brandVersionId,
       supplierId: supplierId,
       sku: sku,

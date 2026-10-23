@@ -65,6 +65,10 @@ const kCompanyJobNameHistoryCompanyLimit = 512;
 const _nameReceiptDomain = 'wiredpart.job.name.receipt@1:';
 const _incomingNameReceiptDomain = 'wiredpart.job.name.incoming.receipt@1:';
 
+final class CompanyJobNameContextRefusal extends JobLineRefusal {
+  const CompanyJobNameContextRefusal._(super.reason);
+}
+
 final class CompanyJobNameCapacityRefusal extends JobLineRefusal {
   const CompanyJobNameCapacityRefusal.history()
     : super('Name history capacity reached. No edit was saved.');
@@ -571,15 +575,19 @@ extension CompanyJobNameCommands on CompanyJobCommands {
             await _verifyNameRecord(existing);
             return existing.receiptBytes;
           }
-          await _validateMetadataLifecycle(
-            _db,
-            command.companyId,
-            command.shopId,
-            command.jobId,
-            command.creationDigest,
-            command.observedLifecycleHeads,
-            local: true,
-          );
+          try {
+            await _validateMetadataLifecycle(
+              _db,
+              command.companyId,
+              command.shopId,
+              command.jobId,
+              command.creationDigest,
+              command.observedLifecycleHeads,
+              local: true,
+            );
+          } on _JobMetadataLifecycleRefusal catch (error) {
+            throw CompanyJobNameContextRefusal._(error.reason);
+          }
           await _verifyNameDependencies(command);
           await _nameCapacity(command);
           final body = <String, Object?>{

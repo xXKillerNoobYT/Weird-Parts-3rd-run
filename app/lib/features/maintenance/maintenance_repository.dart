@@ -96,10 +96,10 @@ class MaintenanceRepository {
     );
   }
 
-  Future<String> createSupplier(String name) async {
+  Future<String> createSupplier(String name, {String? reservedId}) async {
     await _pin.requireUnlocked();
     return _db.taxonomyDao.insertSupplier(
-      id: newId(),
+      id: _recordId(reservedId),
       name: name,
       deviceId: _deviceId,
     );
