@@ -15,6 +15,7 @@ import 'package:uuid/uuid.dart';
 import '../../data/app_database.dart';
 import '../company/company_bootstrap.dart';
 import '../company/company_store_markers.dart';
+import '../company/src/join_proof_verifier.dart';
 import '../nearby/nearby_pairing.dart';
 import '../nearby/nearby_protocol.dart' show NearbyException;
 import '../nearby/nearby_controller.dart'

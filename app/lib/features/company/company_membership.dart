@@ -29,6 +29,12 @@ void _joinHash(Object? value) {
   }
 }
 
+final _joinProofVerifier = JoinProofVerifier();
+
+@visibleForTesting
+JoinProofStatistics get joinProofVerificationStatistics =>
+    _joinProofVerifier.statistics;
+
 Future<void> _joinVerify(
   Map<String, Object?> body,
   Object? signature,
@@ -41,17 +47,12 @@ Future<void> _joinVerify(
       key.length != 44) {
     throw const CompanyBootstrapRefusal('Invalid Join signature');
   }
-  final public = base64Decode(key);
-  final bytes = base64Decode(signature);
-  if (public.length != 32 ||
-      bytes.length != 64 ||
-      !await Ed25519().verify(
-        utf8.encode('$domain${_securityCanonical(body)}'),
-        signature: Signature(
-          bytes,
-          publicKey: SimplePublicKey(public, type: KeyPairType.ed25519),
-        ),
-      )) {
+  if (!await _joinProofVerifier.verify(
+    domain: domain,
+    canonicalBody: () => _securityCanonical(body),
+    publicKeyText: key,
+    signatureText: signature,
+  )) {
     throw const CompanyBootstrapRefusal('Join signature refused');
   }
 }
