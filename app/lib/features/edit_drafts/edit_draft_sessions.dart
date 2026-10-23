@@ -99,9 +99,13 @@ abstract class _EditSession {
             control['token'] != _record.token) {
           throw StateError('This unfinished editing session was replaced');
         }
-        if (_record.input is NewPartInput &&
+        if ((_record.input is NewPartInput || _record.input is VarianceInput) &&
             await _owner._read(_record.inputKey) != _persistedInput) {
-          throw StateError('This unfinished Part input was replaced');
+          throw StateError(
+            _record.input is NewPartInput
+                ? 'This unfinished Part input was replaced'
+                : 'This unfinished variance input was replaced',
+          );
         }
         final changed = await _owner._db.customUpdate(
           'UPDATE app_settings SET value = ? WHERE key = ?',
@@ -241,6 +245,55 @@ abstract class _EditSession {
       );
       rethrow;
     }
+  }
+}
+
+class NewVarianceEditSession extends _EditSession {
+  NewVarianceEditSession._(super.owner, super.record);
+  VarianceInput get initial => _record.input as VarianceInput;
+  String get partId => _record.target['part']!;
+  String get varianceId => _record.target['reserved']!;
+  void replace(VarianceInput input) => _replace(input);
+
+  Future<VarianceCreated> save() async {
+    final result = await _settle('variance-create', () async {
+      final brand = initial.brandId;
+      if (brand == null) throw StateError('Brand is required');
+      await CatalogRepository(
+        _owner._db,
+        _owner._pin,
+        _owner._deviceId,
+      ).createBrandVersion(
+        partId: partId,
+        brandId: brand,
+        reservedId: varianceId,
+        mpn: initial.mpnText,
+        varianceName: initial.varianceNameText,
+        isMain: initial.isMain,
+      );
+      final row = await (_owner._db.select(
+        _owner._db.brandVersions,
+      )..where((table) => table.id.equals(varianceId))).getSingle();
+      return {
+        'id': row.id,
+        'part': row.partId,
+        'brand': row.brandId,
+        'device': row.originDeviceId,
+        'createdAt': row.createdAt.toUtc().toIso8601String(),
+        'slot': _record.slot,
+        'target': jsonEncode(_record.target),
+      };
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) {
+      throw StateError('Created variance receipt is unavailable');
+    }
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer variance edit replaced this receipt');
+    }
+    return _owner._createdVariance(raw, _record.target);
   }
 }
 

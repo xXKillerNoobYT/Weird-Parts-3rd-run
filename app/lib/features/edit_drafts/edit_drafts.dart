@@ -126,6 +126,18 @@ final class CatalogNameInput {
   final String nameText;
 }
 
+final class VarianceInput {
+  const VarianceInput({
+    required this.brandId,
+    required this.varianceNameText,
+    required this.mpnText,
+    required this.isMain,
+  });
+  final String? brandId;
+  final String varianceNameText, mpnText;
+  final bool isMain;
+}
+
 final class SupplierListingInput {
   const SupplierListingInput({required this.supplierId, required this.skuText});
   final String? supplierId;
@@ -237,6 +249,28 @@ final class NewJobCreated extends EditOpening<NewJobEditSession> {
 
   final String id, name;
   final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
+}
+
+final class VarianceCreated extends EditOpening<NewVarianceEditSession> {
+  VarianceCreated._({
+    required this.id,
+    required this.partId,
+    required this.brandId,
+    required this.originDeviceId,
+    required this.createdAt,
+    required this._acknowledge,
+  });
+  final String id, partId, brandId, originDeviceId;
+  final DateTime createdAt;
+  final Future<void> Function() _acknowledge;
+  bool identifies(BrandVersion variance) =>
+      variance.id == id &&
+      variance.partId == partId &&
+      variance.brandId == brandId &&
+      variance.originDeviceId == originDeviceId &&
+      variance.createdAt.toUtc() == createdAt &&
+      variance.deletedAt == null;
   Future<void> acknowledge() => _acknowledge();
 }
 
