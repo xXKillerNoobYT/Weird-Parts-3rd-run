@@ -158,6 +158,46 @@ Future<Map<String, Object?>> _malformedPrivateEnvelope(
 }
 
 void main() {
+  for (final ownerSelected in [true, false]) {
+    test(
+      '${ownerSelected ? 'owner' : 'restricted'} selection sign-out during first custody read never publishes a session',
+      () async {
+        final f = await JoinFixture.create();
+        final user = await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: 'Sam Builder',
+          pin: '0123',
+        );
+        final before = Map.of(f.aStore.states);
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        addTearDown(() {
+          if (!release.isCompleted) release.complete();
+        });
+        f.aStore.beforeRead = (namespace) {
+          if (!entered.isCompleted &&
+              namespace == companyCustodyNamespace(f.a.namespace)) {
+            entered.complete();
+            return release.future;
+          }
+          return null;
+        };
+        final signingIn = f.aEnrollment.signInUser(
+          ownerSelected ? f.owner.identity.userId : user.userId,
+          ownerSelected ? '1234' : '0123',
+        );
+        await entered.future.timeout(const Duration(seconds: 10));
+        await f.aEnrollment.signOut();
+        release.complete();
+        await expectLater(signingIn, throwsA(isA<CompanyBootstrapRefusal>()));
+        expect(f.aEnrollment.currentCompanySession, isNull);
+        expect(f.aEnrollment.currentSession, isNull);
+        expectJoinProtectedUnchanged(f.aStore, before);
+      },
+    );
+  }
+
   test('restricted sign-out during final custody read never publishes a cancelled session', () async {
     final f = await JoinFixture.create();
     final user = await f.aEnrollment.createRestrictedUser(

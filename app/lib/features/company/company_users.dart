@@ -1225,11 +1225,14 @@ extension CompanyUsers on CompanyEnrollment {
   }
 
   Future<CompanySession> signInUser(String userId, String pin) async {
-    final custody = await _readCustody();
-    if (custody?.user == userId) return signIn(pin);
     final releasing = signOut();
     final epoch = _authenticationEpoch;
     await releasing;
+    final custody = await _readCustody();
+    if (epoch != _authenticationEpoch) {
+      throw const CompanyBootstrapRefusal('User sign-in was cancelled');
+    }
+    if (custody?.user == userId) return signIn(pin);
     var account = await _readUserAccount();
     if (account == null) {
       throw const CompanyBootstrapRefusal('User is not available locally');
