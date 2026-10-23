@@ -260,8 +260,8 @@ enum CompanyBootstrapStatus {
 
 enum CompanyContinuityPolicy { localContinuity, boundedAge }
 
-final class OwnerSession {
-  OwnerSession._(
+sealed class CompanySession {
+  CompanySession._(
     this._owner,
     this.identity,
     this.sessionId,
@@ -310,7 +310,7 @@ final class OwnerSession {
         installation != _owner.installation.identity?.id.value ||
         generation != _owner.installation.identity?.generation.value ||
         session != sessionId) {
-      throw StateError('Local administrator session is unavailable');
+      throw StateError('Local company session is unavailable');
     }
     _lastUse = _clock.elapsed;
   }
@@ -330,6 +330,8 @@ final class OwnerSession {
   }
 
   void _clear() => _revoked = true;
+
+  Future<void> requireCurrentAccount() => _owner._requireSessionAccount(this);
 
   Future<T> runLocalCommand<T>(Future<T> Function() operation) async {
     if (!isValid) {
@@ -353,19 +355,47 @@ final class OwnerSession {
   }
 }
 
+final class OwnerSession extends CompanySession {
+  OwnerSession._(
+    super.owner,
+    super.identity,
+    super.sessionId,
+    super.authoritySnapshot,
+    super.membershipSnapshot,
+  ) : super._();
+}
+
+final class RestrictedUserSession extends CompanySession {
+  RestrictedUserSession._(
+    super.owner,
+    super.identity,
+    super.sessionId,
+    super.authoritySnapshot,
+    super.membershipSnapshot,
+    this._accountCommitment,
+  ) : super._();
+  final String _accountCommitment;
+}
+
 final class CompanyEnrollment {
   CompanyEnrollment({required this.installation, required this.db});
 
   final InstallationSecurity installation;
   final AppDatabase db;
-  OwnerSession? _session;
+  CompanySession? _session;
   int _authenticationEpoch = 0;
+  String? _userProvisionOffer;
 
-  OwnerSession? get currentSession =>
+  CompanySession? get currentCompanySession =>
       _session?.isValid == true ? _session : null;
+  OwnerSession? get currentSession => switch (currentCompanySession) {
+    final OwnerSession owner => owner,
+    _ => null,
+  };
 
   Future<void> signOut() async {
     _authenticationEpoch++;
+    _userProvisionOffer = null;
     installation._activeCompanyChannel?.close();
     final session = _session;
     session?._clear();
@@ -509,12 +539,15 @@ final class CompanyEnrollment {
   Future<VerifiedCreateJobSession> issueCreateJobAssertion(
     CreateJob command,
   ) async {
-    final session = currentSession;
+    final session = currentCompanySession;
     final custody = await _readCustody();
     if (session == null || custody == null || custody.status != 'active') {
       throw const CompanyBootstrapRefusal('Administrator sign-in required');
     }
     await _checkBinding(custody, requireActive: true);
+    if (session is RestrictedUserSession) {
+      return _issueRestrictedCreateJob(command, session, custody);
+    }
     if (command.companyId != custody.company ||
         command.shopId != custody.shop) {
       throw const CompanyBootstrapRefusal('Command is outside this company');

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -116,6 +117,127 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     }, JoinLoopbackHttpOverrides()),
+  );
+
+  testWidgets(
+    'saved additional user status survives a delayed provisioning request response',
+    (tester) => HttpOverrides.runWithHttpOverrides(() async {
+      late JoinFixture f;
+      late NearbyController a;
+      late NearbyController b;
+      late OwnerSession member;
+      await tester.runAsync(
+        () => HttpOverrides.runWithHttpOverrides(() async {
+          f = await JoinFixture.create();
+          await activateFixtureB(f);
+          member = await f.bEnrollment.signIn('1234');
+          await f.aEnrollment.createRestrictedUser(
+            owner: f.owner,
+            requestId: '9f5329f7-9c27-4a7c-aeab-d72d9ac35945',
+            name: 'Sam Builder',
+            pin: '0123',
+          );
+          await joinChannels(
+            onPaired: (bc, ac) {
+              b = bc;
+              a = ac;
+            },
+          );
+        }, JoinLoopbackHttpOverrides()),
+      );
+      await tester.binding.setSurfaceSize(const Size(1500, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Row(
+            children: [
+              Expanded(
+                child: CompanyJoinPage(
+                  enrollment: f.aEnrollment,
+                  approver: f.owner,
+                  reconnect: true,
+                  createController: (_) => a,
+                ),
+              ),
+              Expanded(
+                child: CompanyJoinPage(
+                  enrollment: f.bEnrollment,
+                  approver: member,
+                  reconnect: true,
+                  createController: (_) => b,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      final retained = find.byKey(
+        ValueKey('company-peer-${f.owner.identity.deviceId}'),
+      );
+      await joinWidgetSignal(tester, () => retained.evaluate().isNotEmpty);
+      await tester.tap(retained);
+      await tester.pump();
+      await tester.runAsync(
+        () => tester.tap(find.byKey(const Key('company-peer-verify')).at(1)),
+      );
+      final provision = find.byKey(const Key('company-user-provision'));
+      await joinWidgetSignal(tester, () => provision.evaluate().isNotEmpty);
+      final responseHeld = Completer<void>();
+      final releaseResponse = Completer<void>();
+      addTearDown(() {
+        if (!releaseResponse.isCompleted) releaseResponse.complete();
+      });
+      final receive = a.onJoinMessage!;
+      a.onJoinMessage = (pair, wire) async {
+        final reply = await receive(pair, wire);
+        if (wire['kind'] == 'user-provision-request') {
+          responseHeld.complete();
+          await releaseResponse.future;
+        }
+        return reply;
+      };
+      await tester.runAsync(() => tester.tap(provision));
+      final accept = find.byKey(const Key('company-user-provision-accept'));
+      await joinWidgetSignal(tester, () => accept.evaluate().isNotEmpty);
+      await tester.runAsync(() => tester.tap(accept));
+      const saved =
+          'Additional user saved on this installation. Close this page and switch user to sign in offline.';
+      await joinWidgetSignal(
+        tester,
+        () =>
+            responseHeld.isCompleted && find.text(saved).evaluate().isNotEmpty,
+      );
+      releaseResponse.complete();
+      await joinWidgetSignal(
+        tester,
+        () => find
+            .text(
+              'The retained installation confirmed the additional user is saved. Repeating this transfer preserves PIN attempts.',
+            )
+            .evaluate()
+            .isNotEmpty,
+      );
+      expect(find.text(saved), findsOneWidget);
+      expect(
+        find.text(
+          'Confirmed this user and installation. Waiting for protected provisioning.',
+        ),
+        findsNothing,
+      );
+      expect(
+        (await tester.runAsync(() => f.bEnrollment.listCompanyUsers()))!
+            .map((user) => user.name),
+        contains('Sam Builder'),
+      );
+      await tester.runAsync(() async {
+        await a.dispose();
+        await b.dispose();
+        await f.closeAndCheckOwnerData();
+      });
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    }, JoinLoopbackHttpOverrides()),
+    timeout: const Timeout(Duration(minutes: 2)),
   );
 
   testWidgets(

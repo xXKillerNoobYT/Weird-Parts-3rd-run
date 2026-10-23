@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../data/app_database.dart';
 import '../installation/installation_security.dart';
@@ -47,7 +48,12 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
   final _passphraseConfirmation = TextEditingController();
   final _sourcePassphrase = TextEditingController();
   CompanyBootstrapStatus? _status;
-  OwnerSession? _session;
+  CompanySession? _session;
+  List<CompanyUserChoice> _users = const [];
+  String? _selectedUser;
+  final _userName = TextEditingController();
+  final _userPin = TextEditingController();
+  String? _userCreateRequest;
   String? _error;
   String? _recoveryPath;
   String? _sourcePath;
@@ -83,6 +89,8 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     _passphrase.dispose();
     _passphraseConfirmation.dispose();
     _sourcePassphrase.dispose();
+    _userName.dispose();
+    _userPin.dispose();
     super.dispose();
   }
 
@@ -101,14 +109,17 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     _expiryTimer?.cancel();
     if (mounted) setState(() => _session = null);
     await _enrollment.signOut();
+    if (mounted) await _load();
   }
 
   Future<void> _joinNearby({bool reconnect = false}) async {
+    final owner = _session;
+    if (owner is! OwnerSession) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CompanyJoinPage(
           enrollment: _enrollment,
-          approver: _session,
+          approver: owner,
           reconnect: reconnect,
         ),
       ),
@@ -119,7 +130,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     }
   }
 
-  void _scheduleExpiry(OwnerSession session) {
+  void _scheduleExpiry(CompanySession session) {
     _expiryTimer?.cancel();
     final remaining = session.timeUntilExpiry;
     _expiryTimer = Timer(
@@ -146,6 +157,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
 
   Future<void> _load() async {
     var status = await _enrollment.readStatus();
+    final users = status == CompanyBootstrapStatus.active
+        ? await _enrollment.listCompanyUsers()
+        : <CompanyUserChoice>[];
     var legacy = status == CompanyBootstrapStatus.legacyUnsupported;
     if (status == CompanyBootstrapStatus.unjoined) {
       try {
@@ -162,6 +176,12 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       }
     }
     if (!mounted) return;
+    setState(() {
+      _users = users;
+      if (!users.any((u) => u.userId == _selectedUser && u.available)) {
+        _selectedUser = users.where((u) => u.available).firstOrNull?.userId;
+      }
+    });
     _applyStatus(status, legacy: legacy);
   }
 
@@ -273,12 +293,15 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         return;
       }
       final session = await _enrollment.signIn(_pin.text);
+      final users = await _enrollment.listCompanyUsers();
       _pin.clear();
       _passphrase.clear();
       _passphraseConfirmation.clear();
       if (mounted && _foreground && loginIntent == _loginIntentEpoch) {
         setState(() {
           _session = session;
+          _users = users;
+          _selectedUser = session.identity.userId;
           _status = CompanyBootstrapStatus.active;
         });
         _scheduleExpiry(session);
@@ -297,15 +320,57 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     }
   }
 
-  Future<void> _signIn() async {
-    if (_busy) return;
-    final loginIntent = _loginIntentEpoch;
+  Future<void> _createUser() async {
+    final owner = _session;
+    if (_busy || owner is! OwnerSession || !owner.identity.isAuthorityOwner) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final session = await _enrollment.signIn(_pin.text);
+      _userCreateRequest ??= const Uuid().v4();
+      await _enrollment.createRestrictedUser(
+        owner: owner,
+        requestId: _userCreateRequest!,
+        name: _userName.text.trim(),
+        pin: _userPin.text,
+      );
+      _userName.clear();
+      _userPin.clear();
+      _userCreateRequest = null;
+      await _load();
+    } on CompanyBootstrapRefusal catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error =
+              'User creation may already be saved. Retry the same details.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _signIn() async {
+    if (_busy) return;
+    final loginIntent = _loginIntentEpoch;
+    var ownerSelected =
+        _selectedUser == null ||
+        _users.isEmpty ||
+        _selectedUser == _users.first.userId;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final users = await _enrollment.listCompanyUsers();
+      final selected = _selectedUser ?? users.first.userId;
+      ownerSelected = selected == users.first.userId;
+      final session = await _enrollment.signInUser(selected, _pin.text);
       _pin.clear();
       if (mounted && _foreground && loginIntent == _loginIntentEpoch) {
         setState(() => _session = session);
@@ -316,7 +381,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     } catch (_) {
       if (mounted) {
         setState(
-          () => _error = 'Administrator PIN refused or company needs recovery.',
+          () => _error = ownerSelected
+              ? 'Administrator PIN refused or company needs recovery.'
+              : 'User PIN refused or this user needs provisioning.',
         );
       }
     } finally {
@@ -396,6 +463,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: ListView(
+            key: ValueKey(
+              'company-frame:$title:${_session?.sessionId ?? 'locked'}',
+            ),
             padding: const EdgeInsets.all(20),
             children: [
               ...children,
@@ -601,13 +671,32 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     final session = _session;
     if (session == null || !session.isValid) {
       return _frame('Company locked', [
-        const Text('Sign in with the company administrator PIN.'),
+        const Text('Select a company user and enter their PIN.'),
+        DropdownButtonFormField<String>(
+          key: const Key('company-user-selector'),
+          initialValue: _selectedUser,
+          decoration: const InputDecoration(labelText: 'Company user'),
+          items: [
+            for (final user in _users)
+              DropdownMenuItem(
+                value: user.userId,
+                enabled: user.available,
+                child: Text(user.name),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) => setState(() {
+                  _selectedUser = value;
+                  _pin.clear();
+                }),
+        ),
         TextField(
           key: const Key('company-signin-pin'),
           controller: _pin,
           obscureText: true,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Administrator PIN'),
+          decoration: const InputDecoration(labelText: 'Company PIN'),
         ),
         FilledButton(
           key: const Key('company-signin'),
@@ -620,21 +709,27 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     return _frame(identity.name, [
       const Text('Company authority is active on this installation.'),
       const SizedBox(height: 16),
-      if (identity.isAuthorityOwner)
+      if (session is OwnerSession && identity.isAuthorityOwner)
         OutlinedButton(
           key: const Key('company-enroll-open'),
           onPressed: _busy ? null : _joinNearby,
           child: const Text('Approve a nearby company device'),
         ),
-      OutlinedButton(
-        key: const Key('company-peer-open'),
-        onPressed: _busy ? null : () => _joinNearby(reconnect: true),
-        child: const Text('Verify a retained company peer'),
-      ),
+      if (session is OwnerSession)
+        OutlinedButton(
+          key: const Key('company-peer-open'),
+          onPressed: _busy ? null : () => _joinNearby(reconnect: true),
+          child: const Text('Verify a retained company peer'),
+        ),
       Text('Company ID: ${identity.companyId}'),
       Text('Shop ID: ${identity.shopId}'),
-      Text('Administrator ID: ${identity.userId}'),
+      Text('User ID: ${identity.userId}'),
       Text('Device ID: ${identity.deviceId}'),
+      const SizedBox(height: 16),
+      if (session is RestrictedUserSession)
+        const Text(
+          'Create Job permission only. Sign in as the owner to exchange pending Jobs with a retained peer.',
+        ),
       const SizedBox(height: 16),
       const Text(
         'Local continuity is selected. The encrypted authority package cannot restore shop data. Parts and Job line editing remain unavailable until their company-authorized migration.',
@@ -646,10 +741,46 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         owner: session,
       ),
       const SizedBox(height: 16),
+      if (session is OwnerSession && identity.isAuthorityOwner) ...[
+        const Text(
+          'Company users. This version supports the owner and one additional Create Job user.',
+        ),
+        for (final user in _users)
+          Text('${user.name}${user.available ? '' : ' (unavailable)'}'),
+        if (_users.length < 2) ...[
+          TextField(
+            key: const Key('company-user-name'),
+            controller: _userName,
+            decoration: const InputDecoration(
+              labelText: 'Additional user name',
+            ),
+          ),
+          TextField(
+            key: const Key('company-user-pin'),
+            controller: _userPin,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Additional user PIN'),
+          ),
+          FilledButton(
+            key: const Key('company-create-user'),
+            onPressed: _busy ? null : _createUser,
+            child: const Text('Create restricted user'),
+          ),
+        ] else
+          const Text(
+            'Additional user capacity reached. Use the retained peer connection to provision this user.',
+          ),
+      ],
       FilledButton(
         key: const Key('company-signout'),
         onPressed: _busy ? null : _lock,
         child: const Text('Sign out'),
+      ),
+      TextButton(
+        key: const Key('company-switch-user'),
+        onPressed: _busy ? null : _lock,
+        child: const Text('Switch user'),
       ),
     ]);
   }

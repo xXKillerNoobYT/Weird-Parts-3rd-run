@@ -815,7 +815,7 @@ extension CompanyJobNameCommands on CompanyJobCommands {
   }
 
   Future<List<CompanyJobName>> nameSyncHoldings({
-    required OwnerSession ownerSession,
+    required CompanySession ownerSession,
   }) async {
     await requireSyncPermission(ownerSession);
     final scope = ownerSession.identity;
@@ -852,7 +852,7 @@ extension CompanyJobNameCommands on CompanyJobCommands {
   }
 
   Future<List<CompanyJobView>> listJobViews({
-    required OwnerSession ownerSession,
+    required CompanySession ownerSession,
   }) async {
     final jobs = await listJobs(ownerSession: ownerSession);
     final names = await nameSyncHoldings(ownerSession: ownerSession);
@@ -899,7 +899,8 @@ extension CompanyJobNameCommands on CompanyJobCommands {
     return result;
   }
 
-  Future<bool> canRenameJobs(OwnerSession owner) async {
+  Future<bool> canRenameJobs(CompanySession owner) async {
+    if (owner is! OwnerSession) return false;
     final scope = owner.identity;
     try {
       final session = await enrollment.issueRenameJobAssertion(
@@ -1064,8 +1065,8 @@ final class VerifiedRenameJobSession extends VerifiedCompanyOperation {
   String get operationDomain => 'wiredpart.job.name.operation@1:';
 
   @override
-  void validateLiveOwner(OwnerSession? owner) {
-    if (owner == null) {
+  void validateLiveOwner(CompanySession? owner) {
+    if (owner is! OwnerSession) {
       throw const JobLineRefusal('Live administrator session required');
     }
     final a = _assertion;

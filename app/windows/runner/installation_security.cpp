@@ -60,7 +60,8 @@ std::string Namespace(const Map& map) {
     if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
           c == '.' || c == '_' || c == '-')) throw Failure("installation_invalid_argument");
   }
-  if (value != "production" && value != "production.company-custody") {
+  if (value != "production" && value != "production.company-custody" &&
+      value != "production.company-user-1") {
     if (value.rfind("synthetic.", 0) != 0 || value.size() <= 10 ||
         !((value[10] >= 'a' && value[10] <= 'z') ||
           (value[10] >= '0' && value[10] <= '9'))) throw Failure("installation_invalid_argument");
