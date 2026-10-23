@@ -5,12 +5,14 @@ import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
+import 'package:wired_parts/features/nearby/nearby_page.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
@@ -199,6 +201,82 @@ Future<void> _openNewJobCustomLine(
 }
 
 void main() {
+  const nearbyAvailability = {
+    TargetPlatform.android: false,
+    TargetPlatform.fuchsia: false,
+    TargetPlatform.iOS: false,
+    TargetPlatform.linux: false,
+    TargetPlatform.macOS: true,
+    TargetPlatform.windows: true,
+  };
+  for (final entry in nearbyAvailability.entries) {
+    testWidgets('More Nearby availability on ${entry.key.name}', (tester) async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      const channel = MethodChannel('wired_parts/nearby_wifi');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      final nativeCalls = <String>[];
+      addTearDown(() async {
+        try {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pumpAndSettle();
+        } finally {
+          messenger.setMockMethodCallHandler(channel, null);
+          await db.close();
+        }
+      });
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        nativeCalls.add(call.method);
+        expect(call.method, 'ipv4Interfaces');
+        return <dynamic>[];
+      });
+      final deviceId = await db.settingsDao.ensureDeviceId();
+      final pin = PinService(db.settingsDao);
+
+      await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+      await tester.tap(_navLabel('More'));
+      await tester.pumpAndSettle();
+
+      for (final label in [
+        'Inventory / Warehouses',
+        'Maintenance',
+        'Backup & restore',
+        'Set PIN',
+        'Lock catalog',
+        'Reset / wipe all data',
+      ]) {
+        expect(find.widgetWithText(ListTile, label), findsOneWidget);
+      }
+      expect(nativeCalls, isEmpty);
+      final nearbyTile = find.widgetWithText(ListTile, 'Nearby');
+      if (entry.value) {
+        expect(nearbyTile, findsOneWidget);
+        expect(tester.widget<ListTile>(nearbyTile).enabled, isTrue);
+        expect(tester.widget<ListTile>(nearbyTile).onTap, isNotNull);
+        await tester.tap(nearbyTile);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(NearbyPage), findsOneWidget);
+        expect(nativeCalls, ['ipv4Interfaces']);
+        final failureNotice = find.widgetWithText(ListTile, 'Nearby failed');
+        expect(failureNotice, findsOneWidget);
+        expect(
+          find.descendant(
+            of: failureNotice,
+            matching: find.textContaining(
+              'Connect to the same Wi-Fi as the other device.',
+            ),
+          ),
+          findsOneWidget,
+        );
+      } else {
+        expect(nearbyTile, findsNothing);
+        expect(find.byType(NearbyPage), findsNothing);
+        expect(nativeCalls, isEmpty);
+      }
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant({entry.key}));
+  }
+
   testWidgets('HomeShell shows navigation destinations', (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
