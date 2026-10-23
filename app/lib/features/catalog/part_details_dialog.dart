@@ -121,7 +121,10 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    await _editTaxonomyName(CatalogNameTarget.newType(_categoryId!), 'Add type');
+    await _editTaxonomyName(
+      CatalogNameTarget.newType(_categoryId!),
+      'Add type',
+    );
   }
 
   Future<void> _addVariant() async {
@@ -130,7 +133,10 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    await _editTaxonomyName(CatalogNameTarget.newVariant(_styleId!), 'Add variant');
+    await _editTaxonomyName(
+      CatalogNameTarget.newVariant(_styleId!),
+      'Add variant',
+    );
   }
 
   Future<void> _editTaxonomyName(CatalogNameTarget target, String title) async {
@@ -140,8 +146,11 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
         target: target,
         title: title,
         onSaved: (saved) async {
-          if (saved.kind == CatalogNameKind.brand) {
-            throw StateError('A brand cannot change the part taxonomy');
+          if (saved.kind == CatalogNameKind.brand ||
+              saved.kind == CatalogNameKind.supplier) {
+            throw StateError(
+              'A brand or supplier cannot change the part taxonomy',
+            );
           }
           await _load();
           if (!mounted) return;
@@ -157,7 +166,10 @@ class _PartDetailsDialogState extends State<PartDetailsDialog> {
               case CatalogNameKind.variant:
                 _typeId = saved.id;
               case CatalogNameKind.brand:
-                throw StateError('A brand cannot change the part taxonomy');
+              case CatalogNameKind.supplier:
+                throw StateError(
+                  'A brand or supplier cannot change the part taxonomy',
+                );
             }
             _error = null;
           });

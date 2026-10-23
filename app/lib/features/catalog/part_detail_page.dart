@@ -5,7 +5,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../app.dart';
 import '../../data/app_database.dart';
-import '../maintenance/maintenance_repository.dart';
 import '../edit_drafts/edit_drafts.dart';
 import '../edit_drafts/edit_draft_widgets.dart';
 import '../pin/pin_gate.dart';
@@ -48,7 +47,6 @@ class _ListingRow {
 
 class _PartDetailPageState extends State<PartDetailPage> {
   late final CatalogRepository _catalog;
-  late final MaintenanceRepository _maintenance;
   late final AppDatabase _db;
 
   final _nameController = TextEditingController();
@@ -188,7 +186,6 @@ class _PartDetailPageState extends State<PartDetailPage> {
     }
     _db = scope.db;
     _catalog = CatalogRepository(scope.db, scope.pin, scope.deviceId);
-    _maintenance = MaintenanceRepository(scope.db, scope.pin, scope.deviceId);
     _reload();
   }
 
@@ -540,7 +537,10 @@ class _PartDetailPageState extends State<PartDetailPage> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    await _editTaxonomyName(CatalogNameTarget.newType(_categoryId!), 'Add type');
+    await _editTaxonomyName(
+      CatalogNameTarget.newType(_categoryId!),
+      'Add type',
+    );
   }
 
   Future<void> _addVariant() async {
@@ -549,7 +549,10 @@ class _PartDetailPageState extends State<PartDetailPage> {
       return;
     }
     if (!await _gate() || !mounted) return;
-    await _editTaxonomyName(CatalogNameTarget.newVariant(_styleId!), 'Add variant');
+    await _editTaxonomyName(
+      CatalogNameTarget.newVariant(_styleId!),
+      'Add variant',
+    );
   }
 
   Future<void> _editTaxonomyName(CatalogNameTarget target, String title) async {
@@ -563,8 +566,11 @@ class _PartDetailPageState extends State<PartDetailPage> {
           if (mounted) setState(() => _catalogNameNotice = message);
         },
         onSaved: (saved) async {
-          if (saved.kind == CatalogNameKind.brand) {
-            throw StateError('A brand cannot change the part taxonomy');
+          if (saved.kind == CatalogNameKind.brand ||
+              saved.kind == CatalogNameKind.supplier) {
+            throw StateError(
+              'A brand or supplier cannot change the part taxonomy',
+            );
           }
           await _refreshTaxonomyLists();
           if (!mounted) return;
@@ -580,7 +586,10 @@ class _PartDetailPageState extends State<PartDetailPage> {
               case CatalogNameKind.variant:
                 _typeId = saved.id;
               case CatalogNameKind.brand:
-                throw StateError('A brand cannot change the part taxonomy');
+              case CatalogNameKind.supplier:
+                throw StateError(
+                  'A brand or supplier cannot change the part taxonomy',
+                );
             }
           });
           await _session?.flush();
@@ -641,23 +650,55 @@ class _PartDetailPageState extends State<PartDetailPage> {
     return created;
   }
 
-  Future<Supplier?> _addSupplierInPlace() async {
-    if (!await _gate() || !mounted) return null;
-    final name = await promptName(context, title: 'Add supplier');
-    if (name == null || name.isEmpty || !mounted) return null;
-    try {
-      final id = await _maintenance.createSupplier(name);
-      await _refreshTaxonomyLists();
-      if (!mounted) return null;
-      for (final s in _suppliers) {
-        if (s.id == id) return s;
-      }
-      return null;
-    } on StateError catch (e) {
-      if (!mounted) return null;
-      _toast(e.message);
+  Future<Supplier?> _addSupplierInPlace({
+    BuildContext? consumerContext,
+    required Future<void> Function(Supplier) onAdopt,
+    ValueChanged<String>? onNotice,
+  }) async {
+    final consumer = consumerContext ?? context;
+    if (!consumer.mounted || !await _gate() || !mounted || !consumer.mounted) {
       return null;
     }
+    setState(() => _catalogNameNotice = null);
+    Supplier? created;
+    void notice(String message) {
+      if (!consumer.mounted) return;
+      if (mounted) setState(() => _catalogNameNotice = message);
+      onNotice?.call(message);
+    }
+
+    try {
+      await showCatalogNameDialog(
+        consumer,
+        target: CatalogNameTarget.newSupplier(),
+        title: 'Add supplier',
+        onSaved: (saved) async {
+          await _refreshTaxonomyLists();
+          if (!mounted || !consumer.mounted) {
+            throw StateError('The supplier consumer is no longer available');
+          }
+          final matching = _suppliers.where(
+            (supplier) =>
+                supplier.id == saved.id && supplier.name == saved.name,
+          );
+          if (saved.kind != CatalogNameKind.supplier || matching.isEmpty) {
+            throw StateError(
+              'The saved supplier is not available in the refreshed list',
+            );
+          }
+          final supplier = matching.first;
+          await onAdopt(supplier);
+          if (!mounted || !consumer.mounted) {
+            throw StateError('The supplier consumer is no longer available');
+          }
+          created = supplier;
+        },
+        onNotice: notice,
+      );
+    } catch (error) {
+      notice('$error');
+    }
+    return created;
   }
 
   Future<void> _save() async {
@@ -761,8 +802,13 @@ class _PartDetailPageState extends State<PartDetailPage> {
   Future<void> _addListing(BrandVersion version) async {
     if (!await _gate() || !mounted) return;
 
+    String? selectedSupplier;
     if (_suppliers.isEmpty) {
-      final created = await _addSupplierInPlace();
+      final created = await _addSupplierInPlace(
+        onAdopt: (supplier) async {
+          selectedSupplier = supplier.id;
+        },
+      );
       if (created == null || !mounted) return;
     }
 
@@ -770,8 +816,13 @@ class _PartDetailPageState extends State<PartDetailPage> {
       context: context,
       builder: (ctx) => _ListingDialog(
         suppliers: List<Supplier>.of(_suppliers),
-        initialSupplierId: _defaultSupplierId ?? _suppliers.first.id,
-        onAddSupplier: _addSupplierInPlace,
+        initialSupplierId:
+            selectedSupplier ?? _defaultSupplierId ?? _suppliers.first.id,
+        onAddSupplier: (consumer, onAdopt, onNotice) => _addSupplierInPlace(
+          consumerContext: consumer,
+          onAdopt: onAdopt,
+          onNotice: onNotice,
+        ),
       ),
     );
     if (result == null || !mounted) return;
@@ -994,10 +1045,54 @@ class _PartDetailPageState extends State<PartDetailPage> {
                       onAdd: _saving
                           ? null
                           : () async {
-                              final created = await _addSupplierInPlace();
-                              if (created != null && mounted) {
-                                _change(() => _defaultSupplierId = created.id);
-                              }
+                              final session = _session;
+                              await _addSupplierInPlace(
+                                onAdopt: (supplier) async {
+                                  if (!mounted ||
+                                      _loading ||
+                                      _saving ||
+                                      _opening != null ||
+                                      session == null ||
+                                      !identical(_session, session) ||
+                                      session.status.value.phase ==
+                                          EditPhase.closed) {
+                                    throw StateError(
+                                      'The part editor is no longer available',
+                                    );
+                                  }
+                                  _change(
+                                    () => _defaultSupplierId = supplier.id,
+                                  );
+                                  if (session.initial.defaultSupplierId !=
+                                      supplier.id) {
+                                    throw StateError(
+                                      'The supplier selection was not captured',
+                                    );
+                                  }
+                                  await session.flush();
+                                  if (!mounted ||
+                                      _loading ||
+                                      _saving ||
+                                      _opening != null ||
+                                      !identical(_session, session) ||
+                                      session.status.value.phase ==
+                                          EditPhase.closed) {
+                                    throw StateError(
+                                      'The part editor is no longer available',
+                                    );
+                                  }
+                                  final status = session.status.value;
+                                  if (status.phase != EditPhase.durable ||
+                                      status.durableSequence !=
+                                          status.latestSequence ||
+                                      session.initial.defaultSupplierId !=
+                                          supplier.id) {
+                                    throw StateError(
+                                      'The default supplier selection is not durable yet',
+                                    );
+                                  }
+                                },
+                              );
                             },
                     ),
                     SwitchListTile(
@@ -1123,7 +1218,8 @@ class _VarianceDialog extends StatefulWidget {
     BuildContext consumer,
     ValueChanged<Brand> onAdopt,
     ValueChanged<String> onNotice,
-  ) onAddBrand;
+  )
+  onAddBrand;
 
   @override
   State<_VarianceDialog> createState() => _VarianceDialogState();
@@ -1293,7 +1389,12 @@ class _ListingDialog extends StatefulWidget {
 
   final List<Supplier> suppliers;
   final String? initialSupplierId;
-  final Future<Supplier?> Function() onAddSupplier;
+  final Future<Supplier?> Function(
+    BuildContext consumer,
+    Future<void> Function(Supplier) onAdopt,
+    ValueChanged<String> onNotice,
+  )
+  onAddSupplier;
 
   @override
   State<_ListingDialog> createState() => _ListingDialogState();
@@ -1303,6 +1404,7 @@ class _ListingDialogState extends State<_ListingDialog> {
   late List<Supplier> _suppliers;
   late String? _supplierId;
   final _skuController = TextEditingController();
+  String? _notice;
 
   @override
   void initState() {
@@ -1320,14 +1422,26 @@ class _ListingDialogState extends State<_ListingDialog> {
   }
 
   Future<void> _addSupplier() async {
-    final created = await widget.onAddSupplier();
-    if (created == null || !mounted) return;
-    setState(() {
-      if (!_suppliers.any((s) => s.id == created.id)) {
-        _suppliers = [..._suppliers, created];
-      }
-      _supplierId = created.id;
-    });
+    setState(() => _notice = null);
+    await widget.onAddSupplier(
+      context,
+      (supplier) async {
+        if (!mounted) {
+          throw StateError('The listing dialog is no longer available');
+        }
+        setState(() {
+          _suppliers = [
+            for (final existing in _suppliers)
+              if (existing.id != supplier.id) existing,
+            supplier,
+          ];
+          _supplierId = supplier.id;
+        });
+      },
+      (message) {
+        if (mounted) setState(() => _notice = message);
+      },
+    );
   }
 
   void _submit() {
@@ -1340,7 +1454,17 @@ class _ListingDialogState extends State<_ListingDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add supplier listing'),
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Add supplier listing'),
+          if (_notice != null) ...[
+            const SizedBox(height: 8),
+            Semantics(liveRegion: true, child: Text(_notice!)),
+          ],
+        ],
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

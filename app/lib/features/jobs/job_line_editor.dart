@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../app.dart';
 import '../../data/app_database.dart';
 import '../catalog/catalog_repository.dart';
+import '../catalog/catalog_name_dialog.dart';
 import '../catalog/catalog_tree.dart';
 import '../catalog/catalog_tree_picker.dart';
 import '../catalog/part_detail_page.dart';
@@ -75,6 +76,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
   EditOpening<JobLineEditSession>? _opening;
   bool _applyingInput = false;
   bool _allowPop = false;
+  String? _catalogNameNotice;
 
   bool get _isEditing => _lineId != null;
 
@@ -463,33 +465,85 @@ class _JobLineEditorState extends State<JobLineEditor> {
   Future<void> _addSupplierForSplit(_SplitDraft split) async {
     final scope = AppScope.of(context);
     if (!await ensurePinUnlocked(context, scope.pin) || !mounted) return;
-    final name = await promptName(context, title: 'Add supplier');
-    if (name == null || name.isEmpty || !mounted) return;
-    try {
-      final id = await _maintenance.createSupplier(name);
-      // Brand-version splits only list suppliers with a listing on that
-      // version. Hang an empty-SKU listing so Add supplier stays selectable
-      // after refresh / reopen. Custom / general-part / deleted-part lines
-      // skip this — do not write a listing onto a tombstoned variance.
-      if (_brandVersionId != null && !_catalogPartMissing) {
-        await _catalog.createSupplierListing(
-          brandVersionId: _brandVersionId!,
-          supplierId: id,
-          sku: '',
+    final session = _session;
+    final partId = _partId;
+    final versionId = _brandVersionId;
+    final useCustom = _useCustom;
+    final partMissing = _catalogPartMissing;
+    final lineId = _lineId;
+    void requireConsumer() {
+      if (!mounted ||
+          _loading ||
+          _saving ||
+          _opening != null ||
+          session == null ||
+          !identical(_session, session) ||
+          session.status.value.phase == EditPhase.closed ||
+          !_splits.contains(split) ||
+          _partId != partId ||
+          _brandVersionId != versionId ||
+          _useCustom != useCustom ||
+          _catalogPartMissing != partMissing ||
+          _lineId != lineId) {
+        throw StateError(
+          'The supplier split consumer changed or is unavailable',
         );
       }
-      final suppliers = await _db.taxonomyDao.listSuppliers();
-      if (!mounted) return;
-      _allSuppliers = suppliers;
-      await _refreshSupplierChoices();
-      if (!mounted) return;
-      if (!_supplierChoices.any((s) => s.id == id)) {
-        _toast('That supplier is not on this brand version yet');
-        return;
-      }
-      _change(() => split.supplierId = id);
-    } on StateError catch (e) {
-      if (mounted) _toast(e.message);
+    }
+
+    try {
+      requireConsumer();
+      setState(() => _catalogNameNotice = null);
+      await showCatalogNameDialog(
+        context,
+        target: !useCustom && versionId != null && !partMissing
+            ? CatalogNameTarget.newSupplierForVersion(versionId)
+            : CatalogNameTarget.newSupplier(),
+        title: 'Add supplier',
+        onSaved: (saved) async {
+          requireConsumer();
+          final activeSession = session!;
+          final suppliers = await _db.taxonomyDao.listSuppliers();
+          requireConsumer();
+          if (saved.kind != CatalogNameKind.supplier ||
+              !suppliers.any(
+                (supplier) =>
+                    supplier.id == saved.id && supplier.name == saved.name,
+              )) {
+            throw StateError('The saved supplier is not in the refreshed list');
+          }
+          _allSuppliers = suppliers;
+          await _refreshSupplierChoices();
+          requireConsumer();
+          if (!_supplierChoices.any(
+            (supplier) =>
+                supplier.id == saved.id && supplier.name == saved.name,
+          )) {
+            throw StateError(
+              'The saved supplier is not selectable for this split',
+            );
+          }
+          _change(() => split.supplierId = saved.id);
+          final index = _splits.indexOf(split);
+          if (activeSession.initial.splits.length != _splits.length ||
+              activeSession.initial.splits[index].supplierId != saved.id) {
+            throw StateError('The supplier selection was not captured');
+          }
+          await activeSession.flush();
+          requireConsumer();
+          final status = activeSession.status.value;
+          if (status.phase != EditPhase.durable ||
+              status.durableSequence != status.latestSequence ||
+              activeSession.initial.splits[index].supplierId != saved.id) {
+            throw StateError('The supplier split selection is not durable yet');
+          }
+        },
+        onNotice: (message) {
+          if (mounted) setState(() => _catalogNameNotice = message);
+        },
+      );
+    } catch (error) {
+      if (mounted) setState(() => _catalogNameNotice = '$error');
     }
   }
 
@@ -758,6 +812,17 @@ class _JobLineEditorState extends State<JobLineEditor> {
         if (!didPop) _leave(LeaveIntent.back);
       },
       child: Scaffold(
+        bottomNavigationBar: _catalogNameNotice == null
+            ? null
+            : SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(_catalogNameNotice!),
+                  ),
+                ),
+              ),
         appBar: AppBar(
           title: Text(_isEditing ? 'Edit line' : 'Add line'),
           actions: [

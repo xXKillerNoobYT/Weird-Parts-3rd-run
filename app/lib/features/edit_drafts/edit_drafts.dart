@@ -59,15 +59,31 @@ final class NewJobInput {
   final String nameText;
 }
 
-enum CatalogNameKind { category, type, variant, brand }
+enum CatalogNameKind { category, type, variant, brand, supplier }
 
 final class CatalogNameTarget {
-  const CatalogNameTarget._(this.kind, this.isRename, {this.id, this.parentId});
+  const CatalogNameTarget._(
+    this.kind,
+    this.isRename, {
+    this.id,
+    this.parentId,
+    this.listingVersionId,
+  });
 
   const CatalogNameTarget.newCategory()
     : this._(CatalogNameKind.category, false);
 
   const CatalogNameTarget.newBrand() : this._(CatalogNameKind.brand, false);
+
+  const CatalogNameTarget.newSupplier()
+    : this._(CatalogNameKind.supplier, false);
+
+  factory CatalogNameTarget.newSupplierForVersion(String brandVersionId) =>
+      CatalogNameTarget._(
+        CatalogNameKind.supplier,
+        false,
+        listingVersionId: _identity(brandVersionId),
+      );
 
   factory CatalogNameTarget.newType(String categoryId) => CatalogNameTarget._(
     CatalogNameKind.type,
@@ -95,7 +111,7 @@ final class CatalogNameTarget {
 
   final CatalogNameKind kind;
   final bool isRename;
-  final String? id, parentId;
+  final String? id, parentId, listingVersionId;
 
   static String _identity(String value) {
     if (value.trim().isEmpty) {

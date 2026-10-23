@@ -101,6 +101,10 @@ void main() {
             .toList();
       case CatalogNameKind.brand:
         return (await db.taxonomyDao.listBrands()).map((r) => r.name).toList();
+      case CatalogNameKind.supplier:
+        return (await db.taxonomyDao.listSuppliers())
+            .map((r) => r.name)
+            .toList();
     }
   }
 
