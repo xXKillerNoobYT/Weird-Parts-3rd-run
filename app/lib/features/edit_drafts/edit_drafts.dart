@@ -9,7 +9,6 @@ import 'package:drift/drift.dart' show Variable;
 import '../../core/new_id.dart';
 
 import '../../data/app_database.dart';
-import '../catalog/part_details_dialog.dart';
 import '../catalog/part_photo_store.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/part_write_companion.dart';
@@ -213,6 +212,37 @@ final class JobLineInput {
   final List<SplitInput> splits;
 }
 
+final class _JobLineDraftInput {
+  const _JobLineDraftInput(this.line, [this.promotion]);
+  final JobLineInput line;
+  final _PendingPromotion? promotion;
+}
+
+final class _PendingPromotion {
+  _PendingPromotion({
+    required this.generation,
+    required this.partId,
+    required this.details,
+    required this.references,
+  });
+  final String generation, partId;
+  final NewPartInput details;
+  final Map<String, String> references;
+}
+
+final class JobLinePromotion {
+  JobLinePromotion._(this._parent, this._generation);
+  final JobLineEditSession _parent;
+  final String _generation;
+  NewPartInput get initial => _parent._pending(_generation).details;
+  ValueListenable<EditStatus> get status => _parent.status;
+  void replace(NewPartInput input) =>
+      _parent._replacePromotion(_generation, input);
+  Future<void> flush() => _parent._flushPromotion(_generation);
+  Future<void> cancel() => _parent._cancelPromotion(_generation);
+  Future<JobLinePromoted> promote() => _parent._promote(_generation);
+}
+
 sealed class EditOpening<S> {}
 
 final class FreshEdit<S> extends EditOpening<S> {
@@ -342,12 +372,20 @@ final class PartSaved {
   final PartEditSession session;
 }
 
-final class JobLinePromoted {
-  const JobLinePromoted({
+final class JobLinePromoted extends EditOpening<JobLineEditSession> {
+  JobLinePromoted._({
     required this.partId,
     required this.lineId,
-    required this.session,
+    required this.name,
+    required this.categoryId,
+    required this.styleId,
+    required this.typeId,
+    required this.continuation,
+    required this._acknowledgeAndContinue,
   });
-  final String partId, lineId;
-  final JobLineEditSession session;
+  final String partId, lineId, name, categoryId, styleId, typeId;
+  final JobLineInput continuation;
+  final Future<JobLineEditSession> Function() _acknowledgeAndContinue;
+  Future<JobLineEditSession> acknowledgeAndContinue() =>
+      _acknowledgeAndContinue();
 }
