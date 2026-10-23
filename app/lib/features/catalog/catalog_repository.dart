@@ -262,17 +262,32 @@ class CatalogRepository {
     required String mpn,
     String varianceName = '',
     bool isMain = false,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
-    return _db.partsDao.insertBrandVersion(
-      id: newId(),
-      partId: partId,
-      brandId: brandId,
-      mpn: mpn,
-      deviceId: _deviceId,
-      varianceName: varianceName,
-      isMain: isMain,
-    );
+    if (mpn.trim().isEmpty) throw StateError('Part number is required');
+    if (reservedId != null && reservedId.trim().isEmpty) {
+      throw StateError('Reserved variance ID must not be empty');
+    }
+    return legacyBusinessWrite(_db, () async {
+      final part = await _db.partsDao.getPart(partId);
+      final brand = await (_db.select(
+        _db.brands,
+      )..where((table) => table.id.equals(brandId))).getSingleOrNull();
+      if (part == null || brand == null || brand.deletedAt != null) {
+        throw StateError('Part and Brand must still exist');
+      }
+      await _pin.requireUnlocked();
+      return _db.partsDao.insertBrandVersion(
+        id: reservedId ?? newId(),
+        partId: partId,
+        brandId: brandId,
+        mpn: mpn.trim(),
+        deviceId: _deviceId,
+        varianceName: varianceName.trim(),
+        isMain: isMain,
+      );
+    });
   }
 
   Future<void> updateBrandVersion({

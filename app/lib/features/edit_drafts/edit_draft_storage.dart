@@ -3,6 +3,16 @@ part of 'edit_drafts.dart';
 const _rowLimit = 256 * 1024;
 const _splitLimit = 512;
 
+void _varianceTarget(Map<String, String> target) {
+  const fields = {'kind', 'part', 'reserved'};
+  if (target['kind'] != 'variance-new' ||
+      target.length != fields.length ||
+      !fields.every(target.containsKey) ||
+      target.values.any((value) => value.trim().isEmpty)) {
+    throw const FormatException('Invalid new variance target');
+  }
+}
+
 void _newPartTarget(Map<String, String> target) {
   if (target['kind'] != 'part-new' ||
       target.length != 2 ||
@@ -183,6 +193,8 @@ Map<String, Object?> _control(String raw) {
             'slot',
             'target',
           }
+        : command == 'variance-create'
+        ? {'id', 'part', 'brand', 'device', 'createdAt', 'slot', 'target'}
         : command == 'part-save'
         ? {'part'}
         : command == 'job-create'
@@ -218,6 +230,12 @@ Map<String, Object?> _control(String raw) {
 }
 
 Map<String, Object?> _inputJson(Object input) => switch (input) {
+  VarianceInput v => {
+    'brand': v.brandId,
+    'name': v.varianceNameText,
+    'mpn': v.mpnText,
+    'main': v.isMain,
+  },
   SupplierListingInput l => {'supplier': l.supplierId, 'sku': l.skuText},
   CatalogNameInput c => {'name': c.nameText},
   NewJobInput j => {'name': j.nameText},
@@ -263,6 +281,15 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
 };
 Object _parseInput(String kind, Object? value) {
   final m = _map(value);
+  if (kind == 'variance-new') {
+    _keys(m, {'brand', 'name', 'mpn', 'main'});
+    return VarianceInput(
+      brandId: _nullable(m['brand']),
+      varianceNameText: _text(m['name']),
+      mpnText: _text(m['mpn']),
+      isMain: _boolean(m['main']),
+    );
+  }
   if (kind == 'supplier-listing-new') {
     _keys(m, {'supplier', 'sku'});
     return SupplierListingInput(
@@ -369,6 +396,9 @@ SplitInput _parseSplit(Object? value) {
 
 String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
+  if (target['kind'] == 'variance-new') {
+    return 'variance-new/${segment('part')}';
+  }
   if (target['kind'] == 'supplier-listing-new') {
     return 'supplier-listing-new/${segment('listingVersion')}';
   }
@@ -445,7 +475,9 @@ final class _DraftRecord {
       throw const FormatException('Unsupported unfinished edit version');
     }
     final target = _strings(m['target']);
-    if (target['kind'] == 'supplier-listing-new') {
+    if (target['kind'] == 'variance-new') {
+      _varianceTarget(target);
+    } else if (target['kind'] == 'supplier-listing-new') {
       _supplierListingTarget(target);
     } else if (target['kind'] == 'catalog-name-new' ||
         target['kind'] == 'catalog-name-rename') {
@@ -595,6 +627,17 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'variance-new') {
+      final part = await _row('parts', target['part']!);
+      if (part == null || part['deleted_at'] != null) {
+        throw StateError('Part no longer exists');
+      }
+      final variance = await _row('brand_versions', target['reserved']!);
+      if (variance != null) {
+        throw StateError('Reserved variance ID is already in use');
+      }
+      return {'part': _digest(part), 'variance': _digest(variance)};
+    }
     if (target['kind'] == 'part-new') {
       final part = await _row('parts', target['reserved']!);
       if (part != null) throw StateError('Reserved Part ID is already in use');
@@ -741,6 +784,8 @@ class EditDrafts {
     }
 
     switch (input) {
+      case VarianceInput v:
+        add('brands', v.brandId);
       case SupplierListingInput l:
         add('suppliers', l.supplierId);
       case CatalogNameInput():
@@ -1358,6 +1403,107 @@ class EditDrafts {
     );
   }
 
+  Future<EditOpening<NewVarianceEditSession>> openNewVariance({
+    required String partId,
+    required VarianceInput initial,
+  }) {
+    final target = {
+      'kind': 'variance-new',
+      'part': partId,
+      'reserved': newId(),
+    };
+    _varianceTarget(target);
+    return _open<NewVarianceEditSession>(
+      target,
+      () async => initial,
+      (record) => NewVarianceEditSession._(this, record),
+      onCommitted: (raw) => _createdVariance(raw, target),
+    );
+  }
+
+  Future<VarianceCreated> _createdVariance(
+    String raw,
+    Map<String, String> wanted,
+  ) async {
+    if (_closed || _quiescing) throw StateError('Catalog storage is changing');
+    final control = _control(raw);
+    if (control['phase'] != 'committed' ||
+        control['command'] != 'variance-create') {
+      throw const FormatException('Unsupported created variance receipt');
+    }
+    final result = _strings(control['result']);
+    final target = _strings(jsonDecode(result['target']!));
+    _varianceTarget(target);
+    if (result['id'] != target['reserved'] ||
+        result['part'] != target['part'] ||
+        target['part'] != wanted['part'] ||
+        wanted['kind'] != target['kind'] ||
+        result['slot'] != _slot(target) ||
+        result['slot'] != _slot(wanted)) {
+      throw const FormatException('Created variance target mismatch');
+    }
+    final createdAt = DateTime.tryParse(result['createdAt']!);
+    if (createdAt == null ||
+        createdAt.toUtc().toIso8601String() != result['createdAt']) {
+      throw const FormatException('Invalid variance creation time');
+    }
+    final origin = _parseOrigin(control['origin']);
+    if (result['device'] != origin['device']) {
+      throw const FormatException('Created variance origin mismatch');
+    }
+    final key = '$editDraftPrefix${result['slot']}/control';
+    Future<void> validate() async {
+      if (await _read(key) != raw ||
+          await _read('$editDraftPrefix${result['slot']}/input') != null) {
+        throw StateError('A newer variance edit replaced this receipt');
+      }
+      if (_digest(_origin()) != _digest(origin)) {
+        throw StateError('Created variance belongs to another installation');
+      }
+      final row = await (_db.select(
+        _db.brandVersions,
+      )..where((table) => table.id.equals(result['id']!))).getSingleOrNull();
+      if (row == null ||
+          row.deletedAt != null ||
+          row.partId != result['part'] ||
+          row.brandId != result['brand'] ||
+          row.originDeviceId != result['device'] ||
+          row.createdAt.toUtc() != createdAt) {
+        throw StateError(
+          'The created variance identity is no longer available',
+        );
+      }
+      for (final parent in [
+        ('parts', result['part']!),
+        ('brands', result['brand']!),
+      ]) {
+        final row = await _row(parent.$1, parent.$2);
+        if (row == null || row['deleted_at'] != null) {
+          throw StateError('A saved variance parent is unavailable');
+        }
+      }
+    }
+
+    await validate();
+    return VarianceCreated._(
+      id: result['id']!,
+      partId: result['part']!,
+      brandId: result['brand']!,
+      originDeviceId: result['device']!,
+      createdAt: createdAt,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing) {
+          throw StateError('Catalog storage is changing');
+        }
+        await _db.transaction(() async {
+          if (await _read(key) == null) return;
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
+  }
+
   Future<EditOpening<NewPartEditSession>> openNewPart({
     String? initialCategoryId,
     String? initialStyleId,
@@ -1610,7 +1756,9 @@ class EditDrafts {
           token: newId(),
           input: input,
         );
-        if (input is NewPartInput) await _requireReferences(record);
+        if (input is NewPartInput || input is VarianceInput) {
+          await _requireReferences(record);
+        }
         return record;
       });
       final session = create(record);

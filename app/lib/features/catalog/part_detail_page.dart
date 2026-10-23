@@ -603,7 +603,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   Future<Brand?> _addBrandInPlace({
     BuildContext? consumerContext,
-    ValueChanged<Brand>? onAdopt,
+    required Future<void> Function(Brand) onAdopt,
     ValueChanged<String>? onNotice,
   }) async {
     final consumer = consumerContext ?? context;
@@ -637,7 +637,7 @@ class _PartDetailPageState extends State<PartDetailPage> {
             );
           }
           final brand = matching.first;
-          onAdopt?.call(brand);
+          await onAdopt(brand);
           if (!mounted || !consumer.mounted) {
             throw StateError('The brand consumer is no longer available');
           }
@@ -754,24 +754,22 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   Future<void> _addVariance({String? brandId}) async {
     if (!await _gate() || !mounted) return;
-
+    final edits = _edits;
+    if (edits == null) {
+      _toast('Unfinished edits are unavailable');
+      return;
+    }
     var selectedBrand = brandId;
     if (selectedBrand != null && !_brands.any((b) => b.id == selectedBrand)) {
       selectedBrand = null;
     }
-    if (selectedBrand == null && _brands.isNotEmpty) {
-      selectedBrand = _brands.first.id;
-    }
-    if (selectedBrand == null) {
-      final created = await _addBrandInPlace(
-        onAdopt: (brand) => selectedBrand = brand.id,
-      );
-      if (created == null || selectedBrand == null || !mounted) return;
-    }
-
-    final result = await showDialog<_VarianceDraft>(
+    selectedBrand ??= _brands.isEmpty ? null : _brands.first.id;
+    final result = await showDialog<VarianceCreated>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => _VarianceDialog(
+        edits: edits,
+        partId: widget.partId,
         brands: List<Brand>.of(_brands),
         groups: _brandGroups,
         initialBrandId: selectedBrand,
@@ -783,20 +781,28 @@ class _PartDetailPageState extends State<PartDetailPage> {
       ),
     );
     if (result == null || !mounted) return;
-
     try {
-      await _catalog.createBrandVersion(
-        partId: widget.partId,
-        brandId: result.brandId,
-        mpn: result.mpn,
-        varianceName: result.varianceName,
-        isMain: result.isMain,
-      );
+      await _refreshTaxonomyLists();
       await _refreshBrandGroups();
-    } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      final saved = _brandGroups
+          .expand((group) => group.variances)
+          .where((row) => result.identifies(row.version));
+      final part = await _db.partsDao.getPart(result.partId);
+      if (!mounted) return;
+      if (saved.isEmpty ||
+          part == null ||
+          !_brands.any((brand) => brand.id == result.brandId)) {
+        throw StateError(
+          'The saved variance is unavailable in the refreshed list',
+        );
+      }
+      _toast('Variance saved');
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await result.acknowledge();
+    } catch (error) {
+      if (mounted) _toast('Variance saved. Confirmation pending. $error');
     }
   }
 
@@ -1186,34 +1192,24 @@ class _PartDetailPageState extends State<PartDetailPage> {
   }
 }
 
-class _VarianceDraft {
-  const _VarianceDraft({
-    required this.brandId,
-    required this.varianceName,
-    required this.mpn,
-    required this.isMain,
-  });
-
-  final String brandId;
-  final String varianceName;
-  final String mpn;
-  final bool isMain;
-}
-
 class _VarianceDialog extends StatefulWidget {
   const _VarianceDialog({
+    required this.edits,
+    required this.partId,
     required this.brands,
     required this.groups,
     required this.initialBrandId,
     required this.onAddBrand,
   });
 
+  final EditDrafts edits;
+  final String partId;
   final List<Brand> brands;
   final List<_BrandGroup> groups;
   final String? initialBrandId;
   final Future<Brand?> Function(
     BuildContext consumer,
-    ValueChanged<Brand> onAdopt,
+    Future<void> Function(Brand) onAdopt,
     ValueChanged<String> onNotice,
   )
   onAddBrand;
@@ -1225,10 +1221,18 @@ class _VarianceDialog extends StatefulWidget {
 class _VarianceDialogState extends State<_VarianceDialog> {
   late List<Brand> _brands;
   late String? _brandId;
-  late bool _isMain;
-  final _nameController = TextEditingController();
   final _mpnController = TextEditingController();
+  final _nameController = TextEditingController();
+  late bool _isMain;
   String? _notice;
+  String? _error;
+  NewVarianceEditSession? _session;
+  EditOpening<NewVarianceEditSession>? _opening;
+  VarianceCreated? _saved;
+  bool _loading = true;
+  bool _busy = false;
+  bool _applyingInput = false;
+  bool _allowPop = false;
 
   @override
   void initState() {
@@ -1237,135 +1241,368 @@ class _VarianceDialogState extends State<_VarianceDialog> {
     _brandId =
         widget.initialBrandId ?? (_brands.isEmpty ? null : _brands.first.id);
     _isMain = _existingForBrand(_brandId).isEmpty;
+    _mpnController.addListener(_capture);
+    _nameController.addListener(_capture);
+    _openDraft();
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
+    _mpnController.removeListener(_capture);
+    _nameController.removeListener(_capture);
+    final session = _session;
+    if (session != null) {
+      unawaited(session.leave(LeaveIntent.back).catchError((Object _) {}));
+    }
     _mpnController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
-  Iterable<_VarianceRow> _existingForBrand(String? brandId) {
-    if (brandId == null) return const [];
-    return widget.groups
-        .where((g) => g.brandId == brandId)
-        .expand((g) => g.variances);
-  }
-
-  Future<void> _addBrand() async {
-    setState(() => _notice = null);
-    await widget.onAddBrand(
-      context,
-      (brand) {
-        if (!mounted) {
-          throw StateError('The variance dialog is no longer available');
-        }
-        setState(() {
-          _brands = [
-            for (final existing in _brands)
-              if (existing.id != brand.id) existing,
-            brand,
-          ];
-          _brandId = brand.id;
-          _isMain = _existingForBrand(_brandId).isEmpty;
-        });
-      },
-      (message) {
-        if (mounted) setState(() => _notice = message);
-      },
-    );
-  }
-
-  void _submit() {
-    final brandId = _brandId;
-    final mpn = _mpnController.text.trim();
-    if (brandId == null || mpn.isEmpty) return;
-    Navigator.pop(
-      context,
-      _VarianceDraft(
-        brandId: brandId,
-        varianceName: _nameController.text.trim(),
-        mpn: mpn,
+  void _capture() {
+    if (_applyingInput) return;
+    _session?.replace(
+      VarianceInput(
+        brandId: _brandId,
+        mpnText: _mpnController.text,
+        varianceNameText: _nameController.text,
         isMain: _isMain,
       ),
     );
   }
 
+  Future<void> _openDraft() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final opening = await widget.edits.openNewVariance(
+        partId: widget.partId,
+        initial: VarianceInput(
+          brandId: _brandId,
+          mpnText: '',
+          varianceNameText: '',
+          isMain: _isMain,
+        ),
+      );
+      if (!mounted) {
+        if (opening is FreshEdit<NewVarianceEditSession>) {
+          await opening.session.leave(LeaveIntent.back);
+        }
+        return;
+      }
+      if (opening is FreshEdit<NewVarianceEditSession>) {
+        await _useSession(opening.session);
+      } else if (opening is VarianceCreated) {
+        setState(() {
+          _saved = opening;
+          _opening = null;
+        });
+      } else {
+        setState(() => _opening = opening);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _useSession(NewVarianceEditSession session) async {
+    if (!mounted) {
+      await session.leave(LeaveIntent.back);
+      return;
+    }
+    _applyingInput = true;
+    setState(() {
+      _session = session;
+      _opening = null;
+      _saved = null;
+      _brandId = session.initial.brandId;
+      _mpnController.text = session.initial.mpnText;
+      _nameController.text = session.initial.varianceNameText;
+      _isMain = session.initial.isMain;
+    });
+    _applyingInput = false;
+  }
+
+  Future<void> _discardRecovery() async {
+    switch (_opening) {
+      case RecoverableEdit<NewVarianceEditSession> opening:
+        await opening.discard();
+      case BlockedEdit<NewVarianceEditSession> opening:
+        await opening.discard();
+      default:
+        return;
+    }
+    if (!mounted) return;
+    setState(() => _opening = null);
+    await _openDraft();
+  }
+
+  Iterable<_VarianceRow> _existingForBrand(String? brandId) => widget.groups
+      .where((group) => group.brandId == brandId)
+      .expand((group) => group.variances);
+
+  Future<void> _addBrand() async {
+    final session = _session;
+    if (_busy || session == null) return;
+    setState(() {
+      _notice = null;
+      _busy = true;
+      _error = null;
+    });
+    try {
+      _capture();
+      await session.flush();
+      if (!mounted) return;
+      await widget.onAddBrand(
+        context,
+        (brand) async {
+          if (!mounted) {
+            throw StateError('The variance dialog is no longer available');
+          }
+          setState(() {
+            _brands = [
+              for (final existing in _brands)
+                if (existing.id != brand.id) existing,
+              brand,
+            ];
+            _brandId = brand.id;
+            _isMain = _existingForBrand(brand.id).isEmpty;
+          });
+          _capture();
+          await session.flush();
+          final status = session.status.value;
+          if (!mounted ||
+              _session != session ||
+              status.phase != EditPhase.durable ||
+              status.durableSequence != status.latestSequence ||
+              session.initial.brandId != brand.id) {
+            throw StateError('The variance dialog is no longer available');
+          }
+        },
+        (message) {
+          if (mounted) setState(() => _notice = message);
+        },
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    final session = _session;
+    if (_busy || session == null) return;
+    _capture();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      _finish(await session.save());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _finish(VarianceCreated saved) {
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    Navigator.of(context).pop<VarianceCreated>(saved);
+  }
+
+  Future<void> _leave(LeaveIntent intent) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (_session case final session?) {
+        _capture();
+        await session.leave(intent);
+      } else if (intent == LeaveIntent.discard) {
+        switch (_opening) {
+          case RecoverableEdit<NewVarianceEditSession> opening:
+            await opening.discard();
+          case BlockedEdit<NewVarianceEditSession> opening:
+            await opening.discard();
+          default:
+            break;
+        }
+      }
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop<VarianceCreated>();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Add variance'),
-          if (_notice != null) ...[
-            const SizedBox(height: 8),
-            Semantics(liveRegion: true, child: Text(_notice!)),
+    return PopScope<VarianceCreated>(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave(LeaveIntent.back);
+      },
+      child: AlertDialog(
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Add variance'),
+            if (_notice != null) ...[
+              const SizedBox(height: 8),
+              Semantics(liveRegion: true, child: Text(_notice!)),
+            ],
+          ],
+        ),
+        content: SizedBox(
+          width: 420,
+          height: _opening != null ? 260 : 390,
+          child: Column(
+            children: [
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _opening != null
+                    ? EditOpeningPanel<NewVarianceEditSession>(
+                        opening: _opening!,
+                        onResume: _useSession,
+                        onDiscard: _discardRecovery,
+                      )
+                    : _saved != null
+                    ? const Text('Variance saved')
+                    : ListView(
+                        children: [
+                          if (_session case final session?)
+                            EditStatusBanner(status: session.status),
+                          if (_session == null)
+                            TextButton(
+                              onPressed: _openDraft,
+                              child: const Text('Retry'),
+                            ),
+                          DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            key: ValueKey(_brandId),
+                            initialValue:
+                                _brandId != null &&
+                                    _brands.any((s) => s.id == _brandId)
+                                ? _brandId
+                                : null,
+                            decoration: const InputDecoration(
+                              labelText: 'Brand',
+                            ),
+                            hint: const Text('Select or add'),
+                            items: [
+                              for (final s in _brands)
+                                DropdownMenuItem(
+                                  value: s.id,
+                                  child: Text(s.name),
+                                ),
+                            ],
+                            onChanged: _busy || _session == null
+                                ? null
+                                : (v) {
+                                    setState(() {
+                                      _brandId = v;
+                                      _isMain = _existingForBrand(v).isEmpty;
+                                    });
+                                    _capture();
+                                  },
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: _busy || _session == null
+                                  ? null
+                                  : _addBrand,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Add brand'),
+                            ),
+                          ),
+                          TextField(
+                            controller: _nameController,
+                            enabled: !_busy && _session != null,
+                            decoration: const InputDecoration(
+                              labelText: 'Variance (color / option)',
+                              hintText: 'White',
+                            ),
+                          ),
+                          TextField(
+                            controller: _mpnController,
+                            enabled: !_busy && _session != null,
+                            decoration: const InputDecoration(
+                              labelText: 'Part number',
+                            ),
+                            autofocus: true,
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Main'),
+                            subtitle: const Text(
+                              'First pick; others are extra options',
+                            ),
+                            value: _isMain,
+                            onChanged: _busy || _session == null
+                                ? null
+                                : (value) {
+                                    setState(() => _isMain = value);
+                                    _capture();
+                                  },
+                          ),
+                        ],
+                      ),
+              ),
+              if (_error != null)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 100),
+                  child: SingleChildScrollView(child: Text(_error!)),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          if (_saved != null)
+            TextButton(
+              onPressed: () => _leave(LeaveIntent.back),
+              child: const Text('Close'),
+            ),
+          if (_saved case final saved?)
+            FilledButton(
+              onPressed: () => _finish(saved),
+              child: const Text('Done'),
+            )
+          else ...[
+            TextButton(
+              onPressed: _busy || _loading
+                  ? null
+                  : () => _leave(LeaveIntent.back),
+              child: const Text('Back'),
+            ),
+            TextButton(
+              onPressed: _busy || _loading
+                  ? null
+                  : () => _leave(LeaveIntent.discard),
+              child: const Text('Cancel'),
+            ),
+            if (_session != null && _opening == null)
+              FilledButton(
+                onPressed: _busy || _loading ? null : _submit,
+                child: const Text('Add'),
+              ),
           ],
         ],
       ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              // ignore: deprecated_member_use
-              value: _brandId != null && _brands.any((b) => b.id == _brandId)
-                  ? _brandId
-                  : null,
-              decoration: const InputDecoration(labelText: 'Brand'),
-              hint: const Text('Select or add'),
-              items: [
-                for (final b in _brands)
-                  DropdownMenuItem(value: b.id, child: Text(b.name)),
-              ],
-              onChanged: (v) {
-                setState(() {
-                  _brandId = v;
-                  _isMain = _existingForBrand(v).isEmpty;
-                });
-              },
-            ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _addBrand,
-                icon: const Icon(Icons.add),
-                label: const Text('Add brand'),
-              ),
-            ),
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Variance (color / option)',
-                hintText: 'White',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _mpnController,
-              decoration: const InputDecoration(labelText: 'Part number'),
-              autofocus: true,
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Main'),
-              subtitle: const Text('First pick; others are extra options'),
-              value: _isMain,
-              onChanged: (v) => setState(() => _isMain = v),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Add')),
-      ],
     );
   }
 }
