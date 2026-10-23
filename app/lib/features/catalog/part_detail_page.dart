@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -801,23 +802,22 @@ class _PartDetailPageState extends State<PartDetailPage> {
 
   Future<void> _addListing(BrandVersion version) async {
     if (!await _gate() || !mounted) return;
-
-    String? selectedSupplier;
-    if (_suppliers.isEmpty) {
-      final created = await _addSupplierInPlace(
-        onAdopt: (supplier) async {
-          selectedSupplier = supplier.id;
-        },
-      );
-      if (created == null || !mounted) return;
+    final edits = _edits;
+    if (edits == null) {
+      _toast('Unfinished edits are unavailable');
+      return;
     }
-
-    final result = await showDialog<_ListingDraft>(
+    final result = await showDialog<SupplierListingSaved>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => _ListingDialog(
+        edits: edits,
+        partId: widget.partId,
+        brandVersionId: version.id,
         suppliers: List<Supplier>.of(_suppliers),
         initialSupplierId:
-            selectedSupplier ?? _defaultSupplierId ?? _suppliers.first.id,
+            _defaultSupplierId ??
+            (_suppliers.isEmpty ? null : _suppliers.first.id),
         onAddSupplier: (consumer, onAdopt, onNotice) => _addSupplierInPlace(
           consumerContext: consumer,
           onAdopt: onAdopt,
@@ -828,16 +828,13 @@ class _PartDetailPageState extends State<PartDetailPage> {
     if (result == null || !mounted) return;
 
     try {
-      await _catalog.createSupplierListing(
-        brandVersionId: version.id,
-        supplierId: result.supplierId,
-        sku: result.sku,
-      );
       await _refreshBrandGroups();
-    } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await result.acknowledge();
+    } catch (error) {
+      if (mounted) _toast('Supplier listing saved. Refresh pending: $error');
     }
   }
 
@@ -1373,20 +1370,18 @@ class _VarianceDialogState extends State<_VarianceDialog> {
   }
 }
 
-class _ListingDraft {
-  const _ListingDraft({required this.supplierId, required this.sku});
-
-  final String supplierId;
-  final String sku;
-}
-
 class _ListingDialog extends StatefulWidget {
   const _ListingDialog({
+    required this.edits,
+    required this.partId,
+    required this.brandVersionId,
     required this.suppliers,
     required this.initialSupplierId,
     required this.onAddSupplier,
   });
 
+  final EditDrafts edits;
+  final String partId, brandVersionId;
   final List<Supplier> suppliers;
   final String? initialSupplierId;
   final Future<Supplier?> Function(
@@ -1405,6 +1400,14 @@ class _ListingDialogState extends State<_ListingDialog> {
   late String? _supplierId;
   final _skuController = TextEditingController();
   String? _notice;
+  String? _error;
+  SupplierListingEditSession? _session;
+  EditOpening<SupplierListingEditSession>? _opening;
+  SupplierListingSaved? _saved;
+  bool _loading = true;
+  bool _busy = false;
+  bool _applyingInput = false;
+  bool _allowPop = false;
 
   @override
   void initState() {
@@ -1413,101 +1416,305 @@ class _ListingDialogState extends State<_ListingDialog> {
     _supplierId =
         widget.initialSupplierId ??
         (_suppliers.isEmpty ? null : _suppliers.first.id);
+    _skuController.addListener(_capture);
+    _openDraft();
   }
 
   @override
   void dispose() {
+    _skuController.removeListener(_capture);
+    final session = _session;
+    if (session != null) {
+      unawaited(session.leave(LeaveIntent.back).catchError((Object _) {}));
+    }
     _skuController.dispose();
     super.dispose();
   }
 
-  Future<void> _addSupplier() async {
-    setState(() => _notice = null);
-    await widget.onAddSupplier(
-      context,
-      (supplier) async {
-        if (!mounted) {
-          throw StateError('The listing dialog is no longer available');
-        }
-        setState(() {
-          _suppliers = [
-            for (final existing in _suppliers)
-              if (existing.id != supplier.id) existing,
-            supplier,
-          ];
-          _supplierId = supplier.id;
-        });
-      },
-      (message) {
-        if (mounted) setState(() => _notice = message);
-      },
+  void _capture() {
+    if (_applyingInput) return;
+    _session?.replace(
+      SupplierListingInput(
+        supplierId: _supplierId,
+        skuText: _skuController.text,
+      ),
     );
   }
 
-  void _submit() {
-    final supplierId = _supplierId;
-    if (supplierId == null) return;
-    final sku = _skuController.text.trim();
-    Navigator.pop(context, _ListingDraft(supplierId: supplierId, sku: sku));
+  Future<void> _openDraft() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    var bootstrap = false;
+    try {
+      final opening = await widget.edits.openSupplierListing(
+        brandVersionId: widget.brandVersionId,
+        partId: widget.partId,
+        initial: SupplierListingInput(supplierId: _supplierId, skuText: ''),
+      );
+      if (!mounted) {
+        if (opening is FreshEdit<SupplierListingEditSession>) {
+          await opening.session.leave(LeaveIntent.back);
+        }
+        return;
+      }
+      if (opening is FreshEdit<SupplierListingEditSession>) {
+        await _useSession(opening.session);
+        bootstrap = _suppliers.isEmpty;
+      } else if (opening is SupplierListingSaved) {
+        setState(() {
+          _saved = opening;
+          _opening = null;
+        });
+      } else {
+        setState(() => _opening = opening);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    if (mounted && bootstrap) await _addSupplier();
+  }
+
+  Future<void> _useSession(SupplierListingEditSession session) async {
+    if (!mounted) {
+      await session.leave(LeaveIntent.back);
+      return;
+    }
+    _applyingInput = true;
+    setState(() {
+      _session = session;
+      _opening = null;
+      _saved = null;
+      _supplierId = session.initial.supplierId;
+      _skuController.text = session.initial.skuText;
+    });
+    _applyingInput = false;
+  }
+
+  Future<void> _discardRecovery() async {
+    switch (_opening) {
+      case RecoverableEdit<SupplierListingEditSession> opening:
+        await opening.discard();
+      case BlockedEdit<SupplierListingEditSession> opening:
+        await opening.discard();
+      default:
+        return;
+    }
+    if (!mounted) return;
+    setState(() => _opening = null);
+    await _openDraft();
+  }
+
+  Future<void> _addSupplier() async {
+    final session = _session;
+    if (_busy || session == null) return;
+    setState(() {
+      _notice = null;
+      _busy = true;
+      _error = null;
+    });
+    try {
+      _capture();
+      await session.flush();
+      if (!mounted) return;
+      await widget.onAddSupplier(
+        context,
+        (supplier) async {
+          if (!mounted) {
+            throw StateError('The listing dialog is no longer available');
+          }
+          setState(() {
+            _suppliers = [
+              for (final existing in _suppliers)
+                if (existing.id != supplier.id) existing,
+              supplier,
+            ];
+            _supplierId = supplier.id;
+          });
+          _capture();
+          await session.flush();
+          if (!mounted || session.status.value.phase == EditPhase.closed) {
+            throw StateError('The listing dialog is no longer available');
+          }
+        },
+        (message) {
+          if (mounted) setState(() => _notice = message);
+        },
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    final session = _session;
+    if (_busy || session == null) return;
+    _capture();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      _finish(await session.save());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _finish(SupplierListingSaved saved) {
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    Navigator.of(context).pop<SupplierListingSaved>(saved);
+  }
+
+  Future<void> _leave(LeaveIntent intent) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (_session case final session?) {
+        _capture();
+        await session.leave(intent);
+      } else if (intent == LeaveIntent.discard) {
+        switch (_opening) {
+          case RecoverableEdit<SupplierListingEditSession> opening:
+            await opening.discard();
+          case BlockedEdit<SupplierListingEditSession> opening:
+            await opening.discard();
+          default:
+            break;
+        }
+      }
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      Navigator.of(context).pop<SupplierListingSaved>();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Add supplier listing'),
-          if (_notice != null) ...[
-            const SizedBox(height: 8),
-            Semantics(liveRegion: true, child: Text(_notice!)),
+    return PopScope<SupplierListingSaved>(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave(LeaveIntent.back);
+      },
+      child: AlertDialog(
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Add supplier listing'),
+            if (_notice != null) ...[
+              const SizedBox(height: 8),
+              Semantics(liveRegion: true, child: Text(_notice!)),
+            ],
+          ],
+        ),
+        content: SizedBox(
+          width: 420,
+          height: _opening != null ? 260 : 330,
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _opening != null
+              ? EditOpeningPanel<SupplierListingEditSession>(
+                  opening: _opening!,
+                  onResume: _useSession,
+                  onDiscard: _discardRecovery,
+                )
+              : _saved != null
+              ? const Text('Supplier listing saved')
+              : ListView(
+                  children: [
+                    if (_session case final session?)
+                      EditStatusBanner(status: session.status),
+                    if (_session == null)
+                      TextButton(
+                        onPressed: _openDraft,
+                        child: const Text('Retry'),
+                      ),
+                    DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
+                      value:
+                          _supplierId != null &&
+                              _suppliers.any((s) => s.id == _supplierId)
+                          ? _supplierId
+                          : null,
+                      decoration: const InputDecoration(labelText: 'Supplier'),
+                      hint: const Text('Select or add'),
+                      items: [
+                        for (final s in _suppliers)
+                          DropdownMenuItem(value: s.id, child: Text(s.name)),
+                      ],
+                      onChanged: _busy || _session == null
+                          ? null
+                          : (v) {
+                              setState(() => _supplierId = v);
+                              _capture();
+                            },
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _busy || _session == null
+                            ? null
+                            : _addSupplier,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add supplier'),
+                      ),
+                    ),
+                    TextField(
+                      controller: _skuController,
+                      enabled: !_busy && _session != null,
+                      decoration: const InputDecoration(
+                        labelText: 'SKU (optional)',
+                        hintText: 'Leave blank if you do not have one',
+                      ),
+                      autofocus: true,
+                    ),
+                    if (_error != null) Text(_error!),
+                  ],
+                ),
+        ),
+        actions: [
+          if (_saved case final saved?)
+            FilledButton(
+              onPressed: () => _finish(saved),
+              child: const Text('Done'),
+            )
+          else ...[
+            TextButton(
+              onPressed: _busy || _loading
+                  ? null
+                  : () => _leave(LeaveIntent.back),
+              child: const Text('Back'),
+            ),
+            TextButton(
+              onPressed: _busy || _loading
+                  ? null
+                  : () => _leave(LeaveIntent.discard),
+              child: const Text('Cancel'),
+            ),
+            if (_session != null && _opening == null)
+              FilledButton(
+                onPressed: _busy || _loading ? null : _submit,
+                child: const Text('Add'),
+              ),
           ],
         ],
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DropdownButtonFormField<String>(
-            // ignore: deprecated_member_use
-            value:
-                _supplierId != null &&
-                    _suppliers.any((s) => s.id == _supplierId)
-                ? _supplierId
-                : null,
-            decoration: const InputDecoration(labelText: 'Supplier'),
-            hint: const Text('Select or add'),
-            items: [
-              for (final s in _suppliers)
-                DropdownMenuItem(value: s.id, child: Text(s.name)),
-            ],
-            onChanged: (v) => setState(() => _supplierId = v),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _addSupplier,
-              icon: const Icon(Icons.add),
-              label: const Text('Add supplier'),
-            ),
-          ),
-          TextField(
-            controller: _skuController,
-            decoration: const InputDecoration(
-              labelText: 'SKU (optional)',
-              hintText: 'Leave blank if you do not have one',
-            ),
-            autofocus: true,
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Add')),
-      ],
     );
   }
 }

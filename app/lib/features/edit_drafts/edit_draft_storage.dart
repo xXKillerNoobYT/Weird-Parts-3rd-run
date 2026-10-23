@@ -3,6 +3,16 @@ part of 'edit_drafts.dart';
 const _rowLimit = 256 * 1024;
 const _splitLimit = 512;
 
+void _supplierListingTarget(Map<String, String> target) {
+  const fields = {'kind', 'part', 'listingVersion', 'reserved'};
+  if (target['kind'] != 'supplier-listing-new' ||
+      target.length != fields.length ||
+      !fields.every(target.containsKey) ||
+      target.values.any((value) => value.trim().isEmpty)) {
+    throw const FormatException('Invalid supplier listing target');
+  }
+}
+
 extension _CatalogNameStore on CatalogNameKind {
   String get _table => switch (this) {
     CatalogNameKind.category => 'categories',
@@ -163,6 +173,8 @@ Map<String, Object?> _control(String raw) {
         ? {'location', 'row'}
         : command == 'catalog-name-create' || command == 'catalog-name-rename'
         ? _catalogNameResultFields(result)
+        : command == 'supplier-listing-create'
+        ? {'id', 'row', 'slot', 'target'}
         : command == 'line-save' || command == 'line-remove'
         ? {'line'}
         : command.startsWith('line-promote/')
@@ -185,6 +197,7 @@ Map<String, Object?> _control(String raw) {
 }
 
 Map<String, Object?> _inputJson(Object input) => switch (input) {
+  SupplierListingInput l => {'supplier': l.supplierId, 'sku': l.skuText},
   CatalogNameInput c => {'name': c.nameText},
   NewJobInput j => {'name': j.nameText},
   WarehouseLocationNameInput l => {'name': l.nameText},
@@ -223,6 +236,13 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
 };
 Object _parseInput(String kind, Object? value) {
   final m = _map(value);
+  if (kind == 'supplier-listing-new') {
+    _keys(m, {'supplier', 'sku'});
+    return SupplierListingInput(
+      supplierId: _nullable(m['supplier']),
+      skuText: _text(m['sku']),
+    );
+  }
   if (kind == 'catalog-name-new' || kind == 'catalog-name-rename') {
     _keys(m, {'name'});
     return CatalogNameInput(nameText: _text(m['name']));
@@ -313,6 +333,9 @@ SplitInput _parseSplit(Object? value) {
 
 String _slot(Map<String, String> target) {
   String segment(String key) => Uri.encodeComponent(target[key]!);
+  if (target['kind'] == 'supplier-listing-new') {
+    return 'supplier-listing-new/${segment('listingVersion')}';
+  }
   if (target['kind'] == 'catalog-name-new') {
     return 'catalog-name-new/${segment('entity')}'
         '${target.containsKey('parent') ? '/${segment('parent')}' : ''}'
@@ -385,7 +408,9 @@ final class _DraftRecord {
       throw const FormatException('Unsupported unfinished edit version');
     }
     final target = _strings(m['target']);
-    if (target['kind'] == 'catalog-name-new' ||
+    if (target['kind'] == 'supplier-listing-new') {
+      _supplierListingTarget(target);
+    } else if (target['kind'] == 'catalog-name-new' ||
         target['kind'] == 'catalog-name-rename') {
       _catalogNameTarget(target);
     } else if (target['kind'] == 'part') {
@@ -531,6 +556,17 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'supplier-listing-new') {
+      final context = await _supplierListingContext(target);
+      final listing = await _row('supplier_listings', target['reserved']!);
+      if (listing != null) {
+        throw StateError('Reserved supplier listing ID is already in use');
+      }
+      return {
+        'listing': _digest(listing),
+        for (final entry in context.entries) entry.key: _digest(entry.value),
+      };
+    }
     if (target['kind'] == 'catalog-name-new' ||
         target['kind'] == 'catalog-name-rename') {
       final kind = _catalogNameKind(target['entity']);
@@ -661,6 +697,8 @@ class EditDrafts {
     }
 
     switch (input) {
+      case SupplierListingInput l:
+        add('suppliers', l.supplierId);
       case CatalogNameInput():
         break;
       case NewJobInput():
@@ -782,7 +820,103 @@ class EditDrafts {
     if (part == null || part['deleted_at'] != null) {
       throw StateError('Supplier listing Part is unavailable');
     }
+    if (target['kind'] == 'supplier-listing-new' &&
+        version['part_id'] != target['part']) {
+      throw StateError('Supplier listing variance belongs to another Part');
+    }
     return {'Version': version, 'Part': part};
+  }
+
+  Future<EditOpening<SupplierListingEditSession>> openSupplierListing({
+    required String brandVersionId,
+    required String partId,
+    required SupplierListingInput initial,
+  }) {
+    final target = {
+      'kind': 'supplier-listing-new',
+      'part': partId,
+      'listingVersion': brandVersionId,
+      'reserved': newId(),
+    };
+    _supplierListingTarget(target);
+    return _open<SupplierListingEditSession>(
+      target,
+      () async => initial,
+      (record) => SupplierListingEditSession._(this, record),
+      onCommitted: (raw) => _savedSupplierListing(raw, target),
+    );
+  }
+
+  Future<SupplierListingSaved> _savedSupplierListing(
+    String raw,
+    Map<String, String> wanted,
+  ) async {
+    if (_closed || _quiescing) throw StateError('Catalog storage is changing');
+    final control = _control(raw);
+    if (control['phase'] != 'committed' ||
+        control['command'] != 'supplier-listing-create') {
+      throw const FormatException('Unsupported saved supplier listing receipt');
+    }
+    final result = _strings(control['result']);
+    final target = _strings(jsonDecode(result['target']!));
+    _supplierListingTarget(target);
+    if (result['id'] != target['reserved'] ||
+        result['slot'] != _slot(target) ||
+        result['slot'] != _slot(wanted) ||
+        ![
+          'kind',
+          'part',
+          'listingVersion',
+        ].every((key) => target[key] == wanted[key])) {
+      throw const FormatException('Saved supplier listing target mismatch');
+    }
+    Future<SupplierListing> validate() async {
+      if (_digest(_origin()) != _digest(control['origin'])) {
+        throw StateError(
+          'Saved supplier listing belongs to another installation',
+        );
+      }
+      await _supplierListingContext(target);
+      final row = await _row('supplier_listings', result['id']!);
+      if (row == null ||
+          row['deleted_at'] != null ||
+          row['origin_device_id'] != _deviceId ||
+          row['brand_version_id'] != target['listingVersion'] ||
+          _digest(row) != result['row']) {
+        throw StateError(
+          'The saved supplier listing changed or is unavailable',
+        );
+      }
+      final supplier = await _row('suppliers', _text(row['supplier_id']));
+      if (supplier == null || supplier['deleted_at'] != null) {
+        throw StateError('The saved listing Supplier is unavailable');
+      }
+      return (await (_db.select(
+        _db.supplierListings,
+      )..where((table) => table.id.equals(result['id']!))).getSingle());
+    }
+
+    final listing = await validate();
+    return SupplierListingSaved._(
+      listing: listing,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing)
+          throw StateError('Catalog storage is changing');
+        await _db.transaction(() async {
+          final key = '$editDraftPrefix${result['slot']}/control';
+          final current = await _read(key);
+          if (current == null) return;
+          if (current != raw ||
+              await _read('$editDraftPrefix${result['slot']}/input') != null) {
+            throw StateError(
+              'A newer supplier listing edit replaced this receipt',
+            );
+          }
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
   }
 
   Future<Map<String, Map<String, Object?>>> _catalogNameAncestors(

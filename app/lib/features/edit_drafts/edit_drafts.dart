@@ -126,6 +126,12 @@ final class CatalogNameInput {
   final String nameText;
 }
 
+final class SupplierListingInput {
+  const SupplierListingInput({required this.supplierId, required this.skuText});
+  final String? supplierId;
+  final String skuText;
+}
+
 final class WarehouseLocationNameInput {
   const WarehouseLocationNameInput({required this.nameText});
   final String nameText;
@@ -233,6 +239,17 @@ final class CatalogNameSaved extends EditOpening<CatalogNameEditSession> {
 
   final CatalogNameKind kind;
   final String id, name;
+  final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
+}
+
+final class SupplierListingSaved
+    extends EditOpening<SupplierListingEditSession> {
+  SupplierListingSaved._({
+    required this.listing,
+    required Future<void> Function() acknowledge,
+  }) : _acknowledge = acknowledge;
+  final SupplierListing listing;
   final Future<void> Function() _acknowledge;
   Future<void> acknowledge() => _acknowledge();
 }
