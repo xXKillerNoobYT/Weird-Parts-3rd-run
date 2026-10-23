@@ -126,6 +126,17 @@ Future<void> _addLevitonWhiteVariance(WidgetTester tester) async {
   await tester.tap(find.text('Add variance').first);
   await tester.pumpAndSettle();
   expect(find.text('Add brand'), findsOneWidget);
+  await tester.tap(
+    find.descendant(
+      of: find.byType(AlertDialog).last,
+      matching: find.widgetWithText(TextButton, 'Add brand'),
+    ),
+  );
+  await tester.pumpAndSettle();
+  expect(
+    tester.widget<AlertDialog>(find.byType(AlertDialog).last).title,
+    isA<Text>().having((title) => title.data, 'data', 'Add brand'),
+  );
   await typeTopDialogName(tester, 'Leviton');
   expect(find.text('Add variance'), findsWidgets);
   final varianceFields = find.descendant(
@@ -138,6 +149,11 @@ Future<void> _addLevitonWhiteVariance(WidgetTester tester) async {
   await tester.pumpAndSettle();
   expect(find.text('Leviton'), findsWidgets);
   expect(find.text('White · R50-W'), findsOneWidget);
+  final varianceSavedNotice = find.widgetWithText(SnackBar, 'Variance saved');
+  expect(varianceSavedNotice, findsOneWidget);
+  await tester.drag(varianceSavedNotice, const Offset(0, 100));
+  await tester.pumpAndSettle();
+  expect(varianceSavedNotice, findsNothing);
 }
 
 Future<void> _openPinAndType1234(WidgetTester tester) async {
