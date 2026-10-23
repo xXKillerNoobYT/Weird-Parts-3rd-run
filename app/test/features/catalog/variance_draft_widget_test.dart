@@ -6,6 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/catalog/catalog_repository.dart';
@@ -16,6 +17,15 @@ import 'package:wired_parts/features/maintenance/maintenance_repository.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 
 import '../warehouse/warehouse_test_support.dart';
+
+class _PhotoPaths extends PathProviderPlatform {
+  _PhotoPaths(this.support);
+
+  final Directory support;
+
+  @override
+  Future<String?> getApplicationSupportPath() async => support.path;
+}
 
 Finder _field(String label) => find.byWidgetPredicate(
   (widget) => widget is TextField && widget.decoration?.labelText == label,
@@ -34,6 +44,9 @@ void main() {
         final directory = Directory.systemTemp.createTempSync(
           'variance-draft-',
         );
+        final previousPaths = PathProviderPlatform.instance;
+        PathProviderPlatform.instance = _PhotoPaths(directory);
+        addTearDown(() => PathProviderPlatform.instance = previousPaths);
         final file = File('${directory.path}/synthetic.sqlite');
         final fixture = await WarehouseFixture.create(file: file);
         var db = fixture.db;
@@ -110,7 +123,7 @@ void main() {
         );
         await JobsRepository(db, deviceId).createJob('Preserved Job');
         await fixture.repo.recordCount(fixture.draft());
-        final photos = Directory('${directory.path}/photos');
+        final photos = Directory('${directory.path}/part_photos');
         final image = img.Image(width: 8, height: 8);
         img.fill(image, color: img.ColorRgb8(20, 80, 140));
         final photoPath = (await tester.runAsync(
@@ -212,8 +225,31 @@ void main() {
           }
           await tester.enterText(_field('PIN'), '1234');
           await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
-          await tester.pumpAndSettle();
+          await tester.pump();
           expect(pin.isUnlocked, isTrue);
+        }
+
+        Future<void> waitForPhotoPart() async {
+          await tester.runAsync(() async {
+            final wait = Stopwatch()..start();
+            while (_field('Name').evaluate().isEmpty &&
+                wait.elapsed < const Duration(seconds: 3)) {
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+              await tester.pump(const Duration(milliseconds: 20));
+            }
+          });
+          expect(_field('Name'), findsOneWidget);
+          expect(
+            tester
+                .widgetList<Image>(find.byType(Image))
+                .where(
+                  (image) =>
+                      image.image is FileImage &&
+                      (image.image as FileImage).file.path == photo.path,
+                ),
+            hasLength(1),
+          );
+          await tester.pumpAndSettle();
         }
 
         Future<void> enterVariance(
@@ -260,8 +296,12 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.tap(find.text(focused ? 'Add variance' : 'Edit part'));
-          await tester.pumpAndSettle();
-          await unlock(refuseWrongPin: refuseWrongPin);
+          await tester.pump();
+          if (!pin.isUnlocked) {
+            await tester.pumpAndSettle();
+            await unlock(refuseWrongPin: refuseWrongPin);
+          }
+          await waitForPhotoPart();
           expect(find.byType(PartDetailPage), findsOneWidget);
           if (!focused) {
             final add = find.widgetWithText(TextButton, 'Add variance').first;
