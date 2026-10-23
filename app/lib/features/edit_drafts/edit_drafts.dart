@@ -147,6 +147,17 @@ final class WarehouseCountInput {
   final DateTime observedAt;
 }
 
+final class NewPartInput {
+  const NewPartInput({
+    required this.nameText,
+    required this.categoryId,
+    required this.styleId,
+    required this.typeId,
+  });
+  final String nameText;
+  final String? categoryId, styleId, typeId;
+}
+
 final class PartInput {
   const PartInput({
     required this.nameText,
@@ -226,6 +237,29 @@ final class NewJobCreated extends EditOpening<NewJobEditSession> {
 
   final String id, name;
   final Future<void> Function() _acknowledge;
+  Future<void> acknowledge() => _acknowledge();
+}
+
+final class NewPartCreated extends EditOpening<NewPartEditSession> {
+  NewPartCreated._({
+    required this.id,
+    required this.name,
+    required this.categoryId,
+    required this.styleId,
+    required this.typeId,
+    required this.originDeviceId,
+    required this.createdAt,
+    required this._acknowledge,
+  });
+
+  final String id, name, categoryId, styleId, typeId, originDeviceId;
+  final DateTime createdAt;
+  final Future<void> Function() _acknowledge;
+  bool identifies(Part part) =>
+      part.id == id &&
+      part.originDeviceId == originDeviceId &&
+      part.createdAt.toUtc() == createdAt &&
+      part.deletedAt == null;
   Future<void> acknowledge() => _acknowledge();
 }
 

@@ -14,6 +14,7 @@ abstract class _EditSession {
   final ValueNotifier<EditStatus> _statusValue;
   ValueListenable<EditStatus> get status => _statusValue;
   bool _admitted = false;
+  String? _persistedInput;
   bool _sealed = false;
   Object? _lastError;
   String? _operation;
@@ -98,6 +99,10 @@ abstract class _EditSession {
             control['token'] != _record.token) {
           throw StateError('This unfinished editing session was replaced');
         }
+        if (_record.input is NewPartInput &&
+            await _owner._read(_record.inputKey) != _persistedInput) {
+          throw StateError('This unfinished Part input was replaced');
+        }
         final changed = await _owner._db.customUpdate(
           'UPDATE app_settings SET value = ? WHERE key = ?',
           variables: [Variable(encoded), Variable(_record.inputKey)],
@@ -106,6 +111,7 @@ abstract class _EditSession {
           throw StateError('This unfinished editing session was removed');
         }
       }
+      _persistedInput = encoded;
       committed = true;
     });
     if (!committed) return;
@@ -513,6 +519,49 @@ class NewJobEditSession extends _EditSession {
       throw StateError('A newer Job edit replaced this receipt');
     }
     return _owner._createdJob(raw);
+  }
+}
+
+class NewPartEditSession extends _EditSession {
+  NewPartEditSession._(super.owner, super.record);
+  NewPartInput get initial => _record.input as NewPartInput;
+  String get partId => _record.target['reserved']!;
+  void replace(NewPartInput input) => _replace(input);
+
+  Future<NewPartCreated> save() async {
+    final result = await _settle('part-create', () async {
+      await CatalogRepository(
+        _owner._db,
+        _owner._pin,
+        _owner._deviceId,
+      ).createGeneralPart(
+        name: initial.nameText,
+        categoryId: initial.categoryId,
+        styleId: initial.styleId,
+        typeId: initial.typeId,
+        reservedId: partId,
+      );
+      final part = (await _owner._db.partsDao.getPart(partId))!;
+      return {
+        'id': partId,
+        'name': part.name,
+        'category': part.categoryId!,
+        'style': part.styleId!,
+        'type': part.typeId!,
+        'device': part.originDeviceId,
+        'createdAt': part.createdAt.toUtc().toIso8601String(),
+        'slot': _record.slot,
+        'target': jsonEncode(_record.target),
+      };
+    });
+    final raw = await _owner._read(_record.controlKey);
+    if (raw == null) throw StateError('Created Part receipt is unavailable');
+    final control = _control(raw);
+    if (control['token'] != _record.token ||
+        _digest(_strings(control['result'])) != _digest(result)) {
+      throw StateError('A newer Part edit replaced this receipt');
+    }
+    return _owner._createdPart(raw);
   }
 }
 

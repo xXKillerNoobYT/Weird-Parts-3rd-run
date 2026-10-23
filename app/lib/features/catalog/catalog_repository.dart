@@ -167,8 +167,12 @@ class CatalogRepository {
     String? categoryId,
     String? styleId,
     String? typeId,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
+    if (reservedId != null && reservedId.trim().isEmpty) {
+      throw StateError('Reserved Part ID must not be empty');
+    }
     final trimmedName = name.trim();
     if (trimmedName.isEmpty) throw StateError('Part name is required');
     return legacyBusinessWrite(_db, () async {
@@ -179,7 +183,7 @@ class CatalogRepository {
       );
       await _pin.requireUnlocked();
       return _db.partsDao.insertGeneralPart(
-        id: newId(),
+        id: reservedId ?? newId(),
         name: trimmedName,
         deviceId: _deviceId,
         defaultSupplierId: defaultSupplierId,
