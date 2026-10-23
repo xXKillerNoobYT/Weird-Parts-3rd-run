@@ -114,12 +114,22 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
 
   Future<void> _joinNearby({bool reconnect = false}) async {
     final owner = _session;
-    if (owner is! OwnerSession) return;
+    final joining =
+        owner == null &&
+        !reconnect &&
+        (_status == CompanyBootstrapStatus.unjoined ||
+            _status == CompanyBootstrapStatus.pendingJoin);
+    if (!joining &&
+        (owner is! OwnerSession ||
+            !owner.isValid ||
+            (!reconnect && !owner.identity.isAuthorityOwner))) {
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CompanyJoinPage(
           enrollment: _enrollment,
-          approver: owner,
+          approver: owner is OwnerSession ? owner : null,
           reconnect: reconnect,
         ),
       ),

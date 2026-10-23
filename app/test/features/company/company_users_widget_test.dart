@@ -127,6 +127,9 @@ void main() {
       );
       await _wait(tester, find.textContaining('Company ID:'));
       expect(find.byKey(const Key('company-enroll-open')), findsNothing);
+      expect(find.byKey(const Key('company-peer-open')), findsNothing);
+      expect(find.byKey(const Key('company-join-open')), findsNothing);
+      expect(find.byKey(const Key('company-join-resume')), findsNothing);
       expect(find.byKey(const Key('company-create-user')), findsNothing);
       await tester.scrollUntilVisible(
         find.textContaining('Create Job permission only. Sign in as the owner'),
