@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
@@ -22,6 +23,105 @@ import 'package:wired_parts/features/shell/home_shell.dart';
 import '../../tool/nearby_lan_validation.dart';
 import '../../tool/nearby_lan_workspace.dart';
 
+enum _LockChildMode { normal, delayedReadiness, delayedShutdown }
+
+const _lockChildDeadline = Duration(seconds: 10);
+
+Future<void> _withLockedWorkspaceChild({
+  required String lockPath,
+  required _LockChildMode mode,
+  required FutureOr<void> Function() whileLocked,
+  void Function(Process child)? onStarted,
+}) async {
+  const normalProgram =
+      "import os,sys; f=open(sys.argv[1], 'a+b'); "
+      "exec('import msvcrt; msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)' if os.name == 'nt' else 'import fcntl; fcntl.lockf(f, fcntl.LOCK_EX)'); "
+      "print('locked', flush=True); sys.stdin.read()";
+  const controlledProgram = '''
+import os,sys,time,threading
+f=open(sys.argv[1], 'a+b')
+exec('import msvcrt; msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)' if os.name == 'nt' else 'import fcntl; fcntl.lockf(f, fcntl.LOCK_EX)')
+mode=sys.argv[2]
+print('lock-acquired', file=sys.stderr, flush=True)
+if mode == 'readiness':
+    closed=threading.Event()
+    def watch_stdin():
+        sys.stdin.read()
+        closed.set()
+    threading.Thread(target=watch_stdin, daemon=True).start()
+    deadline=time.monotonic()+45
+    while time.monotonic()<deadline and not closed.wait(0.02):
+        pass
+    if closed.is_set():
+        sys.exit(0)
+    print('locked', flush=True)
+    sys.stdin.read()
+elif mode == 'shutdown':
+    print('locked', flush=True)
+    sys.stdin.read()
+    time.sleep(45)
+''';
+
+  final args = <String>[
+    '-u',
+    '-c',
+    mode == _LockChildMode.normal ? normalProgram : controlledProgram,
+    lockPath,
+    if (mode != _LockChildMode.normal)
+      mode == _LockChildMode.delayedReadiness ? 'readiness' : 'shutdown',
+  ];
+  Process? child;
+  var bodyFailed = false;
+  try {
+    child = await Process.start(
+      Platform.isWindows ? 'python' : 'python3',
+      args,
+    );
+    onStarted?.call(child);
+    if (mode != _LockChildMode.normal) {
+      expect(
+        await child.stderr
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .first
+            .timeout(_lockChildDeadline),
+        'lock-acquired',
+      );
+    }
+    if (mode == _LockChildMode.delayedReadiness) await whileLocked();
+    expect(
+      await child.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .first
+          .timeout(_lockChildDeadline),
+      'locked',
+    );
+    if (mode != _LockChildMode.delayedReadiness) await whileLocked();
+  } catch (_) {
+    bodyFailed = true;
+    rethrow;
+  } finally {
+    final owned = child;
+    if (owned != null) {
+      try {
+        await owned.stdin.close();
+        await owned.exitCode.timeout(_lockChildDeadline);
+      } catch (cleanupError, stackTrace) {
+        try {
+          owned.kill();
+        } catch (_) {}
+        try {
+          await owned.exitCode.timeout(_lockChildDeadline);
+        } catch (_) {}
+        if (!bodyFailed) {
+          Error.throwWithStackTrace(cleanupError, stackTrace);
+        }
+      }
+    }
+  }
+}
+
 void main() {
   late Directory temp;
   late PathProviderPlatform previous;
@@ -36,6 +136,92 @@ void main() {
     PathProviderPlatform.instance = previous;
     temp.deleteSync(recursive: true);
   });
+
+  Future<void> runTimeoutCase({
+    required bool initialized,
+    required _LockChildMode mode,
+  }) async {
+    final stage = mode == _LockChildMode.delayedReadiness
+        ? 'readiness'
+        : 'shutdown';
+    final run = '$stage-${initialized ? 'existing' : 'new'}';
+    final root = Directory(p.join(temp.path, 'wired-parts-lan-$run-sender'));
+    final marker = File(p.join(root.path, 'validation-owner.json'));
+    final storage = File(p.join(root.path, 'support', kSqliteFileName));
+    List<int>? markerBefore;
+    List<int>? storageBefore;
+    if (initialized) {
+      workspace = ValidationWorkspace.open(
+        run: run,
+        role: ValidationRole.sender,
+        temporaryDirectory: temp,
+      );
+      workspace!.markInitialized();
+      markerBefore = marker.readAsBytesSync();
+      storage.createSync(recursive: true);
+      storage.writeAsBytesSync(utf8.encode('known shop storage'));
+      storageBefore = storage.readAsBytesSync();
+      workspace!.close();
+    }
+
+    Process? child;
+    var childExited = false;
+    var whileLockedChecksCompleted = false;
+    void expectUnchanged() {
+      if (initialized) {
+        expect(marker.readAsBytesSync(), markerBefore);
+        expect(storage.readAsBytesSync(), storageBefore);
+      } else {
+        expect(root.existsSync(), isFalse);
+        expect(marker.existsSync(), isFalse);
+        expect(storage.existsSync(), isFalse);
+      }
+    }
+
+    try {
+      await _withLockedWorkspaceChild(
+        lockPath: '${root.path}.lock',
+        mode: mode,
+        onStarted: (started) {
+          child = started;
+          unawaited(started.exitCode.then((_) => childExited = true));
+        },
+        whileLocked: () {
+          expect(
+            () => ValidationWorkspace.open(
+              run: run,
+              role: ValidationRole.sender,
+              temporaryDirectory: temp,
+            ),
+            throwsA(isA<FileSystemException>()),
+          );
+          expectUnchanged();
+          whileLockedChecksCompleted = true;
+        },
+      );
+      fail('Expected the $stage deadline to expire');
+    } on TimeoutException {
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        whileLockedChecksCompleted,
+        isTrue,
+        reason: 'the competing-open and unchanged-state checks must run',
+      );
+      expectUnchanged();
+      expect(child, isNotNull);
+      expect(
+        childExited,
+        isTrue,
+        reason: 'the owned child must exit on timeout',
+      );
+    } finally {
+      final owned = child;
+      if (owned != null) {
+        if (!childExited) owned.kill();
+        await owned.exitCode.timeout(_lockChildDeadline);
+      }
+    }
+  }
 
   test(
     'run and role derive bounded distinct installation and custody namespaces',
@@ -270,6 +456,7 @@ void main() {
           p.join(temp.path, 'wired-parts-lan-$run-sender'),
         );
         final marker = File(p.join(root.path, 'validation-owner.json'));
+        final storage = File(p.join(root.path, 'support', kSqliteFileName));
         if (initialized) {
           workspace = ValidationWorkspace.open(
             run: run,
@@ -280,42 +467,91 @@ void main() {
           workspace!.close();
         }
         final before = initialized ? marker.readAsStringSync() : null;
-        final child = await Process.start(
-          Platform.isWindows ? 'python' : 'python3',
-          [
-            '-u',
-            '-c',
-            "import os,sys; f=open(sys.argv[1], 'a+b'); "
-                "exec('import msvcrt; msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)' if os.name == 'nt' else 'import fcntl; fcntl.lockf(f, fcntl.LOCK_EX)'); "
-                "print('locked', flush=True); sys.stdin.read()",
-            '${root.path}.lock',
-          ],
+        await _withLockedWorkspaceChild(
+          lockPath: '${root.path}.lock',
+          mode: _LockChildMode.normal,
+          whileLocked: () {
+            expect(
+              () => ValidationWorkspace.open(
+                run: run,
+                role: ValidationRole.sender,
+                temporaryDirectory: temp,
+              ),
+              throwsA(isA<FileSystemException>()),
+            );
+            if (initialized) {
+              expect(marker.readAsStringSync(), before);
+            } else {
+              expect(root.existsSync(), isFalse);
+            }
+            expect(storage.existsSync(), isFalse);
+          },
         );
+      }
+    },
+  );
+
+  for (final initialized in [false, true]) {
+    test(
+      'competing process readiness timeout preserves ${initialized ? 'initialized' : 'new'} workspace and exits child',
+      () => runTimeoutCase(
+        initialized: initialized,
+        mode: _LockChildMode.delayedReadiness,
+      ),
+    );
+    test(
+      'competing process shutdown timeout preserves ${initialized ? 'initialized' : 'new'} workspace and exits child',
+      () => runTimeoutCase(
+        initialized: initialized,
+        mode: _LockChildMode.delayedShutdown,
+      ),
+    );
+  }
+
+  test(
+    'delayed shutdown cleanup preserves the original locked assertion',
+    () async {
+      Process? child;
+      var childExited = false;
+      Object? thrown;
+      try {
         try {
-          expect(
-            await child.stdout
-                .transform(utf8.decoder)
-                .transform(const LineSplitter())
-                .first
-                .timeout(const Duration(seconds: 10)),
-            'locked',
+          await _withLockedWorkspaceChild(
+            lockPath: p.join(temp.path, 'primary-error.lock'),
+            mode: _LockChildMode.delayedShutdown,
+            onStarted: (started) {
+              child = started;
+              unawaited(started.exitCode.then((_) => childExited = true));
+            },
+            whileLocked: () {
+              throw StateError('sentinel locked-workspace assertion');
+            },
           );
-          expect(
-            () => ValidationWorkspace.open(
-              run: run,
-              role: ValidationRole.sender,
-              temporaryDirectory: temp,
-            ),
-            throwsA(isA<FileSystemException>()),
-          );
-          if (initialized) {
-            expect(marker.readAsStringSync(), before);
-          } else {
-            expect(root.existsSync(), isFalse);
-          }
-        } finally {
-          await child.stdin.close();
-          await child.exitCode.timeout(const Duration(seconds: 10));
+        } catch (error) {
+          thrown = error;
+        }
+
+        final owned = child;
+        expect(owned, isNotNull);
+        await owned!.exitCode.timeout(_lockChildDeadline);
+        expect(
+          childExited,
+          isTrue,
+          reason: 'the captured child must settle before rescue',
+        );
+        expect(
+          thrown,
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            'sentinel locked-workspace assertion',
+          ),
+        );
+      } finally {
+        final owned = child;
+        if (owned != null) {
+          if (!childExited) owned.kill();
+          await owned.exitCode.timeout(_lockChildDeadline);
         }
       }
     },
