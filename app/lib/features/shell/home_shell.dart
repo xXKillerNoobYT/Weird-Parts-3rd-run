@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
@@ -242,12 +243,15 @@ class _MoreTabState extends State<_MoreTab> {
             subtitle: const Text('Types tree, brands, suppliers'),
             onTap: _openMaintenance,
           ),
-          ListTile(
-            leading: const Icon(Icons.wifi_tethering),
-            title: const Text('Nearby'),
-            subtitle: Text(nearbySubtitle),
-            onTap: _openNearby,
-          ),
+          if (!kIsWeb &&
+              (defaultTargetPlatform == TargetPlatform.macOS ||
+                  defaultTargetPlatform == TargetPlatform.windows))
+            ListTile(
+              leading: const Icon(Icons.wifi_tethering),
+              title: const Text('Nearby'),
+              subtitle: Text(nearbySubtitle),
+              onTap: _openNearby,
+            ),
           ListTile(
             leading: const Icon(Icons.cloud_download_outlined),
             title: const Text('Backup & restore'),
