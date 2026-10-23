@@ -259,6 +259,16 @@ void main() {
       expect(await draftRows('${editDraftPrefix}job-new'), unrelated);
       expect(await businessRecords(), before);
 
+      await tester.scrollUntilVisible(
+        find.text('Discard unfinished edits'),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byType(AlertDialog).last,
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.tap(find.text('Discard unfinished edits'));
       await tester.pumpAndSettle();
       expectFreshForm(tester, liveBrand);
