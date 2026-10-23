@@ -77,43 +77,64 @@ class _CatalogPageState extends State<CatalogPage> {
 
   Future<void> _addPart({CatalogTreeNode? parent}) async {
     if (!await _gate() || !mounted) return;
-    final details = await showDialog<PartDetails>(
-      context: context,
-      builder: (_) => PartDetailsDialog(
-        maintenance: _maintenance,
-        initialCategoryId: parent?.categoryId,
-        initialStyleId: parent?.styleId,
-        initialTypeId: parent?.typeId,
-      ),
+    setState(() => _catalogNameNotice = null);
+    final saved = await showNewPartDialog(
+      context,
+      maintenance: _maintenance,
+      initialCategoryId: parent?.categoryId,
+      initialStyleId: parent?.styleId,
+      initialTypeId: parent?.typeId,
     );
-    if (details == null || !mounted) return;
+    if (saved == null || !mounted) return;
     try {
-      final id = await _catalog.createGeneralPart(
-        name: details.name,
-        categoryId: details.categoryId,
-        styleId: details.styleId,
-        typeId: details.typeId,
-      );
       await _reload();
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => PartDetailPage(partId: id),
-        ),
+      final part = await _catalog.getPart(saved.id);
+      bool contains(List<CatalogTreeNode> nodes) => nodes.any(
+        (node) =>
+            (node.kind == CatalogTreeKind.part && node.id == saved.id) ||
+            contains(node.children),
       );
-      await _reload();
-    } on StateError catch (e) {
-      _toast(e.message);
+      if (part == null || !saved.identifies(part) || !contains(_tree)) {
+        throw StateError('The saved Part is not in the refreshed catalog');
+      }
+      if (!mounted) return;
+      setState(() => _catalogNameNotice = 'Part saved: ${saved.name}');
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _catalogNameNotice =
+              'Part saved: ${saved.name}. Refresh pending: $error';
+        });
+      }
+      return;
     }
+    if (!mounted) return;
+    try {
+      await saved.acknowledge();
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _catalogNameNotice =
+              'Part saved: ${saved.name}. Confirmation remains pending: $error',
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => PartDetailPage(partId: saved.id)),
+    );
+    if (mounted) await _reload();
   }
 
   Future<void> _openNode(CatalogTreeNode node) async {
     final partId = node.partId;
     if (partId == null) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PartDetailPage(partId: partId),
-      ),
+      MaterialPageRoute<void>(builder: (_) => PartDetailPage(partId: partId)),
     );
     await _reload();
   }
@@ -123,10 +144,16 @@ class _CatalogPageState extends State<CatalogPage> {
     try {
       switch (parent.kind) {
         case CatalogTreeKind.category:
-          await _editTaxonomyName(CatalogNameTarget.newType(parent.id), 'Add type');
+          await _editTaxonomyName(
+            CatalogNameTarget.newType(parent.id),
+            'Add type',
+          );
           return;
         case CatalogTreeKind.type:
-          await _editTaxonomyName(CatalogNameTarget.newVariant(parent.id), 'Add variant');
+          await _editTaxonomyName(
+            CatalogNameTarget.newVariant(parent.id),
+            'Add variant',
+          );
           return;
         case CatalogTreeKind.variant:
           await _addPart(parent: parent);
@@ -232,7 +259,8 @@ class _CatalogPageState extends State<CatalogPage> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override

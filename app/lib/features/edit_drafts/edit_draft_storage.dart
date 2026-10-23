@@ -3,6 +3,15 @@ part of 'edit_drafts.dart';
 const _rowLimit = 256 * 1024;
 const _splitLimit = 512;
 
+void _newPartTarget(Map<String, String> target) {
+  if (target['kind'] != 'part-new' ||
+      target.length != 2 ||
+      !target.containsKey('reserved') ||
+      target.values.any((value) => value.trim().isEmpty)) {
+    throw const FormatException('Invalid new Part target');
+  }
+}
+
 void _supplierListingTarget(Map<String, String> target) {
   const fields = {'kind', 'part', 'listingVersion', 'reserved'};
   if (target['kind'] != 'supplier-listing-new' ||
@@ -162,7 +171,19 @@ Map<String, Object?> _control(String raw) {
     _keys(value, {'phase', 'token', 'command', 'result', 'origin'});
     final command = _text(value['command']);
     final result = _strings(value['result']);
-    final expected = command == 'part-save'
+    final expected = command == 'part-create'
+        ? {
+            'id',
+            'name',
+            'category',
+            'style',
+            'type',
+            'device',
+            'createdAt',
+            'slot',
+            'target',
+          }
+        : command == 'part-save'
         ? {'part'}
         : command == 'job-create'
         ? {'job', 'name'}
@@ -205,6 +226,12 @@ Map<String, Object?> _inputJson(Object input) => switch (input) {
     'quantity': c.quantityText,
     'note': c.noteText,
     'observedAt': c.observedAt.toUtc().toIso8601String(),
+  },
+  NewPartInput p => {
+    'name': p.nameText,
+    'category': p.categoryId,
+    'style': p.styleId,
+    'type': p.typeId,
   },
   PartInput p => {
     'name': p.nameText,
@@ -267,6 +294,15 @@ Object _parseInput(String kind, Object? value) {
   if (kind == 'job-new') {
     _keys(m, {'name'});
     return NewJobInput(nameText: _text(m['name']));
+  }
+  if (kind == 'part-new') {
+    _keys(m, {'name', 'category', 'style', 'type'});
+    return NewPartInput(
+      nameText: _text(m['name']),
+      categoryId: _nullable(m['category']),
+      styleId: _nullable(m['style']),
+      typeId: _nullable(m['type']),
+    );
   }
   if (kind == 'part') {
     _keys(m, {
@@ -346,6 +382,7 @@ String _slot(Map<String, String> target) {
   }
   if (target['kind'] == 'part') return 'part/${segment('id')}';
   if (target['kind'] == 'job-new') return 'job-new';
+  if (target['kind'] == 'part-new') return 'part-new';
   if (target['kind'] == 'warehouse-location-new') {
     return 'warehouse-location-new';
   }
@@ -413,6 +450,8 @@ final class _DraftRecord {
     } else if (target['kind'] == 'catalog-name-new' ||
         target['kind'] == 'catalog-name-rename') {
       _catalogNameTarget(target);
+    } else if (target['kind'] == 'part-new') {
+      _newPartTarget(target);
     } else if (target['kind'] == 'part') {
       if (target.length != 2 || !target.containsKey('id')) {
         throw const FormatException('Invalid Part target');
@@ -556,6 +595,11 @@ class EditDrafts {
   }
 
   Future<Map<String, String>> _base(Map<String, String> target) async {
+    if (target['kind'] == 'part-new') {
+      final part = await _row('parts', target['reserved']!);
+      if (part != null) throw StateError('Reserved Part ID is already in use');
+      return {'part': _digest(part)};
+    }
     if (target['kind'] == 'supplier-listing-new') {
       final context = await _supplierListingContext(target);
       final listing = await _row('supplier_listings', target['reserved']!);
@@ -707,6 +751,10 @@ class EditDrafts {
         break;
       case WarehouseCountInput():
         break;
+      case NewPartInput p:
+        add('categories', p.categoryId);
+        add('styles', p.styleId);
+        add('types', p.typeId);
       case PartInput p:
         add('categories', p.categoryId);
         add('styles', p.styleId);
@@ -772,16 +820,21 @@ class EditDrafts {
         }
       }
     }
-    if (record.input case PartInput p) {
-      if (p.styleId != null) {
-        final style = await _row('styles', p.styleId!);
-        if (style != null && style['category_id'] != p.categoryId) {
+    final hierarchy = switch (record.input) {
+      NewPartInput p => (p.categoryId, p.styleId, p.typeId),
+      PartInput p => (p.categoryId, p.styleId, p.typeId),
+      _ => null,
+    };
+    if (hierarchy case (final categoryId, final styleId, final typeId)) {
+      if (styleId != null) {
+        final style = await _row('styles', styleId);
+        if (style != null && style['category_id'] != categoryId) {
           throw StateError('Type belongs to another Category');
         }
       }
-      if (p.typeId != null) {
-        final type = await _row('types', p.typeId!);
-        if (type != null && type['style_id'] != p.styleId) {
+      if (typeId != null) {
+        final type = await _row('types', typeId);
+        if (type != null && type['style_id'] != styleId) {
           throw StateError('Variant belongs to another Type');
         }
       }
@@ -1305,6 +1358,83 @@ class EditDrafts {
     );
   }
 
+  Future<EditOpening<NewPartEditSession>> openNewPart({
+    String? initialCategoryId,
+    String? initialStyleId,
+    String? initialTypeId,
+  }) => _open<NewPartEditSession>(
+    {'kind': 'part-new', 'reserved': newId()},
+    () async => NewPartInput(
+      nameText: '',
+      categoryId: initialCategoryId,
+      styleId: initialStyleId,
+      typeId: initialTypeId,
+    ),
+    (record) => NewPartEditSession._(this, record),
+    onCommitted: _createdPart,
+  );
+
+  Future<NewPartCreated> _createdPart(String raw) async {
+    if (_closed || _quiescing) throw StateError('Part storage is changing');
+    final control = _control(raw);
+    if (control['phase'] != 'committed' ||
+        control['command'] != 'part-create') {
+      throw const FormatException('Unsupported created Part receipt');
+    }
+    final result = _strings(control['result']);
+    final target = _strings(jsonDecode(result['target']!));
+    _newPartTarget(target);
+    if (result['slot'] != 'part-new' || target['reserved'] != result['id']) {
+      throw const FormatException('Created Part target mismatch');
+    }
+    final createdAt = DateTime.tryParse(result['createdAt']!);
+    if (createdAt == null ||
+        createdAt.toUtc().toIso8601String() != result['createdAt']) {
+      throw const FormatException('Invalid Part creation time');
+    }
+    final origin = _parseOrigin(control['origin']);
+    if (result['device'] != origin['device']) {
+      throw const FormatException('Created Part origin mismatch');
+    }
+    Future<void> validate() async {
+      if (await _read('${editDraftPrefix}part-new/control') != raw ||
+          await _read('${editDraftPrefix}part-new/input') != null) {
+        throw StateError('A newer Part edit replaced this receipt');
+      }
+      if (_digest(_origin()) != _digest(origin)) {
+        throw StateError('Created Part belongs to another installation');
+      }
+      final part = await _db.partsDao.getPart(result['id']!);
+      if (part == null ||
+          part.originDeviceId != result['device'] ||
+          part.createdAt.toUtc() != createdAt) {
+        throw StateError('The created Part identity is no longer available');
+      }
+    }
+
+    await validate();
+    final saved = NewPartCreated._(
+      id: result['id']!,
+      name: result['name']!,
+      categoryId: result['category']!,
+      styleId: result['style']!,
+      typeId: result['type']!,
+      originDeviceId: result['device']!,
+      createdAt: createdAt,
+      acknowledge: () => _queue(() async {
+        if (_closed || _quiescing) throw StateError('Part storage is changing');
+        await _db.transaction(() async {
+          const key = '${editDraftPrefix}part-new/control';
+          final current = await _read(key);
+          if (current == null) return;
+          await validate();
+          await _delete(key);
+        });
+      }),
+    );
+    return saved;
+  }
+
   Future<EditOpening<PartEditSession>> openPart(String partId) =>
       _open<PartEditSession>({'kind': 'part', 'id': partId}, () async {
         final p = await _db.partsDao.getPart(partId);
@@ -1430,7 +1560,9 @@ class EditDrafts {
             }
             await _check(record);
             await _requireReferences(record);
-            final session = create(record).._admitted = true;
+            final session = create(record)
+              .._admitted = true
+              .._persistedInput = raw;
             _active[slot] = session;
             return session;
           }),
@@ -1470,7 +1602,7 @@ class EditDrafts {
           originError = e;
           origin = {'mode': 'unavailable', 'device': _deviceId};
         }
-        return _DraftRecord(
+        final record = _DraftRecord(
           target: target,
           origin: origin,
           base: await _base(target),
@@ -1478,6 +1610,8 @@ class EditDrafts {
           token: newId(),
           input: input,
         );
+        if (input is NewPartInput) await _requireReferences(record);
+        return record;
       });
       final session = create(record);
       if (originError != null) {

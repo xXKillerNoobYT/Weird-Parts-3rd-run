@@ -159,22 +159,54 @@ class _MaintenancePageState extends State<MaintenancePage> {
           );
           return;
         case CatalogTreeKind.variant:
-          final details = await showDialog<PartDetails>(
-            context: context,
-            builder: (_) => PartDetailsDialog(
-              maintenance: _repo,
-              initialCategoryId: parent.categoryId,
-              initialStyleId: parent.styleId,
-              initialTypeId: parent.typeId,
-            ),
+          final saved = await showNewPartDialog(
+            context,
+            maintenance: _repo,
+            initialCategoryId: parent.categoryId,
+            initialStyleId: parent.styleId,
+            initialTypeId: parent.typeId,
           );
-          if (details == null || !mounted) return;
-          await _catalog.createGeneralPart(
-            name: details.name,
-            categoryId: details.categoryId,
-            styleId: details.styleId,
-            typeId: details.typeId,
-          );
+          if (saved == null || !mounted) return;
+          try {
+            await _reload();
+            if (!mounted) return;
+            final part = await _catalog.getPart(saved.id);
+            bool contains(List<CatalogTreeNode> nodes) => nodes.any(
+              (node) =>
+                  (node.kind == CatalogTreeKind.part && node.id == saved.id) ||
+                  contains(node.children),
+            );
+            if (_kind != _Kind.types ||
+                part == null ||
+                !saved.identifies(part) ||
+                !contains(_tree)) {
+              throw StateError('The saved Part is not in the refreshed tree');
+            }
+            if (!mounted) return;
+            setState(() => _catalogNameNotice = 'Part saved: ${saved.name}');
+            await WidgetsBinding.instance.endOfFrame;
+          } catch (error) {
+            if (mounted) {
+              setState(() {
+                _loading = false;
+                _catalogNameNotice =
+                    'Part saved: ${saved.name}. Refresh pending: $error';
+              });
+            }
+            return;
+          }
+          if (!mounted) return;
+          try {
+            await saved.acknowledge();
+          } catch (error) {
+            if (mounted) {
+              setState(
+                () => _catalogNameNotice =
+                    'Part saved: ${saved.name}. Confirmation remains pending: $error',
+              );
+            }
+          }
+          return;
         case CatalogTreeKind.part:
         case CatalogTreeKind.brand:
           if (parent.partId == null) return;
