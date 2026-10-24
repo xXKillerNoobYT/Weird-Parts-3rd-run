@@ -82,13 +82,35 @@ final class HeldPeerCreateContext {
   final CompanyTrustAnchor _trust;
   final Map<String, int> _floors;
   final _CompanyCustody _custody;
+  ResolvedCompanyUserAuthority? _createActor;
+
+  Future<void> admitCreateActor(Map<String, Object?> proof) async {
+    final assertion = Map<String, Object?>.from(proof['body'] as Map);
+    if (assertion['v'] != 4) return;
+    final certificate = proof['userAuthority'];
+    if (certificate is! String) {
+      throw const CompanyBootstrapRefusal('Create user authority is missing');
+    }
+    final actor = await _resolveUserAuthority(
+      peer._owner.enrollment.db,
+      _trust,
+      _floors,
+      certificate,
+    );
+    if (assertion['user'] != actor.user['id'] ||
+        assertion['userAuthority'] != actor.commitment) {
+      throw const CompanyBootstrapRefusal('Create selected user proof differs');
+    }
+    _createActor = actor;
+    validateAuthorization(assertion);
+  }
 
   void validateAuthor(Map<String, Object?> body, [List<int>? publicKey]) {
     final member = peer._held.peer._membership;
     if (body['company'] != _trust.companyId.value ||
         body['shop'] != peer._held.owner.identity.shopId ||
         body['device'] != member.device['id'] ||
-        body['user'] != member.user['id'] ||
+        body['user'] != (_createActor?.user['id'] ?? member.user['id']) ||
         body['installation'] != member.device['installation'] ||
         body['generation'] != member.device['generation'] ||
         (publicKey != null &&
@@ -101,15 +123,24 @@ final class HeldPeerCreateContext {
 
   void validateAuthorization(Map<String, Object?> assertion) {
     final member = peer._held.peer._membership;
+    final actor = _createActor;
+    final user = actor?.user ?? member.user;
     validateAuthor(assertion);
     if (assertion['grant'] != member.device['grant'] ||
-        assertion['credential'] != member.user['credential'] ||
-        assertion['permission'] != member.user['permission'] ||
+        assertion['credential'] != user['credential'] ||
+        assertion['permission'] != user['permission'] ||
         assertion['authority'] != _trust.authorityVersion ||
         assertion['facts'] != _trust.factsCommitment ||
+        (actor != null &&
+            (assertion['v'] != 4 ||
+                assertion['userAuthority'] != actor.commitment)) ||
         (member.certificateBytes == null
-            ? assertion['v'] != 2
-            : assertion['v'] != 3 ||
+            ? (actor == null
+                  ? assertion['v'] != 2
+                  : assertion['deviceProof'] != 2)
+            : (actor == null
+                      ? assertion['v'] != 3
+                      : assertion['deviceProof'] != 3) ||
                   assertion['membership'] != member.proofCommitment)) {
       throw const CompanyBootstrapRefusal(
         'Create authority differs from retained peer',
@@ -130,6 +161,19 @@ final class HeldPeerCreateContext {
       throw const CompanyBootstrapRefusal('No held peer create command');
     }
     final authority = await _membershipAuthority(db, _trust);
+    if (_createActor case final actor?) {
+      final currentActor = await _resolveUserAuthority(
+        db,
+        _trust,
+        _floors,
+        actor.certificateBytes,
+      );
+      if (currentActor.commitment != actor.commitment) {
+        throw const CompanyBootstrapRefusal(
+          'Held create user authority changed',
+        );
+      }
+    }
     final retained = peer._held.peer._membership;
     final ResolvedCompanyMembership current;
     if (retained.certificateBytes case final String certificate) {

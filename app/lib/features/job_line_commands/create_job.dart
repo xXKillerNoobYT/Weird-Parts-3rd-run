@@ -152,7 +152,7 @@ final class VerifiedCreateJobSession extends VerifiedCompanyOperation {
   String get operationDomain => 'wiredpart.job.create.operation@1:';
 
   @override
-  void validateLiveOwner(OwnerSession? owner) {
+  void validateLiveOwner(CompanySession? owner) {
     if (owner == null) {
       throw const JobLineRefusal('Live administrator session required');
     }
@@ -226,8 +226,14 @@ class CreateJobAuthorization {
     }
     final proof = _object(jsonDecode(utf8.decode(signedAssertion)));
     final a = _object(proof['body']);
-    final memberProof = a['v'] == 3;
-    _keys(proof, {'body', 'signature', if (memberProof) 'membership'});
+    final userProof = a['v'] == 4;
+    final memberProof = a['v'] == 3 || (userProof && a['deviceProof'] == 3);
+    _keys(proof, {
+      'body',
+      'signature',
+      if (memberProof) 'membership',
+      if (userProof) 'userAuthority',
+    });
     _keys(a, {
       'v',
       'company',
@@ -246,6 +252,8 @@ class CreateJobAuthorization {
       'facts',
       'session',
       if (memberProof) 'membership',
+      if (userProof) 'userAuthority',
+      if (userProof) 'deviceProof',
     });
     final receiver =
         await JobLineAuthorization(
@@ -258,7 +266,8 @@ class CreateJobAuthorization {
         );
     final trust = receiver.trust;
     final facts = receiver.facts;
-    if ((!memberProof && a['v'] != 2) ||
+    if ((!userProof && !memberProof && a['v'] != 2) ||
+        (userProof && a['deviceProof'] != 2 && a['deviceProof'] != 3) ||
         facts.body['v'] != 2 ||
         a['company'] != command.companyId ||
         a['shop'] != command.shopId ||
@@ -290,11 +299,26 @@ class CreateJobAuthorization {
         : null;
     final device =
         membership?.device ?? facts._entry('devices', _string(a, 'device'));
-    final user = membership?.user ?? facts._entry('users', _string(a, 'user'));
+    final ResolvedCompanyUserAuthority? userAuthority = userProof
+        ? await resolveCompanyUserAuthority(
+            db: db,
+            installation: installation,
+            certificateBytes: _string(proof, 'userAuthority'),
+          )
+        : null;
+    final user =
+        userAuthority?.user ??
+        membership?.user ??
+        facts._entry('users', _string(a, 'user'));
+    if (userProof &&
+        (a['userAuthority'] != userAuthority!.commitment ||
+            a['user'] != user['id'])) {
+      throw const JobLineRefusal('Create user authority differs');
+    }
     if (memberProof &&
         (a['membership'] != membership!.proofCommitment ||
             a['device'] != device['id'] ||
-            a['user'] != user['id'])) {
+            (!userProof && a['user'] != user['id']))) {
       throw const JobLineRefusal('member authorization proof differs');
     }
     bool allows(Map<String, Object?> entry, String key, String value) =>
@@ -348,7 +372,9 @@ class CreateJobAuthorization {
       a,
       _string(proof, 'signature'),
       publicKey,
-      domain: memberProof
+      domain: userProof
+          ? 'wiredpart.job.create.authorization@3:'
+          : memberProof
           ? 'wiredpart.job.create.authorization@2:'
           : 'wiredpart.job.create.authorization@1:',
     );
@@ -405,6 +431,7 @@ final class VerifiedCreateJobReceiptAdmission
       Uint8List.fromList(utf8.encode(row.operationBytes)),
     );
     if (op.authorization['membership'] != _session._proof['membership'] ||
+        op.authorization['userAuthority'] != _session._proof['userAuthority'] ||
         _object(op.authorization['body'])['v'] != _session._assertion['v']) {
       throw const JobLineRefusal('saved membership proof differs');
     }
@@ -486,7 +513,13 @@ Future<void> validateCreateJobCommit(
   }
   final proof = _object(op.authorization['body']);
   final a = _object(op.authorization);
-  _keys(a, {'body', 'signature', if (proof['v'] == 3) 'membership'});
+  _keys(a, {
+    'body',
+    'signature',
+    if (proof['v'] == 3 || (proof['v'] == 4 && proof['deviceProof'] == 3))
+      'membership',
+    if (proof['v'] == 4) 'userAuthority',
+  });
   for (final field in [
     'company',
     'shop',
@@ -519,7 +552,7 @@ class CompanyJobCommands {
 
   Future<JobLineCommandReceipt> createJob(
     CreateJob command, {
-    required OwnerSession ownerSession,
+    required CompanySession ownerSession,
   }) async {
     if (_db.hasCallerTransaction) {
       throw const JobLineRefusal('command must own its top-level transaction');
@@ -687,6 +720,7 @@ class CompanyJobCommands {
             expectedTrust: session._trust,
             expectedFloors: session._floors,
           );
+          await ownerSession.requireCurrentAccount();
           session.validateLiveOwner(ownerSession);
           return JobLineCommandReceipt._decode(receiptBytes);
         });
@@ -702,7 +736,7 @@ class CompanyJobCommands {
     });
   }
 
-  Future<List<Job>> listJobs({required OwnerSession ownerSession}) async {
+  Future<List<Job>> listJobs({required CompanySession ownerSession}) async {
     if (_db.hasCallerTransaction) {
       throw const JobLineRefusal('list must own its read transaction');
     }
@@ -766,6 +800,7 @@ class CompanyJobCommands {
       Uint8List.fromList(utf8.encode(row.operationBytes)),
     );
     if (op.authorization['membership'] != session._proof['membership'] ||
+        op.authorization['userAuthority'] != session._proof['userAuthority'] ||
         _object(op.authorization['body'])['v'] != session._assertion['v']) {
       throw const JobLineRefusal('saved membership proof differs');
     }
@@ -783,7 +818,9 @@ class CompanyJobCommands {
       _object(op.authorization['body']),
       _string(op.authorization, 'signature'),
       session._publicKey,
-      domain: session._assertion['v'] == 3
+      domain: session._assertion['v'] == 4
+          ? 'wiredpart.job.create.authorization@3:'
+          : session._assertion['v'] == 3
           ? 'wiredpart.job.create.authorization@2:'
           : 'wiredpart.job.create.authorization@1:',
     );

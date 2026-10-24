@@ -223,7 +223,7 @@ extension CompanyJobSyncCommands on CompanyJobCommands {
     return row;
   }
 
-  Future<void> requireSyncPermission(OwnerSession owner) async {
+  Future<void> requireSyncPermission(CompanySession owner) async {
     final scope = owner.identity;
     final session = await enrollment.issueCreateJobAssertion(
       CreateJob(
@@ -315,6 +315,7 @@ extension CompanyJobSyncCommands on CompanyJobCommands {
       final peer = availability.peer;
       await requireSyncPermission(ownerSession);
       final context = await peer.prepareCreateCommand(ownerSession);
+      await context.admitCreateActor(operation.authorization);
       context.validateAuthor(operation.body);
       CompanyCommandIntent? intent;
       String result;

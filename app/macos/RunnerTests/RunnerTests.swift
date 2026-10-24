@@ -6,6 +6,88 @@ import XCTest
 #endif
 
 class RunnerTests: XCTestCase {
+  func testInstallationSecurityNamespaceAcceptsCompanyUserSlot() throws {
+    let namespace = try InstallationSecurityNamespace("production.company-user-1")
+
+    XCTAssertEqual(namespace.rawValue, "production.company-user-1")
+  }
+
+  func testInstallationSecurityNamespacePreservesExistingNames() throws {
+    let names = [
+      "production",
+      "production.company-custody",
+      "synthetic.0",
+      "synthetic.a-z_9",
+      "synthetic.production",
+      "synthetic.production.company-custody",
+      "synthetic.production.company-user-1",
+    ]
+
+    for name in names {
+      XCTAssertEqual(try InstallationSecurityNamespace(name).rawValue, name)
+    }
+  }
+
+  func testInstallationSecurityNamespaceEnforcesMaximumByteLength() throws {
+    let maximumLengthName = "synthetic." + String(repeating: "a", count: 54)
+
+    XCTAssertEqual(
+      try InstallationSecurityNamespace(maximumLengthName).rawValue, maximumLengthName)
+    XCTAssertThrowsError(try InstallationSecurityNamespace(maximumLengthName + "a")) { error in
+      guard let storeError = error as? StoreError,
+        case .invalidArgument = storeError else {
+        XCTFail("Expected an invalid-argument failure, received \(error)")
+        return
+      }
+      XCTAssertEqual(storeError.code, "installation_invalid_argument")
+    }
+  }
+
+  func testInstallationSecurityNamespaceRejectsProductionLookalikes() {
+    let names = [
+      "production.company-user-2",
+      "xproduction.company-user-1",
+      "production.company-user-1.extra",
+      "production.company-User-1",
+      "production.company-custody.extra",
+    ]
+
+    for name in names {
+      XCTAssertThrowsError(try InstallationSecurityNamespace(name), name) { error in
+        guard let storeError = error as? StoreError,
+          case .invalidArgument = storeError else {
+          XCTFail("Expected an invalid-argument failure for \(name), received \(error)")
+          return
+        }
+        XCTAssertEqual(storeError.code, "installation_invalid_argument", name)
+      }
+    }
+  }
+
+  func testInstallationSecurityNamespaceRejectsInvalidSyntax() {
+    let names = [
+      "",
+      "synthetic.",
+      "synthetic._a",
+      "synthetic.-a",
+      "synthetic..a",
+      "synthetic.a+b",
+      "synthetic.caf\u{00e9}",
+      "synthetic.a/b",
+    ]
+
+    for name in names {
+      XCTAssertThrowsError(try InstallationSecurityNamespace(name), name) { error in
+        guard let storeError = error as? StoreError,
+          case .invalidArgument = storeError else {
+          XCTFail("Expected an invalid-argument failure for \(name), received \(error)")
+          return
+        }
+        XCTAssertEqual(storeError.code, "installation_invalid_argument", name)
+      }
+    }
+  }
+
   func testRecoveryPublisherWritesExactBytes() throws {
     try withTemporaryDestination { destination in
       let bytes = Data([0x00, 0x7f, 0x80, 0xff, 0x0a])

@@ -59,6 +59,7 @@ import '../job_line_commands/job_line_commands.dart'
         decodeJobLineReceipt;
 
 part '../company/company_protocol.dart';
+part '../company/company_users.dart';
 part '../company/company_join.dart';
 part '../company/company_membership.dart';
 part '../company/company_peer_authentication.dart';
@@ -829,6 +830,7 @@ void validateInstallationNamespace(String namespace) {
   if (namespace.length > 64 ||
       !(namespace == 'production' ||
           namespace == 'production.company-custody' ||
+          namespace == 'production.company-user-1' ||
           RegExp(r'^synthetic\.[a-z0-9][a-z0-9._-]*$').hasMatch(namespace))) {
     throw ArgumentError.value(
       namespace,
@@ -840,7 +842,8 @@ void validateInstallationNamespace(String namespace) {
 
 String companyCustodyNamespace(String baseNamespace) {
   validateInstallationNamespace(baseNamespace);
-  if (baseNamespace.endsWith('.company-custody')) {
+  if (baseNamespace.endsWith('.company-custody') ||
+      baseNamespace.endsWith('.company-user-1')) {
     throw ArgumentError.value(baseNamespace, 'baseNamespace');
   }
   final companion = '$baseNamespace.company-custody';
@@ -1041,11 +1044,12 @@ class InstallationSecurity {
     AppDatabase db,
     VerifiedCompanyOperation session,
     Uint8List bytes, {
-    OwnerSession? ownerSession,
+    CompanySession? ownerSession,
   }) async {
     final operationBytes = Uint8List.fromList(bytes);
     final trust = await readCompanyTrust(db);
     if (trust == null) throw StateError('Company enrollment is unavailable');
+    await ownerSession?.requireCurrentAccount();
     session.validateLiveOwner(ownerSession);
     ownerSession?.validateAuthority(trust, knownSecurityFloors);
     session.validateOperationSigningContent(operationBytes, _record!.identity);
@@ -1060,6 +1064,7 @@ class InstallationSecurity {
     }
     session.validateLiveOwner(ownerSession);
     ownerSession?.validateAuthority(finalTrust, knownSecurityFloors);
+    await ownerSession?.requireCurrentAccount();
     return signature;
   }
 

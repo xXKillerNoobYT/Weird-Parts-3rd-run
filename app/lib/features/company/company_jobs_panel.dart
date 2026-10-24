@@ -12,7 +12,7 @@ class CompanyJobsPanel extends StatefulWidget {
     super.key,
   });
   final CompanyJobCommands commands;
-  final OwnerSession owner;
+  final CompanySession owner;
 
   @override
   State<CompanyJobsPanel> createState() => _CompanyJobsPanelState();
@@ -62,10 +62,12 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       final detailsAvailable = await widget.commands.canEditJobDetails(
         widget.owner,
       );
-      final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
-        widget.commands.enrollment,
-        widget.owner,
-      );
+      final confirmed = widget.owner is OwnerSession
+          ? await CompanyCreatedJobSync.confirmedPeerCounts(
+              widget.commands.enrollment,
+              widget.owner as OwnerSession,
+            )
+          : <String, int>{};
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
         _jobs = jobs;
@@ -147,7 +149,8 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   }
 
   Future<void> _saveName() async {
-    if (_busy || _editing == null) return;
+    final owner = widget.owner;
+    if (_busy || _editing == null || owner is! OwnerSession) return;
     try {
       final scope = widget.owner.identity;
       final job = _editing!;
@@ -170,16 +173,13 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       _error = null;
     });
     try {
-      await widget.commands.renameJob(
-        _pendingRename!,
-        ownerSession: widget.owner,
-      );
+      await widget.commands.renameJob(_pendingRename!, ownerSession: owner);
       final jobs = await widget.commands.listJobViews(
         ownerSession: widget.owner,
       );
       final confirmed = await CompanyCreatedJobSync.confirmedPeerCounts(
         widget.commands.enrollment,
-        widget.owner,
+        owner,
       );
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
@@ -266,7 +266,8 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       _lifecycleReasons[job.baseJob.id] == null;
 
   Future<void> _saveLifecycle() async {
-    if (_busy || _pendingLifecycle == null) return;
+    final owner = widget.owner;
+    if (_busy || _pendingLifecycle == null || owner is! OwnerSession) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -274,7 +275,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
     try {
       await widget.commands.setJobLifecycle(
         _pendingLifecycle!,
-        ownerSession: widget.owner,
+        ownerSession: owner,
       );
       if (mounted) setState(() => _pendingLifecycle = null);
       await _load();
@@ -349,16 +350,17 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
               ),
           ],
         ),
-      CompanyJobDetailsSection(
-        key: Key('company-job-details-${job.baseJob.id}'),
-        job: job,
-        commands: widget.commands,
-        owner: widget.owner,
-        available:
-            _detailsAvailable &&
-            job.lifecycle.state == CompanyJobLifecycleState.live,
-        onSaved: _load,
-      ),
+      if (widget.owner case final OwnerSession owner)
+        CompanyJobDetailsSection(
+          key: Key('company-job-details-${job.baseJob.id}'),
+          job: job,
+          commands: widget.commands,
+          owner: owner,
+          available:
+              _detailsAvailable &&
+              job.lifecycle.state == CompanyJobLifecycleState.live,
+          onSaved: _load,
+        ),
       if (job.lifecycle.state == CompanyJobLifecycleState.deleteConflict) ...[
         Text(
           'Deletion conflict',

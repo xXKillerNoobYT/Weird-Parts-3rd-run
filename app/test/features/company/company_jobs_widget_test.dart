@@ -34,7 +34,7 @@ final class CapacityCommands extends CompanyJobCommands {
   @override
   Future<JobLineCommandReceipt> createJob(
     CreateJob command, {
-    required OwnerSession ownerSession,
+    required CompanySession ownerSession,
   }) async {
     throw const CompanyJobCapacityRefusal();
   }

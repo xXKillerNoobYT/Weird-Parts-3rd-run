@@ -145,6 +145,7 @@ final class JoinActivationStore
   Future<void> writeRecoveryFileExclusive(String path, Uint8List bytes) =>
       delegate.writeRecoveryFileExclusive(path, bytes);
   bool loseNextBaseActivationReply = false;
+  bool loseNextUserReply = false;
   int maximumBytes = 0;
   @override
   Future<String> compareAndSwapState(
@@ -182,6 +183,10 @@ final class JoinActivationStore
       nextRevision: nextRevision,
       bytes: bytes,
     );
+    if (loseNextUserReply && namespace.endsWith('.company-user-1')) {
+      loseNextUserReply = false;
+      throw StateError('Lost protected user CAS response');
+    }
     if (loseNextBaseActivationReply &&
         wasUnjoined &&
         after['companyTrust'] != null) {

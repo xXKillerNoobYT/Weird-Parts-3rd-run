@@ -11,6 +11,8 @@ import 'package:path/path.dart' as p;
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/data/sqlite_file.dart';
+import 'package:wired_parts/features/company/company_gate.dart';
+import 'package:wired_parts/features/company/company_join_page.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
@@ -55,6 +57,72 @@ final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
 }
 
 void main() {
+  testWidgets('unjoined gate opens nearby Join without an owner session', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('company-gate-join-');
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async {
+      await db.close();
+      directory.deleteSync(recursive: true);
+    });
+    final store = _Store();
+    const namespace = 'synthetic.unjoined-gate-join';
+    final installation = InstallationSecurity(
+      store: store,
+      namespace: namespace,
+    );
+    await installation.start(db);
+    expect(
+      await CompanyEnrollment(installation: installation, db: db).readStatus(),
+      CompanyBootstrapStatus.unjoined,
+    );
+    final before = Map.of(store.states);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CompanyBootstrapGate(
+          db: db,
+          installation: installation,
+          supportDirectory: directory,
+        ),
+      ),
+    );
+    final open = find.byKey(const Key('company-join-open'));
+    for (var i = 0; i < 80 && open.evaluate().isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump(const Duration(milliseconds: 25));
+    }
+    expect(open, findsOneWidget);
+    await tester.runAsync(() => tester.tap(open));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(CompanyJoinPage), findsOneWidget);
+    final page = tester.widget<CompanyJoinPage>(find.byType(CompanyJoinPage));
+    expect(page.approver, isNull);
+    expect(page.reconnect, isFalse);
+    expect(page.enrollment.currentCompanySession, isNull);
+    expect(find.text('Join company nearby'), findsOneWidget);
+    expect(find.byKey(const Key('company-join-approve')), findsNothing);
+    expect(
+      await tester.runAsync(page.enrollment.readStatus),
+      CompanyBootstrapStatus.unjoined,
+    );
+    expect(store.states.keys, before.keys);
+    for (final entry in before.entries) {
+      expect(store.states[entry.key]!.revision, entry.value.revision);
+      expect(store.states[entry.key]!.bytes, entry.value.bytes);
+    }
+    expect(
+      await tester.runAsync(() => db.select(db.companyAuthorityFacts).get()),
+      isEmpty,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() async {});
+    await tester.pump();
+  });
+
   testWidgets(
     'Create requires a matching new recovery passphrase confirmation',
     (tester) async {
@@ -396,8 +464,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     for (
       var attempt = 0;
-      attempt < 50 &&
-          find.textContaining('Company ID:').evaluate().isEmpty;
+      attempt < 50 && find.textContaining('Company ID:').evaluate().isEmpty;
       attempt++
     ) {
       await tester.runAsync(

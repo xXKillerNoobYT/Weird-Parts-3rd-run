@@ -1089,7 +1089,7 @@ extension CompanyJobDetailsCommands on CompanyJobCommands {
   }
 
   Future<List<CompanyJobDetail>> detailsSyncHoldings({
-    required OwnerSession ownerSession,
+    required CompanySession ownerSession,
   }) async {
     await requireSyncPermission(ownerSession);
     final scope = ownerSession.identity;
@@ -1125,7 +1125,8 @@ extension CompanyJobDetailsCommands on CompanyJobCommands {
     return matches.single;
   }
 
-  Future<bool> canEditJobDetails(OwnerSession owner) async {
+  Future<bool> canEditJobDetails(CompanySession owner) async {
+    if (owner is! OwnerSession) return false;
     final scope = owner.identity;
     try {
       final session = await enrollment.issueJobDetailsAssertion(
@@ -1290,8 +1291,8 @@ final class VerifiedJobDetailsSession extends VerifiedCompanyOperation {
   String get operationDomain => 'wiredpart.job.details.operation@1:';
 
   @override
-  void validateLiveOwner(OwnerSession? owner) {
-    if (owner == null) {
+  void validateLiveOwner(CompanySession? owner) {
+    if (owner is! OwnerSession) {
       throw const JobLineRefusal('Live administrator session required');
     }
     final a = _assertion;

@@ -4,7 +4,7 @@ part of 'job_line_commands.dart';
 /// or a caller-selected author cannot replace the original signed assertion.
 sealed class VerifiedCompanyOperation {
   String get operationDomain;
-  void validateLiveOwner(OwnerSession? owner);
+  void validateLiveOwner(CompanySession? owner);
   void validateOperationSigningContent(
     Uint8List bytes,
     InstallationIdentity identity,
@@ -44,10 +44,13 @@ final class VerifiedJobLineSession extends VerifiedCompanyOperation {
   Map<String, Object?> get _assertion => _object(_proof['body']);
 
   @override
-  void validateLiveOwner(OwnerSession? owner) {
+  void validateLiveOwner(CompanySession? owner) {
+    if (owner != null && owner is! OwnerSession) {
+      throw const JobLineRefusal('Live administrator session required');
+    }
     final assertion = _assertion;
     if (assertion['v'] != 2) return;
-    if (owner == null) {
+    if (owner is! OwnerSession) {
       throw const JobLineRefusal('Live administrator session required');
     }
     owner.validateCommand(

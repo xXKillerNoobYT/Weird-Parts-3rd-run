@@ -1079,7 +1079,7 @@ extension CompanyJobLifecycleCommands on CompanyJobCommands {
   }
 
   Future<List<CompanyJobLifecycle>> lifecycleSyncHoldings({
-    required OwnerSession ownerSession,
+    required CompanySession ownerSession,
   }) async {
     await requireSyncPermission(ownerSession);
     final scope = ownerSession.identity;
@@ -1117,8 +1117,11 @@ extension CompanyJobLifecycleCommands on CompanyJobCommands {
 
   Future<String?> lifecycleUnavailableReason(
     CompanyJobView view,
-    OwnerSession owner,
+    CompanySession owner,
   ) async {
+    if (owner is! OwnerSession) {
+      return 'This user has Create Job permission only.';
+    }
     try {
       final session = await enrollment.issueJobLifecycleAssertion(
         SetJobLifecycle(
@@ -1292,8 +1295,8 @@ final class VerifiedJobLifecycleSession extends VerifiedCompanyOperation {
   String get operationDomain => 'wiredpart.job.lifecycle.operation@1:';
 
   @override
-  void validateLiveOwner(OwnerSession? owner) {
-    if (owner == null) {
+  void validateLiveOwner(CompanySession? owner) {
+    if (owner is! OwnerSession) {
       throw const JobLineRefusal('Live administrator session required');
     }
     final a = _assertion;

@@ -41,7 +41,8 @@ final class CompanyJobSyncAvailability implements NearbyCompanyDisclosure {
 }
 
 const _syncKind = 'created-jobs';
-const _syncProtocol = 'company.job.sync@4';
+const _syncProtocol = 'company.job.sync@5';
+const _syncActorProfile = 'company.user.authority@1/job.create.authorization@4';
 const _syncAckDomain = 'wiredpart.company.job.create.ack@1:';
 const _nameSyncAckDomain = 'wiredpart.company.job.name.ack@1:';
 const _lifecycleSyncAckDomain = 'wiredpart.company.job.lifecycle.ack@1:';
@@ -1287,6 +1288,19 @@ final class CompanyCreatedJobSync {
   ) async {
     final body = await _open(wire);
     final action = body['action'];
+    if (action == 'profile') {
+      final data = _joinObject(body['data'], {'profile'});
+      if (data['profile'] != _syncActorProfile || _activeRun != null) {
+        throw const CompanyBootstrapRefusal(
+          'Unsupported or busy Job user profile',
+        );
+      }
+      return _seal(wire['request'] as String, {
+        'action': 'profile.reply',
+        'run': body['run'],
+        'data': {'profile': _syncActorProfile},
+      });
+    }
     late _CreatedJobRun run;
     if (action == 'start') {
       atStage(CreatedJobSyncStage.startRequest);
@@ -1689,6 +1703,16 @@ final class CompanyCreatedJobSync {
       await availability.requireCurrent();
       stage = CreatedJobSyncStage.channelOpen;
       await _getChannel();
+      stage = CreatedJobSyncStage.startRequest;
+      final profile = _joinObject(
+        await _rpc('profile', {'profile': _syncActorProfile}),
+        {'profile'},
+      );
+      if (profile['profile'] != _syncActorProfile) {
+        throw const CompanyBootstrapRefusal(
+          'Peer does not support additional-user Jobs. Jobs remain pending.',
+        );
+      }
       stage = CreatedJobSyncStage.localInventory;
       await _freeze(run);
       _requireRun(run);

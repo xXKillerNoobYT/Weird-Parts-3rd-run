@@ -55,7 +55,8 @@ struct InstallationSecurityNamespace {
       bytes.allSatisfy({ Self.isAlphanumeric($0) || $0 == 46 || $0 == 95 || $0 == 45 }) else {
       throw StoreError.invalidArgument
     }
-    if rawValue != "production" && rawValue != "production.company-custody" {
+    if rawValue != "production" && rawValue != "production.company-custody"
+      && rawValue != "production.company-user-1" {
       let prefix = "synthetic."
       guard rawValue.hasPrefix(prefix),
         let first = bytes.dropFirst(prefix.utf8.count).first,
