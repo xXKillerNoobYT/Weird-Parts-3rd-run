@@ -118,7 +118,12 @@ Future<void> main() async {
     final trust = await installation.readCompanyTrust(app.db);
     final protectedUser = trust == null
         ? {'present': false, 'available': false}
-        : await _readProtectedUserProjection(enrollment, installation);
+        : await readCompanyUserValidationProjection(
+            enrollment,
+            installation,
+            run: _run,
+            roleName: _roleName,
+          );
     final identity = installation.identity!;
     final receipt = <String, Object?>{
       'kind': 'company-user-startup@1',
@@ -483,15 +488,18 @@ ValidationRole _validateStartupArguments() {
       : ValidationRole.receiver;
 }
 
-Future<Map<String, Object?>> _readProtectedUserProjection(
+Future<Map<String, Object?>> readCompanyUserValidationProjection(
   CompanyEnrollment enrollment,
-  InstallationSecurity installation,
-) async {
+  InstallationSecurity installation, {
+  required String run,
+  required String roleName,
+}) async {
   final namespace = validationInstallationNamespace(
-    run: _run,
-    roleName: _roleName,
+    run: run,
+    roleName: roleName,
   );
-  if (!namespace.startsWith('synthetic.lan.$_roleName.')) {
+  if (!namespace.startsWith('synthetic.lan.$roleName.') ||
+      namespace != installation.namespace) {
     return {'present': false, 'available': false};
   }
   final slot = companyUserNamespace(namespace);
@@ -527,10 +535,15 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
       'available': choice.available,
       'disabled': lifecycle.disabled,
       'attemptsRemaining': lifecycle.attemptsRemaining,
-      'disableReceiptSaved': lifecycle.confirmed,
+      'disableReceiptSaved': lifecycle.disabled && lifecycle.confirmed,
+      'awaitingCredential': lifecycle.awaitingCredential,
+      'credentialReceiptSaved':
+          !lifecycle.disabled &&
+          lifecycle.credentialVersion > 1 &&
+          lifecycle.confirmed,
       'certificatePublic': {
         'userId': choice.userId,
-        'credentialVersion': 1,
+        'credentialVersion': lifecycle.credentialVersion,
         'permissionVersion': 1,
       },
     };

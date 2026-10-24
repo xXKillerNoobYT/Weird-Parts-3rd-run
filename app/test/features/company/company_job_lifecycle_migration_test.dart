@@ -23,6 +23,8 @@ void main() {
       raw.execute('DROP TABLE company_job_lifecycle_peer_acks');
       raw.execute('DROP TABLE warehouse_counts');
       raw.execute('DROP TABLE warehouse_locations');
+      raw.execute('DROP TABLE company_user_events');
+      raw.execute('DROP TABLE company_user_deliveries');
       raw.execute('PRAGMA user_version = 10');
       raw.dispose();
       await f.reopen();

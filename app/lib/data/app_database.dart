@@ -15,6 +15,7 @@ import 'sqlite_file.dart';
 import 'tables/jobs.dart';
 import 'tables/company_jobs.dart';
 import 'tables/company_membership.dart';
+import 'tables/company_users.dart';
 import 'tables/job_line_history.dart';
 import 'tables/parts.dart';
 import 'tables/taxonomy.dart';
@@ -22,7 +23,7 @@ import 'tables/warehouse.dart';
 
 part 'app_database.g.dart';
 
-const kAppSchemaVersion = 12;
+const kAppSchemaVersion = 13;
 
 @DriftDatabase(
   tables: [
@@ -60,6 +61,8 @@ const kAppSchemaVersion = 12;
     CompanyMembershipCertificates,
     CompanyJoinRequests,
     CompanyJoinEvents,
+    CompanyUserEvents,
+    CompanyUserDeliveries,
     WarehouseLocations,
     WarehouseCounts,
   ],
@@ -136,6 +139,10 @@ class AppDatabase extends _$AppDatabase {
         }
       }
       await transaction(() async {
+        if (from < 13) {
+          await m.createTable(companyUserEvents);
+          await m.createTable(companyUserDeliveries);
+        }
         if (from < 12) {
           await m.createTable(warehouseLocations);
           await m.createTable(warehouseCounts);

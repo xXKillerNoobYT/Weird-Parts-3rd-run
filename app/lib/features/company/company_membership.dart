@@ -276,6 +276,20 @@ Future<ResolvedCompanyMembership> resolveCompanyMembership({
   if (trust == null) {
     throw const CompanyBootstrapRefusal('Company trust unavailable');
   }
+  return _resolveCompanyMembership(
+    db: db,
+    installation: installation,
+    trust: trust,
+    certificateBytes: certificateBytes,
+  );
+}
+
+Future<ResolvedCompanyMembership> _resolveCompanyMembership({
+  required AppDatabase db,
+  required InstallationSecurity installation,
+  required CompanyTrustAnchor trust,
+  String? certificateBytes,
+}) async {
   final authority = await _membershipAuthority(db, trust);
   if (certificateBytes == null) {
     final custody = await CompanyEnrollment(

@@ -33,6 +33,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   bool _detailsAvailable = false;
   Map<String, int> _confirmedPeers = const {};
   Set<String> _heldUserJobs = const {};
+  bool _heldPolicyDisabled = false;
   String? _userPolicyMessage;
   CreateJob? _pending;
   String? _error;
@@ -81,7 +82,9 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         policyMessage = 'Additional-user policy is unavailable. Owner Jobs remain readable; local owner work can continue. That user\'s work remains pending.';
       }
       final held = <String>{};
-      if (lifecycle?.disabled == true && widget.owner is OwnerSession) {
+      if (lifecycle != null &&
+          (lifecycle.disabled || lifecycle.credentialVersion > 1) &&
+          widget.owner is OwnerSession) {
         final creationConfirmed =
             await CompanyCreatedJobSync.confirmedPeerCounts(
               widget.commands.enrollment,
@@ -95,8 +98,15 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
               (creationConfirmed[row.jobId] ?? 0) == 0 &&
               ((jsonDecode(row.operationBytes) as Map)['body']
                       as Map)['user'] ==
-                  lifecycle!.userId) {
-            held.add(row.jobId);
+                  lifecycle.userId) {
+            final proof =
+                (jsonDecode(row.operationBytes) as Map)['authorization'] as Map;
+            if (await widget.commands.enrollment.isCompanyUserOperationHeld(
+              lifecycle.userId,
+              (proof['body'] as Map)['credential'] as int,
+            )) {
+              held.add(row.jobId);
+            }
           }
         }
       }
@@ -109,6 +119,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         _detailsAvailable = detailsAvailable;
         _confirmedPeers = confirmed;
         _heldUserJobs = held;
+        _heldPolicyDisabled = lifecycle?.disabled == true;
         _userPolicyMessage = policyMessage;
         _available = true;
         _loading = false;
@@ -355,7 +366,7 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
       ),
       if (_heldUserJobs.contains(job.baseJob.id))
         Text(
-          'Held for attention. Disabled-user work has no applied peer confirmation. Original bytes and authorship are retained.',
+          'Held for attention. ${_heldPolicyDisabled ? 'Disabled-user' : 'Superseded-credential'} work has no applied peer confirmation. Original bytes and authorship are retained.',
           key: Key('company-job-held-${job.baseJob.id}'),
         ),
       if (job.hasConflict)
@@ -476,8 +487,8 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
             'Jobs are saved on this installation. Use Sync Now with a verified retained peer. Confirmations describe the last successful exchange.',
           ),
           if (_heldUserJobs.isNotEmpty)
-            const Text(
-              'Disabled-user work without a prior applied confirmation is held for attention. Original Job bytes and authorship are retained; owner work can continue.',
+            Text(
+              '${_heldPolicyDisabled ? 'Disabled-user' : 'Superseded-credential'} work without a prior applied confirmation is held for attention. Original Job bytes and authorship are retained; owner work can continue.',
               key: Key('company-user-held-work'),
             ),
           if (_userPolicyMessage case final message?)

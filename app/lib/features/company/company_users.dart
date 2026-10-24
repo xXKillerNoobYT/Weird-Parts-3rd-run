@@ -121,6 +121,21 @@ Future<ResolvedCompanyUserAuthority> _resolveUserAuthority(
   Map<String, int> floors,
   String certificateBytes,
 ) async {
+  if (_decodeUserJson(certificateBytes) is List) {
+    final state = await CompanyUserStateCertificate.verify(
+      certificateBytes,
+      db: db,
+      trust: trust,
+      floors: floors,
+    );
+    final original = Map<String, Object?>.from(
+      (jsonDecode(state.originalCertificateBytes) as Map)['body'] as Map,
+    );
+    return ResolvedCompanyUserAuthority._(certificateBytes, {
+      ...original,
+      'credential': state.credentialVersion,
+    });
+  }
   if (utf8.encode(certificateBytes).length > 1024) {
     throw const CompanyBootstrapRefusal('User certificate exceeds capacity');
   }
@@ -201,18 +216,22 @@ final class _UserAccount {
   _UserAccount._(this.values, this.revision);
   final Map<String, Object?> values;
   final String? revision;
-  String get certificate => values['c'] as String;
+  bool get isCurrentState => values['v'] == 3;
+  String get certificate =>
+      isCurrentState ? _securityCanonical(values['c']) : values['c'] as String;
   List<Object?> get binding => (values['b'] as List).cast<Object?>();
   List<Object?> get credential => (values['p'] as List).cast<Object?>();
   _UserDisable? get disable =>
       values['d'] == null ? null : _UserDisable.decode(values['d']);
-  bool get isDisabled => disable != null;
+  bool get isDisabled => isCurrentState
+      ? ((values['c'] as List)[0] as List)[12] == 1
+      : disable != null;
   int get attempts => values['a'] as int;
   String get identityCommitment => _joinDigest({
     'c': certificate,
     'b': binding,
     'p': values['p'],
-    if (isDisabled) 'd': disable!.identity,
+    if (disable != null) 'd': disable!.identity,
   });
   _UserAccount change(Map<String, Object?> changes) => _UserAccount.decode(
     Uint8List.fromList(
@@ -238,6 +257,28 @@ final class _UserAccount {
     }
     final text = _decodeUserUtf8(bytes);
     final decoded = _decodeUserJson(text);
+    if (decoded is Map && decoded['v'] == 3 && decoded['v'] is int) {
+      final value = _joinObject(decoded, {
+        'v',
+        'c',
+        'b',
+        'p',
+        'a',
+        'o',
+        'r',
+        'j',
+      });
+      if (_securityCanonical(value) != text ||
+          value['a'] is! int ||
+          (value['a'] as int) < 0 ||
+          (value['a'] as int) > _companyAttempts) {
+        throw const CompanyBootstrapRefusal('Invalid protected current user');
+      }
+      _stateTuple(value['c'], 2);
+      _stateTuple(value['b'], 4);
+      if (value['p'] != null) _stateTuple(value['p'], 3);
+      return _UserAccount._(value, revision);
+    }
     final value = _joinObject(decoded, {
       'v',
       'c',
@@ -262,6 +303,11 @@ final class _UserAccount {
       throw const CompanyBootstrapRefusal('Unsupported protected user account');
     }
     final binding = (value['b'] as List).cast<Object?>();
+    if (_decodeUserJson(value['c'] as String) is! Map) {
+      throw const CompanyBootstrapRefusal(
+        'Current user state requires its compatible protected record',
+      );
+    }
     for (final index in [0, 1, 3]) {
       if (binding[index] is! String ||
           !Uuid.isValidUUID(fromString: binding[index] as String)) {
@@ -386,6 +432,11 @@ extension CompanyUsers on CompanyEnrollment {
     final account = await _readUserAccount();
     if (account == null) {
       throw const CompanyBootstrapRefusal('Create one additional user first');
+    }
+    if (account.isCurrentState) {
+      throw const CompanyBootstrapRefusal(
+        'Use the compatible retained-peer Sync Now flow for the current user PIN state',
+      );
     }
     await _checkUserAccount(account);
     final outgoing = account.values['o'];
@@ -671,6 +722,11 @@ extension CompanyUsers on CompanyEnrollment {
       var account = await _readUserAccount();
       if (account == null) {
         throw const CompanyBootstrapRefusal('No additional user to provision');
+      }
+      if (account.isCurrentState) {
+        throw const CompanyBootstrapRefusal(
+          'Use the compatible retained-peer Sync Now flow for the current user PIN state',
+        );
       }
       final user = await _checkUserAccount(account);
       if (user.user['id'] != verifiedRequest.userId) {
@@ -1011,14 +1067,17 @@ extension CompanyUsers on CompanyEnrollment {
     }
   }
 
-  Future<_UserAccount?> _readUserAccount() async {
+  Future<_UserAccount?> _readUserAccount({bool reconcile = true}) async {
     try {
       final state = await installation.store.readState(
         companyUserNamespace(installation.namespace),
       );
-      return state == null
+      final account = state == null
           ? null
           : _UserAccount.decode(state.bytes, revision: state.revision);
+      return account != null && account.isCurrentState && reconcile
+          ? await _reconcileUserPinState(account)
+          : account;
     } on CompanyBootstrapRefusal {
       rethrow;
     } catch (_) {
@@ -1049,6 +1108,14 @@ extension CompanyUsers on CompanyEnrollment {
       );
     }
     final trust = (await installation.readCompanyTrust(db))!;
+    if (account.isCurrentState) {
+      await CompanyUserStateRecord.decode(
+        account.encode(),
+        db: db,
+        installation: installation,
+      );
+      await _requireUserJournal(account);
+    }
     final user = await _resolveUserAuthority(
       db,
       trust,
@@ -1069,6 +1136,7 @@ extension CompanyUsers on CompanyEnrollment {
       'r': base64Encode(List<int>.filled(64, 255)),
     });
     worst.encode();
+    if (account.isCurrentState) return;
     worst.change({
       'v': 2,
       'p': null,
@@ -1165,7 +1233,7 @@ extension CompanyUsers on CompanyEnrollment {
             user.user['id'] as String,
             user._body['name'] as String,
             const ['createJob'],
-            !account.isDisabled,
+            !account.isDisabled && account.values['p'] != null,
             account.isDisabled,
           ),
         );
@@ -1297,7 +1365,9 @@ extension CompanyUsers on CompanyEnrollment {
       throw const CompanyBootstrapRefusal('User is not available locally');
     }
     final user = await _checkUserAccount(account);
-    if (user.user['id'] != userId || account.attempts == 0) {
+    if (user.user['id'] != userId ||
+        account.attempts == 0 ||
+        account.values['p'] == null) {
       throw const CompanyBootstrapRefusal('User PIN refused');
     }
     account = await _writeUserAccount(
@@ -1403,7 +1473,7 @@ extension CompanyUsers on CompanyEnrollment {
       'installation': custody.installation,
       'generation': custody.generation,
       'grant': custody.grant,
-      'credential': 1,
+      'credential': user.user['credential'],
       'permission': 1,
       'authority': trust.authorityVersion,
       'facts': trust.factsCommitment,

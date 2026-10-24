@@ -115,7 +115,7 @@ Future<Map<String, Object?>> syncAttackWire(
   String run,
   String action,
   Object? data, [
-  String protocol = 'company.job.sync@6',
+  String protocol = 'company.job.sync@7',
 ]) async {
   final keys = pair.keys;
   final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
@@ -174,10 +174,7 @@ Future<void> admitAttackRun(
     pair.b.availability.enrollment.installation.identity!.publicKey,
   );
   for (final step in <(String, Map<String, Object?>)>[
-    (
-      'profile',
-      {'profile': 'company.user.disable@1/job.create.authorization@4'},
-    ),
+    ('profile', {'profile': 'company.user.state@1/job.create.authorization@4'}),
     (
       'policyOffer',
       {'offer': await source.enrollment.createUserLifecycleOffer(source.peer)},

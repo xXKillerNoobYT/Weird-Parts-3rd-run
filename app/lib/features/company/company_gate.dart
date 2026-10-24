@@ -56,6 +56,10 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
   String? _selectedUser;
   final _userName = TextEditingController();
   final _userPin = TextEditingController();
+  final _replacementPin = TextEditingController();
+  String? _userResetRequest;
+  int? _userResetExpected;
+  String? _userResetPin;
   String? _userCreateRequest;
   String? _userDisableRequest;
   CompanyUserLifecycleStatus? _userLifecycle;
@@ -96,6 +100,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     _sourcePassphrase.dispose();
     _userName.dispose();
     _userPin.dispose();
+    _replacementPin.dispose();
     super.dispose();
   }
 
@@ -385,7 +390,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         owner is! OwnerSession ||
         !owner.identity.isAuthorityOwner ||
         user == null ||
-        !user.available) {
+        (user.userId.isEmpty || user.disabled)) {
       return;
     }
     setState(() {
@@ -406,6 +411,55 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
       if (mounted) {
         setState(
           () => _error = 'Disablement may already be saved. Retry or reopen the user status.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetUserPin() async {
+    final owner = _session;
+    final user = _users.skip(1).firstOrNull;
+    if (_busy ||
+        owner is! OwnerSession ||
+        !owner.identity.isAuthorityOwner ||
+        user == null ||
+        user.userId.isEmpty ||
+        user.disabled) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      _userResetRequest ??= const Uuid().v4();
+      _userResetExpected ??= _userLifecycle?.credentialVersion ?? 1;
+      _userResetPin ??= _replacementPin.text;
+      final receipt = await _enrollment.resetRestrictedUserPin(
+        owner: owner,
+        userId: user.userId,
+        requestId: _userResetRequest!,
+        expectedCredentialVersion: _userResetExpected!,
+        pin: _userResetPin!,
+      );
+      _replacementPin.clear();
+      _userResetRequest = null;
+      _userResetExpected = null;
+      _userResetPin = null;
+      await _load();
+      if (!receipt.isCurrent && mounted) {
+        setState(
+          () => _error = 'That earlier replacement was already recorded. The current PIN was not changed.',
+        );
+      }
+    } on CompanyBootstrapRefusal catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'PIN replacement may already be saved. Retry the same request and PIN or reopen user status.',
         );
       }
     } finally {
@@ -819,11 +873,60 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
                 ? ''
                 : ' (unavailable)'}',
           ),
-        if (_users.skip(1).any((user) => user.available))
+        if (_users
+            .skip(1)
+            .any((user) => user.userId.isNotEmpty && !user.disabled))
           OutlinedButton(
             key: const Key('company-disable-user'),
             onPressed: _busy ? null : _disableUser,
             child: const Text('Disable additional user permanently'),
+          ),
+        if (_users
+            .skip(1)
+            .any((user) => user.userId.isNotEmpty && !user.disabled)) ...[
+          TextField(
+            key: const Key('company-reset-pin'),
+            controller: _replacementPin,
+            enabled: !_busy && _userResetRequest == null,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Replacement additional-user PIN',
+            ),
+          ),
+          OutlinedButton(
+            key: const Key('company-reset-user'),
+            onPressed: _busy ? null : _resetUserPin,
+            child: const Text('Replace additional-user PIN'),
+          ),
+          if (_userResetRequest != null) ...[
+            const Text(
+              'This PIN replacement request is pending. Retry uses the same chosen PIN. Review status before starting another request.',
+            ),
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() {
+                        _userResetRequest = null;
+                        _userResetExpected = null;
+                        _userResetPin = null;
+                        _replacementPin.clear();
+                      });
+                      await _load();
+                    },
+              child: const Text('Review status and start a new reset request'),
+            ),
+          ],
+        ],
+        if ((_userLifecycle?.credentialVersion ?? 1) > 1 &&
+            _userLifecycle?.disabled == false)
+          Text(
+            _userLifecycle!.awaitingCredential
+                ? 'Newer user PIN policy is saved. Protected credential material is pending; this user cannot sign in here.'
+                : _userLifecycle!.confirmed
+                ? 'Additional-user PIN replacement is saved and confirmed by the retained installation.'
+                : 'Additional-user PIN replaced here. Remote confirmation is pending; disconnected devices retain their cached PIN. Verify the retained peer and Sync Now.',
           ),
         if (_userLifecycle?.disabled == true)
           Text(
