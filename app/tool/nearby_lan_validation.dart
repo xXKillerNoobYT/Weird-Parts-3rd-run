@@ -11,6 +11,7 @@ import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/backup/backup_store.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
+import 'package:wired_parts/features/nearby/nearby_controller.dart';
 
 import 'nearby_lan_workspace.dart';
 
@@ -69,8 +70,9 @@ String validationInstallationNamespace({
 }
 
 Future<WiredPartsApp> validationApplication(
-  ValidationWorkspace workspace,
-) async {
+  ValidationWorkspace workspace, {
+  NearbyController Function(String encounterAlias)? createCompanyJoinController,
+}) async {
   final namespace = validationInstallationNamespace(
     run: workspace.run,
     roleName: workspace.role.name,
@@ -90,6 +92,7 @@ Future<WiredPartsApp> validationApplication(
       deviceId: deviceId,
       installation: installation,
       enableCompanyBootstrap: true,
+      createCompanyJoinController: createCompanyJoinController,
     );
   } catch (_) {
     await db.close();

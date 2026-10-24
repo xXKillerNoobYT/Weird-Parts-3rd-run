@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../../data/app_database.dart';
 import '../installation/installation_security.dart';
 import '../shell/home_shell.dart';
+import '../nearby/nearby_controller.dart';
 import 'company_bootstrap.dart';
 import 'company_jobs_panel.dart';
 import 'company_join_page.dart';
@@ -25,6 +26,7 @@ class CompanyBootstrapGate extends StatefulWidget {
     this.supportDirectory,
     this.pickRecoveryPath,
     this.pickSourcePath,
+    this.createJoinController,
     super.key,
   });
 
@@ -34,6 +36,7 @@ class CompanyBootstrapGate extends StatefulWidget {
   final Directory? supportDirectory;
   final Future<String?> Function()? pickRecoveryPath;
   final Future<String?> Function()? pickSourcePath;
+  final NearbyController Function(String encounterAlias)? createJoinController;
 
   @override
   State<CompanyBootstrapGate> createState() => _CompanyBootstrapGateState();
@@ -133,6 +136,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
           enrollment: _enrollment,
           approver: owner is OwnerSession ? owner : null,
           reconnect: reconnect,
+          createController: widget.createJoinController,
         ),
       ),
     );

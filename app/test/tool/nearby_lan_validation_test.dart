@@ -19,6 +19,7 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/company/company_gate.dart';
 import 'package:wired_parts/features/company/company_store_markers.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
+import 'package:wired_parts/features/nearby/nearby_controller.dart';
 
 import '../../tool/nearby_lan_validation.dart';
 import '../../tool/nearby_lan_workspace.dart';
@@ -316,7 +317,14 @@ void main() {
           workspace!.markInitialized();
           await seed.close();
         });
-        app = await tester.runAsync(() => validationApplication(workspace!));
+        NearbyController factory(String alias) =>
+            throw StateError('Join was not requested');
+        app = await tester.runAsync(
+          () => validationApplication(
+            workspace!,
+            createCompanyJoinController: factory,
+          ),
+        );
         final first = app!;
         final namespace = validationInstallationNamespace(
           run: 'startup',
@@ -326,6 +334,7 @@ void main() {
         expect(first.installation!.store, isA<NativeInstallationSecureStore>());
         expect(first.installation!.readiness, InstallationReadiness.ready);
         expect(first.enableCompanyBootstrap, isTrue);
+        expect(first.createCompanyJoinController, same(factory));
         expect(first.deviceId, workspace!.deviceId);
         await tester.pumpWidget(first);
         await tester.runAsync(() async {
@@ -337,6 +346,12 @@ void main() {
           }
         });
         expect(find.byType(CompanyBootstrapGate), findsOneWidget);
+        expect(
+          tester
+              .widget<CompanyBootstrapGate>(find.byType(CompanyBootstrapGate))
+              .createJoinController,
+          same(factory),
+        );
         expect(find.byType(HomeShell), findsOneWidget);
         expect(find.text('Continue local shop'), findsNothing);
         expect(
@@ -353,6 +368,7 @@ void main() {
           () => validationApplication(workspace!),
         ))!;
         app = reopened;
+        expect(reopened.createCompanyJoinController, isNull);
         expect(reopened.installation!.readiness, InstallationReadiness.ready);
         expect(reopened.installation!.namespace, namespace);
         expect(reopened.deviceId, first.deviceId);

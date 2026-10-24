@@ -88,19 +88,40 @@ class NearbyWifiNetwork {
     );
   }
 
-  Future<ConnectionTask<Socket>> connect(Uri uri) async {
+  Future<ConnectionTask<Socket>> connect(
+    Uri uri, {
+    FutureOr<void> Function(NearbyTransportStage stage)? onStage,
+  }) async {
+    void observe(NearbyTransportStage stage) {
+      try {
+        final pending = onStage?.call(stage);
+        if (pending is Future<void>) {
+          unawaited(
+            pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+          );
+        }
+      } catch (_) {}
+    }
+
     if (!allowsPeer(uri.host)) {
       throw const NearbyException('Use the same Wi-Fi network.');
     }
+    observe(NearbyTransportStage.interfaceCheck);
     await interface();
+    observe(NearbyTransportStage.interfaceValidated);
+    observe(NearbyTransportStage.tcpStart);
     final task = await Socket.startConnect(
       InternetAddress(uri.host),
       uri.port,
       sourceAddress: bindAddress,
     );
-    final ready = task.socket.then(
-      (socket) => _bindStream(socket, outgoingPeer: uri.host),
-    );
+    final ready = task.socket.then((socket) {
+      observe(NearbyTransportStage.tcpConnected);
+      observe(NearbyTransportStage.bindingCheck);
+      final bound = _bindStream(socket, outgoingPeer: uri.host);
+      observe(NearbyTransportStage.bindingValidated);
+      return bound;
+    });
     return ConnectionTask.fromSocket(ready, task.cancel);
   }
 

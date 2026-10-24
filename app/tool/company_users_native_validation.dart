@@ -5,9 +5,13 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:uuid/uuid.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/nearby/nearby_controller.dart';
+import 'package:wired_parts/features/nearby/nearby_discovery.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'nearby_lan_validation.dart'
     show validationApplication, validationInstallationNamespace;
@@ -47,7 +51,18 @@ Future<void> main() async {
     _heldWorkspace = workspace;
     PathProviderPlatform.instance = workspace;
 
-    final app = await validationApplication(workspace);
+    final transport = CompanyUserTransportReceipts(
+      directory: workspace.receipts,
+      run: _run,
+      role: _roleName,
+      sourceRevision: _revision,
+      sourceTree: _tree,
+      processId: pid,
+    );
+    final app = await validationApplication(
+      workspace,
+      createCompanyJoinController: transport.createController,
+    );
     _openedDatabase = app.db;
     final installation = app.installation;
     if (installation == null || installation.identity == null) {
@@ -121,6 +136,14 @@ Future<void> main() async {
       'secondaryProtectedRecord': protectedUser,
       'appOwnsOrdinaryDatabaseExit': true,
       'normalQuitEvidence': 'external host process observation required',
+      'transportMeasurements': {
+        'passed': false,
+        'localOnly': true,
+        'file': p.basename(transport.filePath),
+        'maxRecords': CompanyUserTransportReceipts.maxRecords,
+        'maxRecordBytes': CompanyUserTransportReceipts.maxRecordBytes,
+        'maxTotalBytes': CompanyUserTransportReceipts.maxTotalBytes,
+      },
     };
     final receiptId = '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
     final file = File(
@@ -149,6 +172,132 @@ Future<void> main() async {
     exit(1);
   }
   runApp(readyApp);
+}
+
+/// A bounded local measurement sink, installed only by the guarded native target.
+final class CompanyUserTransportReceipts {
+  CompanyUserTransportReceipts({
+    required Directory directory,
+    required String run,
+    required String role,
+    required String sourceRevision,
+    required String sourceTree,
+    required int processId,
+  }) : _metadata = Map.unmodifiable({
+         'kind': 'company-user-transport@1',
+         'passed': false,
+         'localOnly': true,
+         'os': Platform.operatingSystem,
+         'run': run,
+         'role': role,
+         'pid': processId,
+         'sourceRevision': sourceRevision,
+         'sourceTree': sourceTree,
+       }),
+       _file = File(
+         p.join(
+           directory.path,
+           'company-user-transport-$processId-${const Uuid().v4()}.jsonl',
+         ),
+       ) {
+    if (!RegExp(r'^g2-users-\d{8}-[a-z0-9][a-z0-9-]{0,29}$').hasMatch(run) ||
+        !{'sender', 'receiver'}.contains(role) ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceRevision) ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceTree) ||
+        processId <= 0 ||
+        processId > 2147483647) {
+      throw ArgumentError('Invalid local transport measurement metadata');
+    }
+  }
+  static const maxRecords = 128;
+  static const maxRecordBytes = 1024;
+  static const maxTotalBytes = maxRecords * maxRecordBytes;
+  final Map<String, Object?> _metadata;
+  final File _file;
+  final List<List<int>> _records = [];
+  int _bytes = 0;
+  int _written = 0;
+  bool _disabled = false;
+  bool _closed = false;
+  RandomAccessFile? _handle;
+  Future<void>? _flushing;
+  String get filePath => _file.path;
+  int get capturedCount => _records.length;
+
+  NearbyController createController(String alias) => NearbyController(
+    deviceId: alias,
+    deviceName: 'Nearby ${alias.substring(0, 6)}',
+    discovery: LanNearbyDiscovery(),
+    companyJoin: true,
+    onTransportObservation: record,
+  );
+
+  void record(NearbyTransportObservation event) {
+    if (_disabled || _closed || _records.length >= maxRecords) return;
+    try {
+      final bytes = utf8.encode(
+        '${jsonEncode({..._metadata, ...event.toJson()})}\n',
+      );
+      if (bytes.length > maxRecordBytes ||
+          _bytes + bytes.length > maxTotalBytes) {
+        return;
+      }
+      _records.add(bytes);
+      _bytes += bytes.length;
+      _scheduleFlush();
+    } catch (_) {}
+  }
+
+  void _scheduleFlush() {
+    if (_disabled || _flushing != null || _written == _records.length) return;
+    _flushing =
+        Future<void>(() async {
+          try {
+            if (_handle == null) {
+              await _file.create(exclusive: true);
+              if (await FileSystemEntity.type(_file.path, followLinks: false) !=
+                  FileSystemEntityType.file) {
+                throw const FileSystemException(
+                  'Transport measurement file unavailable',
+                );
+              }
+              _handle = await _file.open(mode: FileMode.writeOnlyAppend);
+            }
+            final end = _records.length;
+            final bytes = [
+              for (var index = _written; index < end; index++)
+                ..._records[index],
+            ];
+            await _handle!.writeFrom(bytes);
+            await _handle!.flush();
+            _written = end;
+          } catch (_) {
+            _disabled = true;
+            try {
+              await _handle?.close();
+            } catch (_) {}
+            _handle = null;
+          }
+        }).whenComplete(() {
+          _flushing = null;
+          _scheduleFlush();
+        });
+  }
+
+  Future<void> drain() async {
+    while (_flushing != null) {
+      await _flushing;
+    }
+  }
+
+  Future<void> close() async {
+    _closed = true;
+    await drain();
+    try {
+      await _handle?.close();
+    } catch (_) {}
+    _handle = null;
+  }
 }
 
 ValidationRole _validateStartupArguments() {
