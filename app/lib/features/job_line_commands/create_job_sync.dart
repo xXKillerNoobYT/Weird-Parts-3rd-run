@@ -1,5 +1,25 @@
 part of 'job_line_commands.dart';
 
+sealed class IncomingCreateJobOutcome {
+  const IncomingCreateJobOutcome();
+}
+
+final class AppliedIncomingCreateJob extends IncomingCreateJobOutcome {
+  const AppliedIncomingCreateJob(this.receiptBytes);
+  final String receiptBytes;
+}
+
+final class HeldIncomingCreateJob extends IncomingCreateJobOutcome {
+  const HeldIncomingCreateJob(
+    this.jobId,
+    this.userId,
+    this.operationCommitment,
+  );
+  final String jobId;
+  final String userId;
+  final String operationCommitment;
+}
+
 const kCreateJobCompactReceiptLimit = 4096;
 const _incomingCreateReceiptDomain = 'wiredpart.job.create.incoming.receipt@1:';
 
@@ -205,6 +225,125 @@ final class _IncomingCreateAdmission extends VerifiedCompanyReceiptAdmission {
 }
 
 extension CompanyJobSyncCommands on CompanyJobCommands {
+  Future<String> applyIncomingCreate(
+    Uint8List canonicalOperation, {
+    required OwnerSession ownerSession,
+    required CompanyJobSyncAvailability availability,
+  }) async {
+    final result = await applyIncomingCreateOutcome(
+      canonicalOperation,
+      ownerSession: ownerSession,
+      availability: availability,
+    );
+    return switch (result) {
+      AppliedIncomingCreateJob(:final receiptBytes) => receiptBytes,
+      HeldIncomingCreateJob() => throw const JobLineRefusal(
+        'Disabled-user work is held for attention',
+      ),
+    };
+  }
+
+  Future<IncomingCreateJobOutcome> applyIncomingCreateOutcome(
+    Uint8List canonicalOperation, {
+    required OwnerSession ownerSession,
+    required CompanyJobSyncAvailability availability,
+  }) async {
+    if (_db.hasCallerTransaction) {
+      throw const JobLineRefusal('incoming create owns transaction');
+    }
+    if (!identical(availability.enrollment, enrollment) ||
+        !identical(availability.owner, ownerSession)) {
+      throw const JobLineRefusal('sync availability belongs to another owner');
+    }
+    final operation = _CreateOperation.parse(
+      Uint8List.fromList(canonicalOperation),
+    );
+    return ownerSession.runLocalCommand(() async {
+      await availability.requireCurrent();
+      await requireSyncPermission(ownerSession);
+      final context = await availability.peer.prepareCreateCommand(
+        ownerSession,
+      );
+      context.validateHistoricalCreateDevice(operation.body);
+      final duplicate = await _db.transaction(() async {
+        await _db.customStatement(
+          'UPDATE app_settings SET value = value WHERE key = ?',
+          [kInstallationBindingKey],
+        );
+        final existing =
+            await (_db.select(_db.companyJobs)..where(
+                  (t) =>
+                      t.companyId.equals(operation.command.companyId) &
+                      t.originGeneration.equals(
+                        operation.body['generation'] as String,
+                      ) &
+                      t.requestId.equals(operation.command.requestId),
+                ))
+                .getSingleOrNull();
+        if (existing == null) return null;
+        if (existing.outgoing || existing.operationBytes != operation.bytes) {
+          throw const JobLineRefusal('incoming create identity collision');
+        }
+        await verifyIncomingRecord(existing);
+        await beforeCommit?.call();
+        await verifyIncomingRecord(existing);
+        await availability.requireCurrent();
+        context.validateHistoricalCreateDevice(operation.body);
+        return existing.receiptBytes;
+      });
+      if (duplicate != null) return AppliedIncomingCreateJob(duplicate);
+      if (await context.isCreateActorDisabled(operation.authorization)) {
+        final key = SimplePublicKey(
+          context.createDevicePublicKey,
+          type: KeyPairType.ed25519,
+        );
+        context.validateAuthor(operation.body, key.bytes);
+        await _verifySignature(
+          operation.body,
+          operation.signature,
+          key,
+          domain: 'wiredpart.job.create.operation@1:',
+        );
+        await _verifySignature(
+          _object(operation.authorization['body']),
+          _string(operation.authorization, 'signature'),
+          key,
+          domain: 'wiredpart.job.create.authorization@3:',
+        );
+        final assertion = _object(operation.authorization['body']);
+        for (final field in [
+          'company',
+          'shop',
+          'job',
+          'request',
+          'generation',
+          'installation',
+          'device',
+          'user',
+          'command',
+          'facts',
+        ]) {
+          if (operation.body[field] != assertion[field]) {
+            throw const JobLineRefusal('held signed author differs');
+          }
+        }
+        await availability.requireCurrent();
+        return HeldIncomingCreateJob(
+          operation.command.jobId,
+          operation.body['user'] as String,
+          operation.commitment,
+        );
+      }
+      return AppliedIncomingCreateJob(
+        await _applyActiveIncomingCreate(
+          canonicalOperation,
+          ownerSession: ownerSession,
+          availability: availability,
+        ),
+      );
+    });
+  }
+
   Future<CompanyJob> verifySyncRecord(String jobId, OwnerSession owner) async {
     await requireSyncPermission(owner);
     final row = await (_db.select(
@@ -293,7 +432,7 @@ extension CompanyJobSyncCommands on CompanyJobCommands {
     return rows;
   }
 
-  Future<String> applyIncomingCreate(
+  Future<String> _applyActiveIncomingCreate(
     Uint8List canonicalOperation, {
     required OwnerSession ownerSession,
     required CompanyJobSyncAvailability availability,

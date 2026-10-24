@@ -624,6 +624,46 @@ void main() {
         .createJob(command, ownerSession: selected);
     await f.aEnrollment.signIn('1234');
     final peers = await _peers(f);
+    final source = (await f.aDb.select(f.aDb.companyJobs).get()).singleWhere(
+      (r) => r.jobId == command.jobId,
+    );
+    final beforeProvisionSql = await sqlSnapshot(f.bDb);
+    final beforeProvisionProtected = Map.of(f.bStore.states);
+    await expectLater(
+      CompanyJobCommands(enrollment: f.bEnrollment).applyIncomingCreate(
+        Uint8List.fromList(utf8.encode(source.operationBytes)),
+        ownerSession: f.bEnrollment.currentSession!,
+        availability: await CompanyJobSyncAvailability.open(
+          enrollment: f.bEnrollment,
+          owner: f.bEnrollment.currentSession!,
+          peer: peers.b,
+        ),
+      ),
+      throwsA(
+        isA<CompanyBootstrapRefusal>().having(
+          (error) => error.message,
+          'missing protected account',
+          'Current user account unavailable',
+        ),
+      ),
+    );
+    expect(await sqlSnapshot(f.bDb), beforeProvisionSql);
+    expectJoinProtectedUnchanged(f.bStore, beforeProvisionProtected);
+    final request = await f.bEnrollment.prepareUserProvisionRequest(
+      peer: peers.b,
+      requestId: const Uuid().v4(),
+      userId: user.userId,
+    );
+    final bundle = await f.aEnrollment.prepareUserProvision(
+      owner: f.aEnrollment.currentSession!,
+      peer: peers.a,
+      request: await f.aEnrollment.receiveUserProvisionRequest(
+        request,
+        peer: peers.a,
+      ),
+    );
+    final ack = await f.bEnrollment.acceptUserProvision(bundle, peer: peers.b);
+    await f.aEnrollment.acceptUserProvisionReceipt(ack, peer: peers.a);
     final a = CompanyCreatedJobSync(
       availability: await CompanyJobSyncAvailability.open(
         enrollment: f.aEnrollment,
@@ -647,9 +687,6 @@ void main() {
       first.complete,
       isTrue,
       reason: '${first.message}; receiver ${b.lastFailure}',
-    );
-    final source = (await f.aDb.select(f.aDb.companyJobs).get()).singleWhere(
-      (r) => r.jobId == command.jobId,
     );
     final received = (await f.bDb.select(f.bDb.companyJobs).get()).singleWhere(
       (r) => r.jobId == command.jobId,
@@ -737,17 +774,17 @@ void main() {
           body['run'] as String,
           'profile.reply',
           {},
-          'company.job.sync@4',
+          'company.job.sync@5',
         );
       };
       final before = await sqlSnapshot(f.bDb);
       final result = await a.syncNow();
       expect(result.complete, isFalse);
       expect(disclosed, hasLength(1));
-      expect(disclosed.single['protocol'], 'company.job.sync@5');
+      expect(disclosed.single['protocol'], 'company.job.sync@6');
       expect(disclosed.single['action'], 'profile');
       expect(disclosed.single['data'], {
-        'profile': 'company.user.authority@1/job.create.authorization@4',
+        'profile': 'company.user.disable@1/job.create.authorization@4',
       });
       expect(await sqlSnapshot(f.bDb), before);
       expect(

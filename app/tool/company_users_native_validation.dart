@@ -5,9 +5,15 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:uuid/uuid.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
+import 'package:wired_parts/features/nearby/nearby_controller.dart';
+import 'package:wired_parts/features/nearby/nearby_discovery.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'nearby_lan_validation.dart'
     show validationApplication, validationInstallationNamespace;
@@ -18,9 +24,14 @@ const _run = String.fromEnvironment('LAN_VALIDATION_RUN');
 const _roleName = String.fromEnvironment('LAN_VALIDATION_ROLE');
 const _revision = String.fromEnvironment('COMPANY_USER_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_USER_SOURCE_TREE');
+const _disabledApiProbe = bool.fromEnvironment(
+  'NATIVE_COMPANY_USER_DISABLED_API_PROBE',
+);
+const _disabledApiProbeRun = 'g2-users-20261024-disable-a';
+const _disabledApiProbeUser = '8bca98b6-de9d-4816-ad4e-54290686f16c';
+const _disabledApiProbePin = '0123';
 const _syntheticPin = '1234';
 const _syntheticRecoveryPhrase = 'Synthetic Goal 2 recovery authority 123';
-const _pinAttemptLimit = 8;
 
 ValidationWorkspace? _heldWorkspace;
 AppDatabase? _openedDatabase;
@@ -44,11 +55,26 @@ Future<void> main() async {
     if (!namespace.startsWith('synthetic.lan.$_roleName.')) {
       throw StateError('invalid synthetic installation namespace');
     }
-    final workspace = ValidationWorkspace.open(run: _run, role: role);
+    final workspace = ValidationWorkspace.open(
+      run: _run,
+      role: role,
+      requireExisting: _disabledApiProbe,
+    );
     _heldWorkspace = workspace;
     PathProviderPlatform.instance = workspace;
 
-    final app = await validationApplication(workspace);
+    final transport = CompanyUserTransportReceipts(
+      directory: workspace.receipts,
+      run: _run,
+      role: _roleName,
+      sourceRevision: _revision,
+      sourceTree: _tree,
+      processId: pid,
+    );
+    final app = await validationApplication(
+      workspace,
+      createCompanyJoinController: transport.createController,
+    );
     _openedDatabase = app.db;
     final installation = app.installation;
     if (installation == null || installation.identity == null) {
@@ -76,6 +102,17 @@ Future<void> main() async {
       installation: installation,
       db: app.db,
     );
+    final disabledApiProbe = await runCompanyUserDisabledApiProbe(
+      enrollment: enrollment,
+      enabled: _disabledApiProbe,
+      validationEnabled: _enabled,
+      initialized: workspace.initialized,
+      run: _run,
+      roleName: _roleName,
+      expectedUserId: _disabledApiProbeUser,
+      sourceRevision: _revision,
+      sourceTree: _tree,
+    );
     final choices = await enrollment.listCompanyUsers();
     final receiptCompany = createdCompany ?? await enrollment.readIdentity();
     final trust = await installation.readCompanyTrust(app.db);
@@ -96,7 +133,8 @@ Future<void> main() async {
       'installation': {
         'id': identity.id.value,
         'generation': identity.generation.value,
-        'receivingStoreGeneration': installation.receivingStoreGeneration?.value,
+        'receivingStoreGeneration':
+            installation.receivingStoreGeneration?.value,
         'publicKeySha256': sha256.convert(identity.publicKey).toString(),
       },
       'companyIdentity': receiptCompany == null
@@ -119,15 +157,25 @@ Future<void> main() async {
           },
       ],
       'secondaryProtectedRecord': protectedUser,
+      'disabledApiProbe': ?disabledApiProbe,
       'appOwnsOrdinaryDatabaseExit': true,
       'normalQuitEvidence': 'external host process observation required',
+      'transportMeasurements': {
+        'passed': false,
+        'localOnly': true,
+        'file': p.basename(transport.filePath),
+        'maxRecords': CompanyUserTransportReceipts.maxRecords,
+        'maxRecordBytes': CompanyUserTransportReceipts.maxRecordBytes,
+        'maxTotalBytes': CompanyUserTransportReceipts.maxTotalBytes,
+      },
     };
-    final receiptId =
-        '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
-    final file = File(p.join(
-      _heldWorkspace!.receipts.path,
-      'company-user-startup-$receiptId.json',
-    ));
+    final receiptId = '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    final file = File(
+      p.join(
+        _heldWorkspace!.receipts.path,
+        'company-user-startup-$receiptId.json',
+      ),
+    );
     file.createSync(exclusive: true);
     file.writeAsStringSync(
       const JsonEncoder.withIndent('  ').convert(receipt),
@@ -150,6 +198,262 @@ Future<void> main() async {
   runApp(readyApp);
 }
 
+Future<Map<String, Object?>?> runCompanyUserDisabledApiProbe({
+  required CompanyEnrollment enrollment,
+  bool enabled = false,
+  required bool validationEnabled,
+  required bool initialized,
+  required String run,
+  required String roleName,
+  required String expectedUserId,
+  required String sourceRevision,
+  required String sourceTree,
+}) async {
+  if (!enabled) return null;
+  final namespace = enrollment.installation.namespace;
+  if (!validationEnabled ||
+      !initialized ||
+      run != _disabledApiProbeRun ||
+      !{'sender', 'receiver'}.contains(roleName) ||
+      !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceRevision) ||
+      !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceTree) ||
+      !Uuid.isValidUUID(fromString: expectedUserId) ||
+      namespace !=
+          validationInstallationNamespace(run: run, roleName: roleName) ||
+      enrollment.currentCompanySession != null) {
+    throw StateError('Disabled API probe refused');
+  }
+  try {
+    Future<Map<String, ProtectedInstallationState>> protectedState() async {
+      final result = <String, ProtectedInstallationState>{};
+      for (final slot in [
+        namespace,
+        companyCustodyNamespace(namespace),
+        companyUserNamespace(namespace),
+      ]) {
+        final state = await enrollment.installation.store.readState(slot);
+        if (state == null) throw StateError('Disabled API probe refused');
+        result[slot] = state;
+      }
+      return result;
+    }
+
+    final beforeProtected = await protectedState();
+    final beforeSql = await _disabledProbeSqlSnapshot(enrollment.db);
+    if (await enrollment.readStatus() != CompanyBootstrapStatus.active) {
+      throw StateError('Disabled API probe refused');
+    }
+    final lifecycle = await enrollment.userLifecycleStatus();
+    final additional = (await enrollment.listCompanyUsers()).skip(1).toList();
+    final identity = await enrollment.readIdentity();
+    if (identity == null ||
+        lifecycle == null ||
+        lifecycle.userId != expectedUserId ||
+        !lifecycle.disabled ||
+        additional.length != 1 ||
+        additional.single.userId != expectedUserId ||
+        !additional.single.disabled ||
+        additional.single.available ||
+        enrollment.currentCompanySession != null) {
+      throw StateError('Disabled API probe refused');
+    }
+
+    var oldPinDenied = false;
+    try {
+      await enrollment.signInUser(expectedUserId, _disabledApiProbePin);
+    } on CompanyBootstrapRefusal catch (error) {
+      if (error.message != 'This company user is disabled') rethrow;
+      oldPinDenied = true;
+    }
+    if (!oldPinDenied || enrollment.currentCompanySession != null) {
+      throw StateError('Disabled API probe refused');
+    }
+
+    final command = CreateJob(
+      companyId: identity.companyId,
+      shopId: identity.shopId,
+      jobId: const Uuid().v4(),
+      requestId: const Uuid().v4(),
+      name: 'Synthetic disabled-user authorization probe',
+    );
+    var commandDenied = false;
+    try {
+      await enrollment.issueCreateJobAssertion(command);
+    } on CompanyBootstrapRefusal catch (error) {
+      if (error.message != 'Administrator sign-in required') rethrow;
+      commandDenied = true;
+    }
+    if (!commandDenied || enrollment.currentCompanySession != null) {
+      throw StateError('Disabled API probe refused');
+    }
+    final afterProtected = await protectedState();
+    for (final slot in beforeProtected.keys) {
+      if (beforeProtected[slot]!.revision != afterProtected[slot]!.revision ||
+          !_sameBytes(
+            beforeProtected[slot]!.bytes,
+            afterProtected[slot]!.bytes,
+          )) {
+        throw StateError('Disabled API probe refused');
+      }
+    }
+    if (await _disabledProbeSqlSnapshot(enrollment.db) != beforeSql) {
+      throw StateError('Disabled API probe refused');
+    }
+    return const {
+      'passed': false,
+      'oldPinDenied': true,
+      'noSession': true,
+      'commandAuthorizationDenied': true,
+      'protectedStateUnchanged': true,
+      'sqlUnchanged': true,
+      'scope':
+          'disabled login and unauthenticated Create Job authorization only',
+    };
+  } catch (_) {
+    try {
+      await enrollment.signOut();
+    } catch (_) {}
+    throw StateError('Disabled API probe refused');
+  }
+}
+
+Future<String> _disabledProbeSqlSnapshot(AppDatabase db) async => jsonEncode({
+  for (final table in db.allTables)
+    table.actualTableName:
+        (await db
+                .customSelect('SELECT * FROM "${table.actualTableName}"')
+                .get())
+            .map((row) => jsonEncode(row.data))
+            .toList()
+          ..sort(),
+});
+
+/// A bounded local measurement sink, installed only by the guarded native target.
+final class CompanyUserTransportReceipts {
+  CompanyUserTransportReceipts({
+    required Directory directory,
+    required String run,
+    required String role,
+    required String sourceRevision,
+    required String sourceTree,
+    required int processId,
+  }) : _metadata = Map.unmodifiable({
+         'kind': 'company-user-transport@1',
+         'passed': false,
+         'localOnly': true,
+         'os': Platform.operatingSystem,
+         'run': run,
+         'role': role,
+         'pid': processId,
+         'sourceRevision': sourceRevision,
+         'sourceTree': sourceTree,
+       }),
+       _file = File(
+         p.join(
+           directory.path,
+           'company-user-transport-$processId-${const Uuid().v4()}.jsonl',
+         ),
+       ) {
+    if (!RegExp(r'^g2-users-\d{8}-[a-z0-9][a-z0-9-]{0,29}$').hasMatch(run) ||
+        !{'sender', 'receiver'}.contains(role) ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceRevision) ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceTree) ||
+        processId <= 0 ||
+        processId > 2147483647) {
+      throw ArgumentError('Invalid local transport measurement metadata');
+    }
+  }
+  static const maxRecords = 128;
+  static const maxRecordBytes = 1024;
+  static const maxTotalBytes = maxRecords * maxRecordBytes;
+  final Map<String, Object?> _metadata;
+  final File _file;
+  final List<List<int>> _records = [];
+  int _bytes = 0;
+  int _written = 0;
+  bool _disabled = false;
+  bool _closed = false;
+  RandomAccessFile? _handle;
+  Future<void>? _flushing;
+  String get filePath => _file.path;
+  int get capturedCount => _records.length;
+
+  NearbyController createController(String alias) => NearbyController(
+    deviceId: alias,
+    deviceName: 'Nearby ${alias.substring(0, 6)}',
+    discovery: LanNearbyDiscovery(),
+    companyJoin: true,
+    onTransportObservation: record,
+  );
+
+  void record(NearbyTransportObservation event) {
+    if (_disabled || _closed || _records.length >= maxRecords) return;
+    try {
+      final bytes = utf8.encode(
+        '${jsonEncode({..._metadata, ...event.toJson()})}\n',
+      );
+      if (bytes.length > maxRecordBytes ||
+          _bytes + bytes.length > maxTotalBytes) {
+        return;
+      }
+      _records.add(bytes);
+      _bytes += bytes.length;
+      _scheduleFlush();
+    } catch (_) {}
+  }
+
+  void _scheduleFlush() {
+    if (_disabled || _flushing != null || _written == _records.length) return;
+    _flushing =
+        Future<void>(() async {
+          try {
+            if (_handle == null) {
+              await _file.create(exclusive: true);
+              if (await FileSystemEntity.type(_file.path, followLinks: false) !=
+                  FileSystemEntityType.file) {
+                throw const FileSystemException(
+                  'Transport measurement file unavailable',
+                );
+              }
+              _handle = await _file.open(mode: FileMode.writeOnlyAppend);
+            }
+            final end = _records.length;
+            final bytes = [
+              for (var index = _written; index < end; index++)
+                ..._records[index],
+            ];
+            await _handle!.writeFrom(bytes);
+            await _handle!.flush();
+            _written = end;
+          } catch (_) {
+            _disabled = true;
+            try {
+              await _handle?.close();
+            } catch (_) {}
+            _handle = null;
+          }
+        }).whenComplete(() {
+          _flushing = null;
+          _scheduleFlush();
+        });
+  }
+
+  Future<void> drain() async {
+    while (_flushing != null) {
+      await _flushing;
+    }
+  }
+
+  Future<void> close() async {
+    _closed = true;
+    await drain();
+    try {
+      await _handle?.close();
+    } catch (_) {}
+    _handle = null;
+  }
+}
+
 ValidationRole _validateStartupArguments() {
   final runMatch = RegExp(r'^g2-users-(\d{8})-([a-z0-9][a-z0-9-]{0,29})$')
       .firstMatch(_run);
@@ -164,6 +468,7 @@ ValidationRole _validateStartupArguments() {
       date.toUtc().toIso8601String().substring(0, 10).replaceAll('-', '') !=
           runMatch![1] ||
       _run.length > 48 ||
+      (_disabledApiProbe && _run != _disabledApiProbeRun) ||
       !RegExp(r'^[a-f0-9]{40}$').hasMatch(_revision) ||
       !RegExp(r'^[a-f0-9]{40}$').hasMatch(_tree) ||
       !{'sender', 'receiver'}.contains(_roleName)) {
@@ -200,21 +505,15 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
     return {'present': false, 'available': false};
   }
   try {
-    final text = utf8.decode(saved.bytes);
-    final raw = jsonDecode(text);
-    if (raw is! Map<String, dynamic> || raw['a'] is! int) {
-      throw const FormatException('unavailable');
-    }
-    final attemptCount = raw['a'] as int;
-    if (attemptCount < 0 || attemptCount > _pinAttemptLimit) {
-      throw const FormatException('unavailable');
-    }
+    final lifecycle = await enrollment.userLifecycleStatus();
     final choices = await enrollment.listCompanyUsers();
-    final additional = choices.skip(1).where((choice) => choice.available).toList();
-    if (additional.length != 1) {
+    final additional = choices.skip(1).toList();
+    if (lifecycle == null ||
+        additional.length != 1 ||
+        additional.single.userId != lifecycle.userId ||
+        additional.single.disabled != lifecycle.disabled) {
       throw const FormatException('unavailable');
     }
-    // The production list validates the signed certificate and pins both versions at 1.
     final latest = await installation.store.readState(slot);
     if (latest == null ||
         latest.revision != saved.revision ||
@@ -225,8 +524,10 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
     return {
       'present': true,
       'byteLength': saved.bytes.length,
-      'available': true,
-      'attemptCount': attemptCount,
+      'available': choice.available,
+      'disabled': lifecycle.disabled,
+      'attemptsRemaining': lifecycle.attemptsRemaining,
+      'disableReceiptSaved': lifecycle.confirmed,
       'certificatePublic': {
         'userId': choice.userId,
         'credentialVersion': 1,
@@ -234,7 +535,11 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
       },
     };
   } catch (_) {
-    return {'present': true, 'byteLength': saved.bytes.length, 'available': false};
+    return {
+      'present': true,
+      'byteLength': saved.bytes.length,
+      'available': false,
+    };
   }
 }
 

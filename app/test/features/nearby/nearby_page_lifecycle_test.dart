@@ -120,7 +120,9 @@ class _Network extends NearbyWifiNetwork {
   _HttpServer? server;
 
   @override
-  Future<HttpServer> listen() async => server = _HttpServer();
+  Future<HttpServer> listen({
+    FutureOr<void> Function(String, int)? onListenerBound,
+  }) async => server = _HttpServer();
 
   @override
   Future<void> close() async {}

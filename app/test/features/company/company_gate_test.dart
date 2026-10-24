@@ -17,6 +17,11 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
+import 'package:wired_parts/features/nearby/nearby_controller.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
+
+import 'company_join_test.dart' show JoinTestDiscovery;
+import 'company_join_widget_test.dart' show joinWidgetSignal;
 
 final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
   final states = <String, ProtectedInstallationState>{};
@@ -57,6 +62,118 @@ final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
 }
 
 void main() {
+  testWidgets(
+    'application forwards the passive native controller factory through the unjoined gate',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync(
+        'company-gate-observer-',
+      );
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final store = _Store();
+      final installation = InstallationSecurity(
+        store: store,
+        namespace: 'synthetic.passive-gate',
+      );
+      await installation.start(db);
+      final discovery = JoinTestDiscovery();
+      final observations = <NearbyTransportObservation>[];
+      NearbyController? created;
+      String? encounter;
+      NearbyController factory(String alias) {
+        encounter = alias;
+        return created = NearbyController(
+          deviceId: alias,
+          deviceName: 'Nearby ${alias.substring(0, 6)}',
+          discovery: discovery,
+          companyJoin: true,
+          bindAddress: InternetAddress.loopbackIPv4,
+          localIps: () async => ['127.0.0.1'],
+          onTransportObservation: observations.add,
+        );
+      }
+
+      final app = WiredPartsApp(
+        db: db,
+        pin: PinService(db.settingsDao),
+        deviceId: await db.settingsDao.ensureDeviceId(),
+        installation: installation,
+        enableCompanyBootstrap: true,
+        reset: LocalDataReset(supportDir: directory),
+        createCompanyJoinController: factory,
+      );
+      try {
+        await tester.pumpWidget(app);
+        final open = find.byKey(const Key('company-join-open'));
+        for (var index = 0; index < 100 && open.evaluate().isEmpty; index++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 25)),
+          );
+          await tester.pump(const Duration(milliseconds: 25));
+        }
+        expect(open, findsOneWidget);
+        expect(
+          tester
+              .widget<CompanyBootstrapGate>(find.byType(CompanyBootstrapGate))
+              .createJoinController,
+          same(factory),
+        );
+        await tester.runAsync(() => tester.tap(open));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        final page = tester.widget<CompanyJoinPage>(
+          find.byType(CompanyJoinPage),
+        );
+        expect(page.createController, same(factory));
+        expect(encounter, matches(RegExp(r'^[a-f0-9-]{36}$')));
+        expect(created!.deviceId, encounter);
+        expect(created!.discovery, same(discovery));
+        expect(created!.companyJoin, isTrue);
+        expect(created!.onJoinMessage, isNotNull);
+        expect(created!.companySyncDisclosure, isNull);
+        expect(page.approver, isNull);
+        expect(page.reconnect, isFalse);
+        await joinWidgetSignal(
+          tester,
+          () => observations.any(
+            (event) => event.stage == NearbyTransportStage.discoveryStarted,
+          ),
+        );
+        await tester.runAsync(() async {
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+        });
+        await joinWidgetSignal(
+          tester,
+          () => observations.any(
+            (event) => event.stage == NearbyTransportStage.stopped,
+          ),
+        );
+        expect(find.text('Company connection closed'), findsOneWidget);
+        final stopped = observations.lastWhere(
+          (event) => event.stage == NearbyTransportStage.stopped,
+        );
+        expect(stopped.stopReason, NearbyTransportStopReason.inactive);
+        expect(stopped.generation, 1);
+        expect(stopped.listenerPort, observations.first.listenerPort);
+      } finally {
+        await tester.runAsync(() async {
+          await created?.dispose();
+          await discovery.controller.close();
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.resumed,
+          );
+        });
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(() async {
+          await db.close();
+          directory.deleteSync(recursive: true);
+        });
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
   testWidgets('unjoined gate opens nearby Join without an owner session', (
     tester,
   ) async {

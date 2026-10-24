@@ -7,6 +7,7 @@ import 'data/app_database.dart';
 import 'features/backup/backup_codec.dart';
 import 'features/backup/backup_store.dart';
 import 'features/nearby/nearby_protocol.dart';
+import 'features/nearby/nearby_controller.dart';
 import 'features/pin/pin_service.dart';
 import 'features/reset/local_data_reset.dart';
 import 'features/shell/home_shell.dart';
@@ -68,6 +69,7 @@ class WiredPartsApp extends StatefulWidget {
     this.enableCompanyBootstrap = false,
     this.pickCompanyRecoveryPath,
     this.pickCompanySourcePath,
+    this.createCompanyJoinController,
     super.key,
   });
 
@@ -85,6 +87,8 @@ class WiredPartsApp extends StatefulWidget {
   final bool enableCompanyBootstrap;
   final Future<String?> Function()? pickCompanyRecoveryPath;
   final Future<String?> Function()? pickCompanySourcePath;
+  final NearbyController Function(String encounterAlias)?
+  createCompanyJoinController;
 
   @override
   State<WiredPartsApp> createState() => _WiredPartsAppState();
@@ -496,6 +500,7 @@ class _WiredPartsAppState extends State<WiredPartsApp>
                 photosDirectory: widget.reset.photosDir,
                 pickRecoveryPath: widget.pickCompanyRecoveryPath,
                 pickSourcePath: widget.pickCompanySourcePath,
+                createJoinController: widget.createCompanyJoinController,
               )
             : HomeShell(key: ValueKey(_generation)),
       ),

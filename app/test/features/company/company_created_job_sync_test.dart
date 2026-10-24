@@ -115,7 +115,7 @@ Future<Map<String, Object?>> syncAttackWire(
   String run,
   String action,
   Object? data, [
-  String protocol = 'company.job.sync@5',
+  String protocol = 'company.job.sync@6',
 ]) async {
   final keys = pair.keys;
   final kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
@@ -164,7 +164,76 @@ Future<Map<String, Object?>> syncAttackWire(
   };
 }
 
+Future<void> admitAttackRun(
+  ({CompanyCreatedJobSync a, CompanyCreatedJobSync b, OwnerSession ownerB})
+  pair,
+  String run,
+) async {
+  final source = pair.a.availability;
+  final recipient = base64Encode(
+    pair.b.availability.enrollment.installation.identity!.publicKey,
+  );
+  for (final step in <(String, Map<String, Object?>)>[
+    (
+      'profile',
+      {'profile': 'company.user.disable@1/job.create.authorization@4'},
+    ),
+    (
+      'policyOffer',
+      {'offer': await source.enrollment.createUserLifecycleOffer(source.peer)},
+    ),
+    ('policy', {'policy': null}),
+    ('policyAck', {'receipt': null}),
+  ]) {
+    await pair.b.receive(
+      await syncAttackWire(
+        pair.a.controller.pairedJoinSession!,
+        recipient,
+        run,
+        step.$1,
+        step.$2,
+      ),
+    );
+  }
+}
+
 void main() {
+  test('creation confirmation survives a pending owner edit while whole-Job confirmation waits', () async {
+    final f = await JoinFixture.create(allowOwnerAdditions: true);
+    await activateFixtureB(f);
+    final pair = await openSyncPair(f);
+    expect((await pair.a.syncNow()).complete, isTrue);
+    final commands = CompanyJobCommands(enrollment: f.aEnrollment);
+    final view = (await commands.listJobViews(ownerSession: f.owner)).single;
+    await commands.renameJob(
+      RenameJob(
+        companyId: f.owner.identity.companyId,
+        shopId: f.owner.identity.shopId,
+        jobId: view.baseJob.id,
+        requestId: const Uuid().v4(),
+        creationDigest: view.creationDigest,
+        observedHeads: view.nameHeads,
+        observedLifecycleHeads: view.lifecycle.lifecycleHeads,
+        name: 'Pending owner edit',
+      ),
+      ownerSession: f.owner,
+    );
+    expect(
+      (await CompanyCreatedJobSync.confirmedPeerCounts(
+        f.aEnrollment,
+        f.owner,
+      ))[view.baseJob.id],
+      0,
+    );
+    expect(
+      (await CompanyCreatedJobSync.confirmedPeerCounts(
+        f.aEnrollment,
+        f.owner,
+        creationOnly: true,
+      ))[view.baseJob.id],
+      1,
+    );
+  }, timeout: const Timeout(Duration(minutes: 2)));
   for (final foreign in [false, true]) {
     final label = foreign ? 'foreign' : 'owned';
     test(
@@ -197,6 +266,7 @@ void main() {
             data,
           ),
         );
+        await admitAttackRun(pair, run);
         await send(run, 'start', {
           'inventory': inventory.meta,
           'store': f.a.receivingStoreGeneration!.value,
@@ -268,10 +338,12 @@ void main() {
     final inventory = CreatedJobHoldingsInventory.local(
       await f.aDb.select(f.aDb.companyJobs).get(),
     );
+    final run = const Uuid().v4();
+    await admitAttackRun(pair, run);
     final wire = await syncAttackWire(
       pair.a.controller.pairedJoinSession!,
       base64Encode(f.b.identity!.publicKey),
-      const Uuid().v4(),
+      run,
       'start',
       {
         'inventory': inventory.meta,
@@ -331,6 +403,7 @@ void main() {
       'inventory': inventory.meta,
       'store': f.a.receivingStoreGeneration!.value,
     };
+    await admitAttackRun(pair, run);
     await send(run, 'start', start);
     final before = await sqlSnapshot(f.bDb);
     final protected = Map.of(f.bStore.states);
@@ -390,6 +463,7 @@ void main() {
           'items': inventory.page(0),
           'confirmedStores': [null],
         };
+        await admitAttackRun(pair, run);
         await send('start', start);
         await send('holdings', holdings);
         await send('put', {
@@ -632,10 +706,12 @@ void main() {
       final inventory = CreatedJobHoldingsInventory.local(
         await f.aDb.select(f.aDb.companyJobs).get(),
       );
+      final run = const Uuid().v4();
+      await admitAttackRun(pair, run);
       final start = await syncAttackWire(
         pair.a.controller.pairedJoinSession!,
         base64Encode(f.b.identity!.publicKey),
-        const Uuid().v4(),
+        run,
         'start',
         {
           'inventory': inventory.meta,
@@ -1126,6 +1202,7 @@ void main() {
       );
     }
 
+    await admitAttackRun(pair, run);
     await send('start', {
       'inventory': inventory.meta,
       'store': f.a.receivingStoreGeneration!.value,
@@ -1186,6 +1263,7 @@ void main() {
         );
       }
 
+      await admitAttackRun(pair, run);
       await send('start', {
         'inventory': inventory.meta,
         'store': f.a.receivingStoreGeneration!.value,
@@ -1465,48 +1543,105 @@ void main() {
     );
   }, timeout: const Timeout(Duration(minutes: 4)));
 
-  test(
-    'durable ACKs skip a shared prefix so a constrained fresh pair advances',
-    () async {
-      final f = await JoinFixture.create(allowOwnerAdditions: true);
-      await activateFixtureB(f);
-      final first = await openSyncPair(f);
-      expect(
-        (await first.a.syncNow()).complete,
-        isTrue,
-        reason: '${first.a.lastFailure}; ${first.b.lastFailure}',
-      );
-      await first.a.closeAndDrain();
-      await first.b.closeAndDrain();
-      await CompanyJobCommands(enrollment: f.aEnrollment).createJob(
-        CreateJob(
-          companyId: f.owner.identity.companyId,
-          shopId: f.owner.identity.shopId,
-          jobId: const Uuid().v4(),
-          requestId: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
-          name: 'Later offline Job',
-        ),
-        ownerSession: f.owner,
-      );
-      final resumed = await openSyncPair(f);
-      for (final sync in [resumed.a, resumed.b]) {
-        final channel = sync.controller.pairedJoinSession!;
-        for (var i = 0; channel.remainingReceivedNonces > 10; i++) {
-          channel.reserveReceivedNonce(base64Encode(List<int>.filled(12, i)));
-        }
+  test('durable ACKs skip a shared prefix so a constrained fresh pair advances', () async {
+    final f = await JoinFixture.create(allowOwnerAdditions: true);
+    await activateFixtureB(f);
+    final first = await openSyncPair(f);
+    expect(
+      (await first.a.syncNow()).complete,
+      isTrue,
+      reason: '${first.a.lastFailure}; ${first.b.lastFailure}',
+    );
+    await first.a.closeAndDrain();
+    await first.b.closeAndDrain();
+    await CompanyJobCommands(enrollment: f.aEnrollment).createJob(
+      CreateJob(
+        companyId: f.owner.identity.companyId,
+        shopId: f.owner.identity.shopId,
+        jobId: const Uuid().v4(),
+        requestId: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+        name: 'Later offline Job',
+      ),
+      ownerSession: f.owner,
+    );
+    final resumed = await openSyncPair(f);
+    // Seven setup RPCs leave seven for the transfer guard and its reserve.
+    const remainingBudget = 14;
+    for (final sync in [resumed.a, resumed.b]) {
+      final channel = sync.controller.pairedJoinSession!;
+      for (var i = 0; channel.remainingReceivedNonces > remainingBudget; i++) {
+        channel.reserveReceivedNonce(base64Encode(List<int>.filled(12, i)));
       }
-      final result = await resumed.a.syncNow();
-      expect(
-        result.complete,
-        isTrue,
-        reason: '${resumed.a.lastFailure}; ${resumed.b.lastFailure}',
+      expect(channel.remainingReceivedNonces, remainingBudget);
+    }
+    final actions = <String>[];
+    final trace = <String>[];
+    final handling = resumed.b.controller.onJoinMessage!;
+    final keys = resumed.a.controller.pairedJoinSession!.keys;
+    SecretKey key = keys.sendKey;
+    for (final purpose in ['company-join', 'company-job-create-sync']) {
+      key = await Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
+        secretKey: key,
+        nonce: utf8.encode(keys.id),
+        info: utf8.encode('wiredpart-v2/$purpose@1/${keys.sendDirection}'),
       );
-      expect(result.sent, 1);
-      expect(await f.bDb.select(f.bDb.companyJobs).get(), hasLength(2));
-      expect(await f.bDb.select(f.bDb.companyJobPeerAcks).get(), hasLength(2));
-    },
-    timeout: const Timeout(Duration(minutes: 4)),
-  );
+    }
+    int remaining(CompanyCreatedJobSync sync) =>
+        sync.controller.pairedJoinSession!.remainingReceivedNonces;
+    resumed.b.controller.onJoinMessage = (session, wire) async {
+      final header = {
+        for (final field in [
+          'v',
+          'kind',
+          'request',
+          'recipient',
+          'session',
+          'direction',
+        ])
+          field: wire[field],
+      };
+      final bytes = await AesGcm.with256bits().decrypt(
+        SecretBox(
+          base64Decode(wire['ciphertext'] as String),
+          nonce: base64Decode(wire['nonce'] as String),
+          mac: Mac(base64Decode(wire['tag'] as String)),
+        ),
+        secretKey: key,
+        aad: utf8.encode(canonicalJoinTest(header)),
+      );
+      final action =
+          (jsonDecode(utf8.decode(bytes)) as Map)['action'] as String;
+      actions.add(action);
+      trace.add('$action A=${remaining(resumed.a)} B=${remaining(resumed.b)}');
+      return handling(session, wire);
+    };
+    final result = await resumed.a.syncNow();
+    expect(
+      result.complete,
+      isTrue,
+      reason:
+          '${resumed.a.lastFailure}; ${resumed.b.lastFailure}; '
+          'stage=${result.failure?.stage.name} sent=${result.sent} received=${result.received}; '
+          'trace=$trace; final A=${remaining(resumed.a)} B=${remaining(resumed.b)}',
+    );
+    expect(actions, [
+      'profile',
+      'policyOffer',
+      'policy',
+      'policyAck',
+      'start',
+      'holdings',
+      'page',
+      'put',
+      'ackBoth',
+      'finish',
+    ]);
+    expect([remaining(resumed.a), remaining(resumed.b)], [4, 4]);
+    stdout.writeln('Constrained sync trace: $trace; final A=4 B=4.');
+    expect(result.sent, 1);
+    expect(await f.bDb.select(f.bDb.companyJobs).get(), hasLength(2));
+    expect(await f.bDb.select(f.bDb.companyJobPeerAcks).get(), hasLength(2));
+  }, timeout: const Timeout(Duration(minutes: 4)));
 
   test('one held receive rejects overlap, permits retry and drains before close completes', () async {
     final f = await JoinFixture.create(allowOwnerAdditions: true);

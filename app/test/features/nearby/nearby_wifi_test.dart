@@ -14,6 +14,124 @@ void main() {
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
+  for (final mode in ['record', 'throw', 'asyncThrow']) {
+    test(
+      'raw listener measurement preserves binding with observer $mode',
+      () async {
+        final network = _Network();
+        final listener = _Listener();
+        final bound = <(String, int)>[];
+        await IOOverrides.runZoned(
+          () async {
+            final server = await network.listen(
+              onListenerBound: (address, port) {
+                expect(listener.events.hasListener, isFalse);
+                bound.add((address, port));
+                if (mode == 'throw') {
+                  throw StateError('private-listener-marker');
+                }
+                if (mode == 'asyncThrow') {
+                  return Future<void>.delayed(
+                    Duration.zero,
+                    () => throw StateError('private-listener-marker'),
+                  );
+                }
+              },
+            );
+            final subscription = server.listen((_) {});
+            expect(bound, [('192.168.10.20', 6809)]);
+            expect(listener.events.hasListener, isTrue);
+            await server.close(force: true);
+            await network.close();
+            await subscription.cancel();
+            await Future<void>.delayed(Duration.zero);
+          },
+          serverSocketBind: (
+            address,
+            port, {
+            backlog = 0,
+            v6Only = false,
+            shared = false,
+          }) async => listener,
+        );
+      },
+    );
+  }
+
+  test('asynchronous Wi-Fi observer failure does not escape successful or refused connect', () async {
+    final network = _Network();
+    final socket = _Socket('192.168.10.40', '192.168.10.40');
+    Future<void> observe(NearbyTransportStage _) async {
+      await Future<void>.delayed(Duration.zero);
+      throw StateError('private-async-stage-marker');
+    }
+
+    await _outgoing(socket, () async {
+      final task = await network.connect(
+        Uri.parse('http://192.168.10.40:6809'),
+        onStage: observe,
+      );
+      expect(await task.socket, same(socket));
+    });
+    final refusal = const SocketException('private-stage-refusal');
+    socket.optionError = refusal;
+    await _outgoing(socket, () async {
+      final task = await network.connect(
+        Uri.parse('http://192.168.10.40:6809'),
+        onStage: observe,
+      );
+      await expectLater(task.socket, throwsA(same(refusal)));
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  });
+
+  for (final observerThrows in [false, true]) {
+    test(
+      'passive Wi-Fi stages preserve socket result when observer throws $observerThrows',
+      () async {
+        final network = _Network();
+        final stages = <NearbyTransportStage>[];
+        final socket = _Socket('192.168.10.40', '192.168.10.40');
+        void observe(NearbyTransportStage stage) {
+          stages.add(stage);
+          if (observerThrows) throw StateError('private-observer-marker');
+        }
+
+        await _outgoing(socket, () async {
+          final task = await network.connect(
+            Uri.parse('http://192.168.10.40:6809'),
+            onStage: observe,
+          );
+          expect(await task.socket, same(socket));
+          expect(socket.destroyed, isFalse);
+        });
+        expect(stages, [
+          NearbyTransportStage.interfaceCheck,
+          NearbyTransportStage.interfaceValidated,
+          NearbyTransportStage.tcpStart,
+          NearbyTransportStage.tcpConnected,
+          NearbyTransportStage.bindingCheck,
+          NearbyTransportStage.bindingValidated,
+        ]);
+        final refusal = const SocketException(
+          'private-socket-marker',
+          osError: OSError('private-os-marker', 65),
+        );
+        socket.optionError = refusal;
+        stages.clear();
+        await _outgoing(socket, () async {
+          final task = await network.connect(
+            Uri.parse('http://192.168.10.40:6809'),
+            onStage: observe,
+          );
+          await expectLater(task.socket, throwsA(same(refusal)));
+        });
+        expect(socket.destroyed, isTrue);
+        expect(stages.last, NearbyTransportStage.bindingCheck);
+      },
+    );
+  }
+
   test(
     'outgoing socket uses peer address while binding selected Wi-Fi',
     () async {

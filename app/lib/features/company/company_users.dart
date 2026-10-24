@@ -19,12 +19,14 @@ final class CompanyUserChoice {
     this.userId,
     this.name,
     this.capabilities,
-    this.available,
-  );
+    this.available, [
+    this.disabled = false,
+  ]);
   final String userId;
   final String name;
   final List<String> capabilities;
   final bool available;
+  final bool disabled;
 }
 
 final class CompanyUserReceipt {
@@ -75,11 +77,13 @@ final class CompanyUserProvisionStatus {
   CompanyUserProvisionStatus._(
     this.userId,
     this.targetDeviceId,
-    this.confirmed,
-  );
+    this.confirmed, [
+    this.disabled = false,
+  ]);
   final String userId;
   final String? targetDeviceId;
   final bool confirmed;
+  final bool disabled;
 }
 
 void _validateUserName(String name) {
@@ -102,8 +106,9 @@ Future<ResolvedCompanyUserAuthority> resolveCompanyUserAuthority({
   if (trust == null) {
     throw const CompanyBootstrapRefusal('Company authority unavailable');
   }
-  return _resolveUserAuthority(
+  return _resolveActiveUserAuthority(
     db,
+    installation,
     trust,
     installation.knownSecurityFloors,
     certificateBytes,
@@ -199,9 +204,16 @@ final class _UserAccount {
   String get certificate => values['c'] as String;
   List<Object?> get binding => (values['b'] as List).cast<Object?>();
   List<Object?> get credential => (values['p'] as List).cast<Object?>();
+  _UserDisable? get disable =>
+      values['d'] == null ? null : _UserDisable.decode(values['d']);
+  bool get isDisabled => disable != null;
   int get attempts => values['a'] as int;
-  String get identityCommitment =>
-      _joinDigest({'c': certificate, 'b': binding, 'p': credential});
+  String get identityCommitment => _joinDigest({
+    'c': certificate,
+    'b': binding,
+    'p': values['p'],
+    if (isDisabled) 'd': disable!.identity,
+  });
   _UserAccount change(Map<String, Object?> changes) => _UserAccount.decode(
     Uint8List.fromList(
       utf8.encode(_securityCanonical({...values, ...changes})),
@@ -225,7 +237,8 @@ final class _UserAccount {
       );
     }
     final text = _decodeUserUtf8(bytes);
-    final value = _joinObject(_decodeUserJson(text), {
+    final decoded = _decodeUserJson(text);
+    final value = _joinObject(decoded, {
       'v',
       'c',
       'b',
@@ -233,14 +246,16 @@ final class _UserAccount {
       'a',
       'o',
       'r',
+      if (decoded is Map && decoded['v'] == 2) 'd',
     });
     if (_securityCanonical(value) != text ||
-        value['v'] != 1 ||
+        (value['v'] != 1 && value['v'] != 2) ||
         value['c'] is! String ||
         value['b'] is! List ||
         (value['b'] as List).length != 4 ||
-        value['p'] is! List ||
-        (value['p'] as List).length != 3 ||
+        (value['d'] == null
+            ? value['p'] is! List || (value['p'] as List).length != 3
+            : value['p'] != null) ||
         value['a'] is! int ||
         (value['a'] as int) < 0 ||
         (value['a'] as int) > _companyAttempts) {
@@ -256,12 +271,16 @@ final class _UserAccount {
       }
     }
     _userBase64(binding[2], 32);
-    final pin = (value['p'] as List).cast<Object?>();
-    if (pin[0] != 1) {
-      throw const CompanyBootstrapRefusal('Unsupported user PIN profile');
+    if (value['d'] != null) {
+      _UserDisable.decode(value['d']);
+    } else {
+      final pin = (value['p'] as List).cast<Object?>();
+      if (pin[0] != 1) {
+        throw const CompanyBootstrapRefusal('Unsupported user PIN profile');
+      }
+      _userBase64(pin[1], 16);
+      _userBase64(pin[2], 32);
     }
-    _userBase64(pin[1], 16);
-    _userBase64(pin[2], 32);
     final outgoing = value['o'];
     if (outgoing != null) {
       if (outgoing is! List ||
@@ -344,12 +363,17 @@ extension CompanyUsers on CompanyEnrollment {
     await _requireUserAdministrator(owner);
     final account = await _readUserAccount();
     if (account == null) return null;
-    final user = await _checkUserAccount(account);
+    final user = await _checkUserAccount(account, requireActive: false);
     final outgoing = account.values['o'];
     return CompanyUserProvisionStatus._(
       user.user['id'] as String,
-      outgoing is List ? outgoing[2] as String : null,
-      account.values['r'] != null,
+      account.isDisabled
+          ? (account.disable!.target?[1] as String?)
+          : (outgoing is List ? outgoing[2] as String : null),
+      account.isDisabled
+          ? account.disable!.receipt != null
+          : account.values['r'] != null,
+      account.isDisabled,
     );
   }
 
@@ -416,11 +440,18 @@ extension CompanyUsers on CompanyEnrollment {
         body['certificate'] is! String) {
       throw const CompanyBootstrapRefusal('User invitation binding differs');
     }
-    final user = await resolveCompanyUserAuthority(
-      db: db,
-      installation: installation,
-      certificateBytes: body['certificate'] as String,
+    final trust = await installation.readCompanyTrust(db);
+    if (trust == null) {
+      throw const CompanyBootstrapRefusal('Company unavailable');
+    }
+    final user = await _resolveUserAuthority(
+      db,
+      trust,
+      installation.knownSecurityFloors,
+      body['certificate'] as String,
     );
+    final existing = await _readUserAccount();
+    if (existing != null) await _checkUserAccount(existing);
     if (user._body['device'] != peer.deviceId) {
       throw const CompanyBootstrapRefusal(
         'Only the authority owner may provision this user',
@@ -452,10 +483,16 @@ extension CompanyUsers on CompanyEnrollment {
         account.identityCommitment != session._accountCommitment ||
         _securityCanonical(account.binding) !=
             _securityCanonical(_userBinding())) {
+      session._clear();
       throw const CompanyBootstrapRefusal('Selected user account changed');
     }
-    final user = await _resolveUserAuthority(
+    if (account.isDisabled) {
+      session._clear();
+      throw const CompanyBootstrapRefusal('This company user is disabled');
+    }
+    final user = await _resolveActiveUserAuthority(
       db,
+      installation,
       trust,
       installation.knownSecurityFloors,
       account.certificate,
@@ -856,7 +893,8 @@ extension CompanyUsers on CompanyEnrollment {
       Uint8List.fromList(
         utf8.encode(
           _securityCanonical({
-            'v': 1,
+            'v': 2,
+            'd': null,
             'c': payload['certificate'],
             'b': _userBinding(),
             'p': payload['credential'],
@@ -996,8 +1034,9 @@ extension CompanyUsers on CompanyEnrollment {
   ];
 
   Future<ResolvedCompanyUserAuthority> _checkUserAccount(
-    _UserAccount account,
-  ) async {
+    _UserAccount account, {
+    bool requireActive = true,
+  }) async {
     final custody = await _readCustody();
     if (custody == null) {
       throw const CompanyBootstrapRefusal('Company is unavailable');
@@ -1009,11 +1048,18 @@ extension CompanyUsers on CompanyEnrollment {
         'User unavailable on this installation',
       );
     }
-    return resolveCompanyUserAuthority(
-      db: db,
-      installation: installation,
-      certificateBytes: account.certificate,
+    final trust = (await installation.readCompanyTrust(db))!;
+    final user = await _resolveUserAuthority(
+      db,
+      trust,
+      installation.knownSecurityFloors,
+      account.certificate,
     );
+    await _verifyUserDisable(account, user, trust);
+    if (requireActive && account.isDisabled) {
+      throw const CompanyBootstrapRefusal('This company user is disabled');
+    }
+    return user;
   }
 
   void _preflightUserCapacity(_UserAccount account) {
@@ -1023,6 +1069,17 @@ extension CompanyUsers on CompanyEnrollment {
       'r': base64Encode(List<int>.filled(64, 255)),
     });
     worst.encode();
+    worst.change({
+      'v': 2,
+      'p': null,
+      'd': [
+        1,
+        id,
+        base64Encode(List<int>.filled(64, 255)),
+        [0, id, id, id, base64Encode(List<int>.filled(32, 255)), id, id],
+        base64Encode(List<int>.filled(64, 255)),
+      ],
+    }).encode();
   }
 
   Future<_UserAccount> _writeUserAccount(_UserAccount next) async {
@@ -1102,13 +1159,14 @@ extension CompanyUsers on CompanyEnrollment {
     try {
       final account = await _readUserAccount();
       if (account != null) {
-        final user = await _checkUserAccount(account);
+        final user = await _checkUserAccount(account, requireActive: false);
         result.add(
           CompanyUserChoice._(
             user.user['id'] as String,
             user._body['name'] as String,
             const ['createJob'],
-            true,
+            !account.isDisabled,
+            account.isDisabled,
           ),
         );
       }
@@ -1178,7 +1236,8 @@ extension CompanyUsers on CompanyEnrollment {
       };
       final salt = _secureRandom(16);
       var account = _UserAccount._({
-        'v': 1,
+        'v': 2,
+        'd': null,
         'c': _securityCanonical({
           'body': body,
           'signature': base64Encode(List<int>.filled(64, 255)),
@@ -1263,6 +1322,14 @@ extension CompanyUsers on CompanyEnrollment {
       throw const CompanyBootstrapRefusal('User sign-in was cancelled');
     }
     final current = (await _readCustody())!;
+    final selected = await _readUserAccount();
+    if (selected == null ||
+        selected.isDisabled ||
+        selected.identityCommitment != account.identityCommitment) {
+      throw const CompanyBootstrapRefusal(
+        'User lifecycle changed during sign-in',
+      );
+    }
     if (epoch != _authenticationEpoch) {
       throw const CompanyBootstrapRefusal('User sign-in was cancelled');
     }
@@ -1358,9 +1425,12 @@ extension CompanyUsers on CompanyEnrollment {
     }
     await _checkUserAccount(latest!);
     session.validateAuthority(trust, installation.knownSecurityFloors);
-    return CreateJobAuthorization(db: db, installation: installation).verify(
-      command,
-      Uint8List.fromList(utf8.encode(_securityCanonical(proof))),
-    );
+    final verified =
+        await CreateJobAuthorization(db: db, installation: installation).verify(
+          command,
+          Uint8List.fromList(utf8.encode(_securityCanonical(proof))),
+        );
+    await session.requireCurrentAccount();
+    return verified;
   }
 }

@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../installation/installation_security.dart';
 import 'company_job_details_section.dart';
+import 'company_bootstrap.dart';
 import '../job_line_commands/job_line_commands.dart';
 
 class CompanyJobsPanel extends StatefulWidget {
@@ -29,6 +32,8 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
   bool _renameAvailable = false;
   bool _detailsAvailable = false;
   Map<String, int> _confirmedPeers = const {};
+  Set<String> _heldUserJobs = const {};
+  String? _userPolicyMessage;
   CreateJob? _pending;
   String? _error;
   bool _loading = true;
@@ -68,6 +73,34 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
               widget.owner as OwnerSession,
             )
           : <String, int>{};
+      CompanyUserLifecycleStatus? lifecycle;
+      String? policyMessage;
+      try {
+        lifecycle = await widget.commands.enrollment.userLifecycleStatus();
+      } on CompanyBootstrapRefusal {
+        policyMessage = 'Additional-user policy is unavailable. Owner Jobs remain readable; local owner work can continue. That user\'s work remains pending.';
+      }
+      final held = <String>{};
+      if (lifecycle?.disabled == true && widget.owner is OwnerSession) {
+        final creationConfirmed =
+            await CompanyCreatedJobSync.confirmedPeerCounts(
+              widget.commands.enrollment,
+              widget.owner as OwnerSession,
+              creationOnly: true,
+            );
+        for (final row in await widget.commands.syncHoldings(
+          ownerSession: widget.owner as OwnerSession,
+        )) {
+          if (row.outgoing &&
+              (creationConfirmed[row.jobId] ?? 0) == 0 &&
+              ((jsonDecode(row.operationBytes) as Map)['body']
+                      as Map)['user'] ==
+                  lifecycle!.userId) {
+            held.add(row.jobId);
+          }
+        }
+      }
+      await widget.commands.requireSyncPermission(widget.owner);
       if (!mounted || !widget.owner.isValid) return;
       setState(() {
         _jobs = jobs;
@@ -75,6 +108,8 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
         _renameAvailable = renameAvailable;
         _detailsAvailable = detailsAvailable;
         _confirmedPeers = confirmed;
+        _heldUserJobs = held;
+        _userPolicyMessage = policyMessage;
         _available = true;
         _loading = false;
       });
@@ -318,6 +353,11 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
               )
             : null,
       ),
+      if (_heldUserJobs.contains(job.baseJob.id))
+        Text(
+          'Held for attention. Disabled-user work has no applied peer confirmation. Original bytes and authorship are retained.',
+          key: Key('company-job-held-${job.baseJob.id}'),
+        ),
       if (job.hasConflict)
         Column(
           key: Key('company-job-name-conflict-${job.baseJob.id}'),
@@ -435,6 +475,13 @@ class _CompanyJobsPanelState extends State<CompanyJobsPanel> {
           const Text(
             'Jobs are saved on this installation. Use Sync Now with a verified retained peer. Confirmations describe the last successful exchange.',
           ),
+          if (_heldUserJobs.isNotEmpty)
+            const Text(
+              'Disabled-user work without a prior applied confirmation is held for attention. Original Job bytes and authorship are retained; owner work can continue.',
+              key: Key('company-user-held-work'),
+            ),
+          if (_userPolicyMessage case final message?)
+            Text(message, key: const Key('company-user-policy-unavailable')),
           if (!_renameAvailable)
             const Text(
               'Name editing requires an explicit company permission upgrade.',
