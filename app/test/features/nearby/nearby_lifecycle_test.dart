@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -50,6 +51,7 @@ NearbyController _controller(
   bool native = false,
   Future<List<String>> Function()? localIps,
   Future<NearbyWifiNetwork> Function()? readNetwork,
+  NearbyTransportObserver? onTransportObservation,
 }) => NearbyController(
   deviceId: deviceId,
   deviceName: deviceName,
@@ -57,6 +59,7 @@ NearbyController _controller(
   bindAddress: native ? null : InternetAddress.loopbackIPv4,
   localIps: localIps ?? () async => ['127.0.0.1'],
   readNetwork: readNetwork ?? readNearbyWifiNetwork,
+  onTransportObservation: onTransportObservation,
   collectPayload: () async => throw StateError('No payload'),
   applyPayload: (_) async => throw StateError('Must not apply'),
 );
@@ -77,10 +80,13 @@ class _Network extends NearbyWifiNetwork {
   int listens = 0;
   int? port;
   @override
-  Future<HttpServer> listen() async {
+  Future<HttpServer> listen({
+    FutureOr<void> Function(String, int)? onListenerBound,
+  }) async {
     listens++;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     port = server.port;
+    onListenerBound?.call(server.address.address, server.port);
     return server;
   }
 
@@ -175,9 +181,12 @@ class _HttpNetwork extends _Network {
   int closes = 0;
 
   @override
-  Future<HttpServer> listen() async {
+  Future<HttpServer> listen({
+    FutureOr<void> Function(String, int)? onListenerBound,
+  }) async {
     listens++;
     port = server.port;
+    onListenerBound?.call(server.address.address, server.port);
     return server;
   }
 
@@ -314,6 +323,98 @@ void main() {
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
+  for (final mode in ['record', 'throw', 'asyncThrow', 'off']) {
+    test(
+      'room measurements preserve listener lifetime with observer $mode',
+      () async {
+        final discovery = _Discovery();
+        final events = <NearbyTransportObservation>[];
+        final nearby = _controller(
+          discovery,
+          onTransportObservation: mode == 'off'
+              ? null
+              : mode == 'asyncThrow'
+              ? (event) async {
+                  events.add(event);
+                  await Future<void>.delayed(Duration.zero);
+                  throw StateError('private-room-observer');
+                }
+              : (event) {
+                  events.add(event);
+                  if (mode == 'throw') {
+                    throw StateError('private-room-observer');
+                  }
+                },
+        );
+        Future<void>? starting;
+        try {
+          for (var room = 0; room < 2; room++) {
+            final entered = discovery.started.stream.first;
+            starting = nearby.start();
+            await entered;
+            final port = discovery.starts.last.port;
+            if (mode != 'off') {
+              final current = events
+                  .where((e) => e.toJson()['generation'] == room * 2 + 1)
+                  .toList();
+              expect(current.map((event) => event.stage.name), [
+                'listenerBound',
+                'httpListening',
+                'discoveryStarting',
+              ]);
+              expect(
+                current.every(
+                  (e) => e.toJson()['listenerAddress'] == '127.0.0.1',
+                ),
+                isTrue,
+              );
+              expect(
+                current.every((e) => e.toJson()['listenerPort'] == port),
+                isTrue,
+              );
+            }
+            discovery.starts.last.ready.complete();
+            await starting;
+            expect(nearby.state.phase, NearbyPhase.looking);
+            final connection = await Socket.connect('127.0.0.1', port);
+            connection.destroy();
+            await nearby.stop();
+            expect(nearby.state.phase, NearbyPhase.idle);
+            if (mode != 'off') {
+              final current = events
+                  .where((e) => e.toJson()['generation'] == room * 2 + 1)
+                  .toList();
+              expect(
+                current.map((e) => e.stage.name),
+                containsAllInOrder(['discoveryStarted', 'stopping', 'stopped']),
+              );
+              expect(current.last.toJson()['stopReason'], 'requested');
+              expect(current.last.toJson()['listenerPort'], port);
+              expect(
+                jsonEncode(current.map((e) => e.toJson()).toList()),
+                isNot(contains('private-room-observer')),
+              );
+            }
+          }
+          if (mode == 'off') {
+            expect(events, isEmpty);
+          }
+          await Future<void>.delayed(Duration.zero);
+        } finally {
+          for (final start in discovery.starts) {
+            if (!start.ready.isCompleted) {
+              start.ready.complete();
+            }
+          }
+          await starting;
+          await nearby.dispose();
+          await discovery.started.close();
+          await discovery.peerUpdates.close();
+        }
+      },
+    );
+  }
+
   for (final failure in ['done', 'error']) {
     test('TCP $failure stops discovery and closes its listener', () async {
       final server = await _HttpServer.bind();
@@ -428,11 +529,13 @@ void main() {
         final replacementNetwork = _HttpNetwork(replacementServer);
         var networkReads = 0;
         final discovery = _Discovery();
+        final observations = <NearbyTransportObservation>[];
         final nearby = _controller(
           discovery,
           native: true,
           readNetwork: () async =>
               networkReads++ == 0 ? oldNetwork : replacementNetwork,
+          onTransportObservation: observations.add,
         );
         addTearDown(() async {
           if (!oldCloseReady.isCompleted) oldCloseReady.complete();
@@ -479,6 +582,41 @@ void main() {
         );
         expect(discovery.stops, stops);
         expect(replacementNetwork.closes, 0);
+        final oldEvents = observations
+            .where((event) => event.generation == 1)
+            .toList();
+        expect(
+          oldEvents.every((event) => event.listenerPort == oldServer.port),
+          isTrue,
+        );
+        expect(
+          oldEvents.any(
+            (event) =>
+                event.stage == NearbyTransportStage.stopped &&
+                event.stopReason?.name ==
+                    (failure == 'done' ? 'listenerDone' : 'listenerError'),
+          ),
+          isTrue,
+        );
+        final replacementEvents = observations
+            .where((event) => event.generation == 3)
+            .toList();
+        expect(
+          replacementEvents.map((event) => event.stage),
+          contains(NearbyTransportStage.discoveryStarted),
+        );
+        expect(
+          replacementEvents.every(
+            (event) => event.listenerPort == replacementServer.port,
+          ),
+          isTrue,
+        );
+        expect(
+          replacementEvents.any(
+            (event) => event.stage == NearbyTransportStage.stopping,
+          ),
+          isFalse,
+        );
         final connection = await Socket.connect(
           '127.0.0.1',
           replacementServer.port,

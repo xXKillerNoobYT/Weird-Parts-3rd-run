@@ -40,6 +40,96 @@ const observation = NearbyTransportObservation(
 );
 
 void main() {
+  test('separate room controllers keep distinct attribution when generation restarts', () async {
+    final events = <NearbyTransportObservation>[];
+    final discoveries = [JoinTestDiscovery(), JoinTestDiscovery()];
+    final controllers = [
+      for (var index = 0; index < 2; index++)
+        NearbyController(
+          deviceId: 'room-$index',
+          deviceName: 'Room',
+          discovery: discoveries[index],
+          companyJoin: true,
+          bindAddress: InternetAddress.loopbackIPv4,
+          localIps: () async => ['127.0.0.1'],
+          onTransportObservation: events.add,
+        ),
+    ];
+    try {
+      for (final controller in controllers) {
+        await controller.start();
+      }
+      final bound = events
+          .where((event) => event.stage == NearbyTransportStage.listenerBound)
+          .toList();
+      expect(bound, hasLength(2));
+      expect(bound.every((event) => event.generation == 1), isTrue);
+      expect(bound.map((event) => event.controller).toSet(), hasLength(2));
+      await controllers.first.stop();
+      expect(controllers.last.state.phase, NearbyPhase.looking);
+      final stopped = events.lastWhere(
+        (event) => event.stage == NearbyTransportStage.stopped,
+      );
+      expect(stopped.controller, bound.first.controller);
+      expect(stopped.listenerPort, bound.first.listenerPort);
+    } finally {
+      for (final controller in controllers) {
+        await controller.dispose();
+      }
+      for (final discovery in discoveries) {
+        await discovery.controller.close();
+      }
+    }
+  });
+  test('largest room projection fits unchanged receipt cap', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'room-transport-bounds-',
+    );
+    final writer = CompanyUserTransportReceipts(
+      directory: directory,
+      run: 'g2-users-20261024-${'a' * 30}',
+      role: 'receiver',
+      sourceRevision: 'a' * 40,
+      sourceTree: 'b' * 40,
+      processId: 2147483647,
+    );
+    try {
+      writer.record(
+        const NearbyTransportObservation(
+          request: 9223372036854775807,
+          generation: 9223372036854775807,
+          controller: 9223372036854775807,
+          operation: NearbyTransportOperation.room,
+          stage: NearbyTransportStage.responseAuthentication,
+          elapsedMicros: 9223372036854775807,
+          peerAddress: '255.255.255.255',
+          peerPort: 65535,
+          sourceInterfaceIndex: 2147483647,
+          sourceAddress: '255.255.255.255',
+          sourcePrefixLength: 30,
+          httpStatus: 599,
+          failure: NearbyTransportFailure.operatingSystem,
+          osError: -2147483648,
+          factoryAddress: '255.255.255.255',
+          factoryPort: 65535,
+          listenerAddress: '255.255.255.255',
+          listenerPort: 65535,
+          stopReason: NearbyTransportStopReason.startupFailure,
+        ),
+      );
+      await writer.drain();
+      expect(writer.capturedCount, 1);
+      final file = File(writer.filePath);
+      expect(await file.length(), lessThanOrEqualTo(1024));
+      final row = jsonDecode((await file.readAsLines()).single) as Map;
+      expect(row['listenerPort'], 65535);
+      expect(row['generation'], 9223372036854775807);
+      expect(row['stopReason'], 'startupFailure');
+    } finally {
+      await writer.close();
+      directory.deleteSync(recursive: true);
+    }
+  });
   test('actual HTTP connection factory destination is measured before connector refusal', () async {
     final network = _RefusingNetwork();
     final discovery = JoinTestDiscovery();
@@ -130,6 +220,7 @@ void main() {
         };
         await host.start();
         await guest.start();
+        events.clear();
         await expectLater(
           guest.sendJoinMessage({'kind': 'request'}),
           throwsA(isA<NearbyException>()),
@@ -367,6 +458,7 @@ void main() {
           peerPort: 6809,
           sourceAddress: 'private-source-marker',
           factoryAddress: 'private-factory-marker',
+          listenerAddress: 'private-listener-marker',
         ).toJson(),
       );
       expect(encoded, isNot(contains('private-')));
@@ -382,8 +474,9 @@ final class _RefusingNetwork extends NearbyWifiNetwork {
     : super(name: 'test', index: 7, address: '192.168.10.20', prefixLength: 24);
   Uri? target;
   @override
-  Future<HttpServer> listen() =>
-      HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  Future<HttpServer> listen({
+    FutureOr<void> Function(String, int)? onListenerBound,
+  }) => HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   @override
   Future<ConnectionTask<Socket>> connect(
     Uri uri, {

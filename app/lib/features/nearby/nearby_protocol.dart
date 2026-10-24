@@ -21,6 +21,7 @@ enum NearbyTransportOperation {
   pairConfirm,
   pairCancel,
   join,
+  room,
 }
 
 enum NearbyTransportStage {
@@ -36,6 +37,28 @@ enum NearbyTransportStage {
   httpResponse,
   responseAuthentication,
   responseVerified,
+  listenerBound,
+  httpListening,
+  discoveryStarting,
+  discoveryStarted,
+  listenerDone,
+  listenerError,
+  discoveryError,
+  stopping,
+  stopped,
+}
+
+enum NearbyTransportStopReason {
+  requested,
+  inactive,
+  hidden,
+  paused,
+  detached,
+  disposed,
+  startupFailure,
+  listenerDone,
+  listenerError,
+  discoveryError,
 }
 
 enum NearbyTransportFailure { socket, operatingSystem, timeout, refused, other }
@@ -62,6 +85,11 @@ final class NearbyTransportObservation {
     this.osError,
     this.factoryAddress,
     this.factoryPort,
+    this.generation,
+    this.controller,
+    this.listenerAddress,
+    this.listenerPort,
+    this.stopReason,
   });
   final int request;
   final NearbyTransportOperation operation;
@@ -77,6 +105,11 @@ final class NearbyTransportObservation {
   final int? osError;
   final String? factoryAddress;
   final int? factoryPort;
+  final int? generation;
+  final int? controller;
+  final String? listenerAddress;
+  final int? listenerPort;
+  final NearbyTransportStopReason? stopReason;
 
   static String? _ipv4(String? value) {
     if (value == null || value.length > 15) return null;
@@ -125,6 +158,14 @@ final class NearbyTransportObservation {
         factoryPort != null && factoryPort! > 0 && factoryPort! <= 65535
         ? factoryPort
         : null,
+    'generation': generation,
+    'controller': controller,
+    'listenerAddress': _ipv4(listenerAddress),
+    'listenerPort':
+        listenerPort != null && listenerPort! > 0 && listenerPort! <= 65535
+        ? listenerPort
+        : null,
+    'stopReason': stopReason?.name,
   };
 }
 

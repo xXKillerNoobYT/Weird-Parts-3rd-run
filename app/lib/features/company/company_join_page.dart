@@ -7,6 +7,7 @@ import '../installation/installation_security.dart';
 import 'company_bootstrap.dart';
 import '../nearby/nearby_controller.dart';
 import '../nearby/nearby_discovery.dart';
+import '../nearby/nearby_protocol.dart';
 
 /// Explicit approval and consent; Match alone never enrolls a company device.
 class CompanyJoinPage extends StatefulWidget {
@@ -558,7 +559,15 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
       _jobAvailabilityTimer?.cancel();
       _jobSync?.close();
       _channel?.close();
-      _controller.stop();
+      _controller.stop(
+        reason: switch (state) {
+          AppLifecycleState.inactive => NearbyTransportStopReason.inactive,
+          AppLifecycleState.hidden => NearbyTransportStopReason.hidden,
+          AppLifecycleState.paused => NearbyTransportStopReason.paused,
+          AppLifecycleState.detached => NearbyTransportStopReason.detached,
+          AppLifecycleState.resumed => NearbyTransportStopReason.requested,
+        },
+      );
       if (mounted) {
         setState(() {
           _closed = true;

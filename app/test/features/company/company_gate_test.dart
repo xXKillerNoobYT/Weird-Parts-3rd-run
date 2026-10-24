@@ -18,8 +18,10 @@ import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 import 'package:wired_parts/features/nearby/nearby_controller.dart';
+import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'company_join_test.dart' show JoinTestDiscovery;
+import 'company_join_widget_test.dart' show joinWidgetSignal;
 
 final class _Store implements InstallationSecureStore, RecoveryFilePublisher {
   final states = <String, ProtectedInstallationState>{};
@@ -74,6 +76,7 @@ void main() {
       );
       await installation.start(db);
       final discovery = JoinTestDiscovery();
+      final observations = <NearbyTransportObservation>[];
       NearbyController? created;
       String? encounter;
       NearbyController factory(String alias) {
@@ -85,6 +88,7 @@ void main() {
           companyJoin: true,
           bindAddress: InternetAddress.loopbackIPv4,
           localIps: () async => ['127.0.0.1'],
+          onTransportObservation: observations.add,
         );
       }
 
@@ -128,10 +132,37 @@ void main() {
         expect(created!.companySyncDisclosure, isNull);
         expect(page.approver, isNull);
         expect(page.reconnect, isFalse);
+        await joinWidgetSignal(
+          tester,
+          () => observations.any(
+            (event) => event.stage == NearbyTransportStage.discoveryStarted,
+          ),
+        );
+        await tester.runAsync(() async {
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+        });
+        await joinWidgetSignal(
+          tester,
+          () => observations.any(
+            (event) => event.stage == NearbyTransportStage.stopped,
+          ),
+        );
+        expect(find.text('Company connection closed'), findsOneWidget);
+        final stopped = observations.lastWhere(
+          (event) => event.stage == NearbyTransportStage.stopped,
+        );
+        expect(stopped.stopReason, NearbyTransportStopReason.inactive);
+        expect(stopped.generation, 1);
+        expect(stopped.listenerPort, observations.first.listenerPort);
       } finally {
         await tester.runAsync(() async {
           await created?.dispose();
           await discovery.controller.close();
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.resumed,
+          );
         });
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.runAsync(() async {

@@ -151,10 +151,25 @@ class NearbyWifiNetwork {
     }
   }
 
-  Future<HttpServer> listen() async {
+  Future<HttpServer> listen({
+    FutureOr<void> Function(String address, int port)? onListenerBound,
+  }) async {
     await interface();
     final listener = await ServerSocket.bind(bindAddress, 0);
     _listener = listener;
+    if (onListenerBound != null) {
+      try {
+        final pending = onListenerBound(
+          listener.address.address,
+          listener.port,
+        );
+        if (pending is Future<void>) {
+          unawaited(
+            pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+          );
+        }
+      } catch (_) {}
+    }
     try {
       return HttpServer.listenOn(_WifiServerSocket(listener, _bindStream));
     } catch (_) {

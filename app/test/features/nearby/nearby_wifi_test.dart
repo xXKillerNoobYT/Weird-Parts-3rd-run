@@ -14,6 +14,50 @@ void main() {
   const channel = MethodChannel('wired_parts/nearby_wifi');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
+  for (final mode in ['record', 'throw', 'asyncThrow']) {
+    test(
+      'raw listener measurement preserves binding with observer $mode',
+      () async {
+        final network = _Network();
+        final listener = _Listener();
+        final bound = <(String, int)>[];
+        await IOOverrides.runZoned(
+          () async {
+            final server = await network.listen(
+              onListenerBound: (address, port) {
+                expect(listener.events.hasListener, isFalse);
+                bound.add((address, port));
+                if (mode == 'throw') {
+                  throw StateError('private-listener-marker');
+                }
+                if (mode == 'asyncThrow') {
+                  return Future<void>.delayed(
+                    Duration.zero,
+                    () => throw StateError('private-listener-marker'),
+                  );
+                }
+              },
+            );
+            final subscription = server.listen((_) {});
+            expect(bound, [('192.168.10.20', 6809)]);
+            expect(listener.events.hasListener, isTrue);
+            await server.close(force: true);
+            await network.close();
+            await subscription.cancel();
+            await Future<void>.delayed(Duration.zero);
+          },
+          serverSocketBind: (
+            address,
+            port, {
+            backlog = 0,
+            v6Only = false,
+            shared = false,
+          }) async => listener,
+        );
+      },
+    );
+  }
+
   test('asynchronous Wi-Fi observer failure does not escape successful or refused connect', () async {
     final network = _Network();
     final socket = _Socket('192.168.10.40', '192.168.10.40');

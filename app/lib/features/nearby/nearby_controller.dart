@@ -84,7 +84,10 @@ class NearbyController {
     this.now,
     this.companyJoin = false,
     this.onTransportObservation,
-  }) : _collectPayload =
+  }) : _transportController = onTransportObservation == null
+           ? null
+           : ++_nextTransportController,
+       _collectPayload =
            collectPayload ??
            (() async =>
                throw const NearbyException('Shop copy is unavailable')),
@@ -162,8 +165,27 @@ class NearbyController {
   final DateTime Function()? now;
   final bool companyJoin;
   final NearbyTransportObserver? onTransportObservation;
+  static int _nextTransportController = 0;
+  final int? _transportController;
   int _transportObservations = 0;
   int _transportRequests = 0;
+
+  void _observeTransport(NearbyTransportObservation event) {
+    final observer = onTransportObservation;
+    if (observer == null ||
+        _transportObservations >= kNearbyTransportObservationLimit) {
+      return;
+    }
+    _transportObservations++;
+    try {
+      final pending = observer(event);
+      if (pending is Future<void>) {
+        unawaited(
+          pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+        );
+      }
+    } catch (_) {}
+  }
 
   _NearbyTransportTrace? _transportTrace(NearbyPeer peer, String path) {
     final observer = onTransportObservation;
@@ -182,22 +204,13 @@ class NearbyController {
     }
     return _NearbyTransportTrace(
       request: ++_transportRequests,
+      controller: _transportController!,
+      generation: _lifecycle,
       operation: operation,
       peer: peer,
       source: _wifi,
       fallbackAddress: bindAddress?.address,
-      observer: (event) {
-        if (_transportObservations >= kNearbyTransportObservationLimit) return;
-        _transportObservations++;
-        try {
-          final pending = observer(event);
-          if (pending is Future<void>) {
-            unawaited(
-              pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
-            );
-          }
-        } catch (_) {}
-      },
+      observer: _observeTransport,
     );
   }
 
@@ -223,6 +236,7 @@ class NearbyController {
   bool _disposed = false;
   Future<void>? _disposal;
   NearbyWifiNetwork? _wifi;
+  _NearbyRoomTrace? _roomTrace;
   StreamSubscription<List<NearbyPeer>>? _peerSub;
   _PairAttempt? _pending;
   int _pairGeneration = 0;
@@ -241,6 +255,13 @@ class NearbyController {
       return;
     }
     final generation = ++_lifecycle;
+    final trace = _roomTrace = onTransportObservation == null
+        ? null
+        : _NearbyRoomTrace(
+            _transportController!,
+            generation,
+            _observeTransport,
+          );
     HttpServer? server;
     NearbyWifiNetwork? wifi;
     _emit(
@@ -253,10 +274,14 @@ class NearbyController {
     );
     try {
       wifi = bindAddress == null ? await readNetwork() : null;
+      trace?.source = wifi;
       if (generation != _lifecycle) return;
       server = wifi != null
-          ? await wifi.listen()
+          ? await wifi.listen(onListenerBound: trace?.bound)
           : await HttpServer.bind(bindAddress!, 0);
+      if (wifi == null) {
+        trace?.bound(server.address.address, server.port);
+      }
       if (generation != _lifecycle) {
         await _closeServer(server, wifi);
         return;
@@ -266,19 +291,27 @@ class NearbyController {
       server.listen(
         _handleHttp,
         onError: (Object e) {
+          trace?.failed(NearbyTransportStage.listenerError, e);
           unawaited(
-            _transportFailed(generation, 'Nearby connection failed: $e'),
+            _transportFailed(
+              generation,
+              'Nearby connection failed: $e',
+              NearbyTransportStopReason.listenerError,
+            ),
           );
         },
         onDone: () {
+          trace?.emit(NearbyTransportStage.listenerDone);
           unawaited(
             _transportFailed(
               generation,
               'Nearby connection stopped. Open Nearby again.',
+              NearbyTransportStopReason.listenerDone,
             ),
           );
         },
       );
+      trace?.emit(NearbyTransportStage.httpListening);
       final ips = wifi != null
           ? [wifi.address]
           : await (localIps ?? localIpv4Addresses)();
@@ -319,15 +352,18 @@ class NearbyController {
           );
         },
         onError: (Object error) {
+          trace?.failed(NearbyTransportStage.discoveryError, error);
           unawaited(
             _transportFailed(
               generation,
               'Nearby discovery stopped. Check local network access and reopen Nearby. $error',
+              NearbyTransportStopReason.discoveryError,
             ),
           );
         },
       );
       _discoveryOwner = generation;
+      trace?.emit(NearbyTransportStage.discoveryStarting);
       await discovery.start(
         deviceId: deviceId,
         name: deviceName,
@@ -339,6 +375,7 @@ class NearbyController {
         await _closeServer(server, wifi);
         return;
       }
+      trace?.emit(NearbyTransportStage.discoveryStarted);
       _emit(
         NearbyViewState(
           phase: NearbyPhase.looking,
@@ -354,7 +391,7 @@ class NearbyController {
         await _closeServer(server, wifi);
         return;
       }
-      await stop();
+      await stop(reason: NearbyTransportStopReason.startupFailure);
       if (!_disposed && _lifecycle == generation + 1) {
         _fail(
           'Could not listen on this Wi-Fi. Allow Wired Parts through the firewall and try again. $e',
@@ -363,9 +400,13 @@ class NearbyController {
     }
   }
 
-  Future<void> _transportFailed(int generation, String message) async {
+  Future<void> _transportFailed(
+    int generation,
+    String message,
+    NearbyTransportStopReason reason,
+  ) async {
     if (generation != _lifecycle || _disposed) return;
-    await stop();
+    await stop(reason: reason);
     if (!_disposed && _lifecycle == generation + 1) {
       _fail(message);
     }
@@ -379,7 +420,12 @@ class NearbyController {
     }
   }
 
-  Future<void> stop() async {
+  Future<void> stop({
+    NearbyTransportStopReason reason = NearbyTransportStopReason.requested,
+  }) async {
+    final trace = _roomTrace;
+    _roomTrace = null;
+    trace?.emit(NearbyTransportStage.stopping, stopReason: reason);
     ++_lifecycle;
     _failPending(cancel: true);
     final peerSub = _peerSub;
@@ -405,6 +451,7 @@ class NearbyController {
       stopDiscovery,
       closeServer,
     ]);
+    trace?.emit(NearbyTransportStage.stopped, stopReason: reason);
   }
 
   Future<void> rename(String name) async {
@@ -1481,14 +1528,75 @@ class NearbyController {
   }
 
   Future<void> _dispose() async {
-    await stop();
+    await stop(reason: NearbyTransportStopReason.disposed);
     await _stateCtrl.close();
   }
+}
+
+final class _NearbyRoomTrace {
+  _NearbyRoomTrace(this.controller, this.generation, this.observer);
+  final int controller;
+  final int generation;
+  final NearbyTransportObserver observer;
+  final Stopwatch _clock = Stopwatch()..start();
+  NearbyWifiNetwork? source;
+  String? _address;
+  int? _port;
+
+  void bound(String address, int port) {
+    _address = address;
+    _port = port;
+    emit(NearbyTransportStage.listenerBound);
+  }
+
+  void emit(
+    NearbyTransportStage stage, {
+    NearbyTransportStopReason? stopReason,
+    NearbyTransportFailure? failure,
+    int? osError,
+  }) {
+    observer(
+      NearbyTransportObservation(
+        request: 0,
+        operation: NearbyTransportOperation.room,
+        stage: stage,
+        elapsedMicros: _clock.elapsedMicroseconds,
+        peerAddress: '',
+        peerPort: 0,
+        generation: generation,
+        controller: controller,
+        listenerAddress: _address,
+        listenerPort: _port,
+        sourceInterfaceIndex: source?.index,
+        sourceAddress: source?.address,
+        sourcePrefixLength: source?.prefixLength,
+        stopReason: stopReason,
+        failure: failure,
+        osError: osError,
+      ),
+    );
+  }
+
+  void failed(NearbyTransportStage stage, Object error) => emit(
+    stage,
+    failure: switch (error) {
+      SocketException() => NearbyTransportFailure.socket,
+      OSError() => NearbyTransportFailure.operatingSystem,
+      _ => NearbyTransportFailure.other,
+    },
+    osError: switch (error) {
+      SocketException(:final osError) => osError?.errorCode,
+      OSError(:final errorCode) => errorCode,
+      _ => null,
+    },
+  );
 }
 
 final class _NearbyTransportTrace {
   _NearbyTransportTrace({
     required this.request,
+    required this.controller,
+    required this.generation,
     required this.operation,
     required this.peer,
     required this.source,
@@ -1496,6 +1604,8 @@ final class _NearbyTransportTrace {
     required this.observer,
   });
   final int request;
+  final int controller;
+  final int generation;
   final NearbyTransportOperation operation;
   final NearbyPeer peer;
   final NearbyWifiNetwork? source;
@@ -1524,6 +1634,8 @@ final class _NearbyTransportTrace {
     observer(
       NearbyTransportObservation(
         request: request,
+        controller: controller,
+        generation: generation,
         operation: operation,
         stage: stage,
         elapsedMicros: _clock.elapsedMicroseconds,
