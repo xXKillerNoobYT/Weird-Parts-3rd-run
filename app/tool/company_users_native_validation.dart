@@ -8,7 +8,9 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:uuid/uuid.dart';
 import 'package:wired_parts/app.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
+import 'package:wired_parts/features/job_line_commands/job_line_commands.dart';
 import 'package:wired_parts/features/nearby/nearby_controller.dart';
 import 'package:wired_parts/features/nearby/nearby_discovery.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
@@ -22,6 +24,12 @@ const _run = String.fromEnvironment('LAN_VALIDATION_RUN');
 const _roleName = String.fromEnvironment('LAN_VALIDATION_ROLE');
 const _revision = String.fromEnvironment('COMPANY_USER_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_USER_SOURCE_TREE');
+const _disabledApiProbe = bool.fromEnvironment(
+  'NATIVE_COMPANY_USER_DISABLED_API_PROBE',
+);
+const _disabledApiProbeRun = 'g2-users-20261024-disable-a';
+const _disabledApiProbeUser = '8bca98b6-de9d-4816-ad4e-54290686f16c';
+const _disabledApiProbePin = '0123';
 const _syntheticPin = '1234';
 const _syntheticRecoveryPhrase = 'Synthetic Goal 2 recovery authority 123';
 
@@ -47,7 +55,11 @@ Future<void> main() async {
     if (!namespace.startsWith('synthetic.lan.$_roleName.')) {
       throw StateError('invalid synthetic installation namespace');
     }
-    final workspace = ValidationWorkspace.open(run: _run, role: role);
+    final workspace = ValidationWorkspace.open(
+      run: _run,
+      role: role,
+      requireExisting: _disabledApiProbe,
+    );
     _heldWorkspace = workspace;
     PathProviderPlatform.instance = workspace;
 
@@ -89,6 +101,17 @@ Future<void> main() async {
     final enrollment = CompanyEnrollment(
       installation: installation,
       db: app.db,
+    );
+    final disabledApiProbe = await runCompanyUserDisabledApiProbe(
+      enrollment: enrollment,
+      enabled: _disabledApiProbe,
+      validationEnabled: _enabled,
+      initialized: workspace.initialized,
+      run: _run,
+      roleName: _roleName,
+      expectedUserId: _disabledApiProbeUser,
+      sourceRevision: _revision,
+      sourceTree: _tree,
     );
     final choices = await enrollment.listCompanyUsers();
     final receiptCompany = createdCompany ?? await enrollment.readIdentity();
@@ -134,6 +157,7 @@ Future<void> main() async {
           },
       ],
       'secondaryProtectedRecord': protectedUser,
+      'disabledApiProbe': ?disabledApiProbe,
       'appOwnsOrdinaryDatabaseExit': true,
       'normalQuitEvidence': 'external host process observation required',
       'transportMeasurements': {
@@ -173,6 +197,136 @@ Future<void> main() async {
   }
   runApp(readyApp);
 }
+
+Future<Map<String, Object?>?> runCompanyUserDisabledApiProbe({
+  required CompanyEnrollment enrollment,
+  bool enabled = false,
+  required bool validationEnabled,
+  required bool initialized,
+  required String run,
+  required String roleName,
+  required String expectedUserId,
+  required String sourceRevision,
+  required String sourceTree,
+}) async {
+  if (!enabled) return null;
+  final namespace = enrollment.installation.namespace;
+  if (!validationEnabled ||
+      !initialized ||
+      run != _disabledApiProbeRun ||
+      !{'sender', 'receiver'}.contains(roleName) ||
+      !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceRevision) ||
+      !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceTree) ||
+      !Uuid.isValidUUID(fromString: expectedUserId) ||
+      namespace !=
+          validationInstallationNamespace(run: run, roleName: roleName) ||
+      enrollment.currentCompanySession != null) {
+    throw StateError('Disabled API probe refused');
+  }
+  try {
+    Future<Map<String, ProtectedInstallationState>> protectedState() async {
+      final result = <String, ProtectedInstallationState>{};
+      for (final slot in [
+        namespace,
+        companyCustodyNamespace(namespace),
+        companyUserNamespace(namespace),
+      ]) {
+        final state = await enrollment.installation.store.readState(slot);
+        if (state == null) throw StateError('Disabled API probe refused');
+        result[slot] = state;
+      }
+      return result;
+    }
+
+    final beforeProtected = await protectedState();
+    final beforeSql = await _disabledProbeSqlSnapshot(enrollment.db);
+    if (await enrollment.readStatus() != CompanyBootstrapStatus.active) {
+      throw StateError('Disabled API probe refused');
+    }
+    final lifecycle = await enrollment.userLifecycleStatus();
+    final additional = (await enrollment.listCompanyUsers()).skip(1).toList();
+    final identity = await enrollment.readIdentity();
+    if (identity == null ||
+        lifecycle == null ||
+        lifecycle.userId != expectedUserId ||
+        !lifecycle.disabled ||
+        additional.length != 1 ||
+        additional.single.userId != expectedUserId ||
+        !additional.single.disabled ||
+        additional.single.available ||
+        enrollment.currentCompanySession != null) {
+      throw StateError('Disabled API probe refused');
+    }
+
+    var oldPinDenied = false;
+    try {
+      await enrollment.signInUser(expectedUserId, _disabledApiProbePin);
+    } on CompanyBootstrapRefusal catch (error) {
+      if (error.message != 'This company user is disabled') rethrow;
+      oldPinDenied = true;
+    }
+    if (!oldPinDenied || enrollment.currentCompanySession != null) {
+      throw StateError('Disabled API probe refused');
+    }
+
+    final command = CreateJob(
+      companyId: identity.companyId,
+      shopId: identity.shopId,
+      jobId: const Uuid().v4(),
+      requestId: const Uuid().v4(),
+      name: 'Synthetic disabled-user authorization probe',
+    );
+    var commandDenied = false;
+    try {
+      await enrollment.issueCreateJobAssertion(command);
+    } on CompanyBootstrapRefusal catch (error) {
+      if (error.message != 'Administrator sign-in required') rethrow;
+      commandDenied = true;
+    }
+    if (!commandDenied || enrollment.currentCompanySession != null) {
+      throw StateError('Disabled API probe refused');
+    }
+    final afterProtected = await protectedState();
+    for (final slot in beforeProtected.keys) {
+      if (beforeProtected[slot]!.revision != afterProtected[slot]!.revision ||
+          !_sameBytes(
+            beforeProtected[slot]!.bytes,
+            afterProtected[slot]!.bytes,
+          )) {
+        throw StateError('Disabled API probe refused');
+      }
+    }
+    if (await _disabledProbeSqlSnapshot(enrollment.db) != beforeSql) {
+      throw StateError('Disabled API probe refused');
+    }
+    return const {
+      'passed': false,
+      'oldPinDenied': true,
+      'noSession': true,
+      'commandAuthorizationDenied': true,
+      'protectedStateUnchanged': true,
+      'sqlUnchanged': true,
+      'scope':
+          'disabled login and unauthenticated Create Job authorization only',
+    };
+  } catch (_) {
+    try {
+      await enrollment.signOut();
+    } catch (_) {}
+    throw StateError('Disabled API probe refused');
+  }
+}
+
+Future<String> _disabledProbeSqlSnapshot(AppDatabase db) async => jsonEncode({
+  for (final table in db.allTables)
+    table.actualTableName:
+        (await db
+                .customSelect('SELECT * FROM "${table.actualTableName}"')
+                .get())
+            .map((row) => jsonEncode(row.data))
+            .toList()
+          ..sort(),
+});
 
 /// A bounded local measurement sink, installed only by the guarded native target.
 final class CompanyUserTransportReceipts {
@@ -314,6 +468,7 @@ ValidationRole _validateStartupArguments() {
       date.toUtc().toIso8601String().substring(0, 10).replaceAll('-', '') !=
           runMatch![1] ||
       _run.length > 48 ||
+      (_disabledApiProbe && _run != _disabledApiProbeRun) ||
       !RegExp(r'^[a-f0-9]{40}$').hasMatch(_revision) ||
       !RegExp(r'^[a-f0-9]{40}$').hasMatch(_tree) ||
       !{'sender', 'receiver'}.contains(_roleName)) {
