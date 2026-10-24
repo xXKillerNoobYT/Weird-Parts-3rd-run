@@ -198,6 +198,13 @@ final class CompanyUserStateRecord {
     Uint8List bytes, {
     required AppDatabase db,
     required InstallationSecurity installation,
+  }) => _decode(bytes, db: db, installation: installation);
+
+  static Future<CompanyUserStateRecord> _decode(
+    Uint8List bytes, {
+    required AppDatabase db,
+    required InstallationSecurity installation,
+    CompanyTrustAnchor? heldTrust,
   }) async {
     try {
       if (bytes.length > kInstallationStateLimit) {
@@ -233,7 +240,7 @@ final class CompanyUserStateRecord {
           ])) {
         throw const CompanyBootstrapRefusal('User state installation differs');
       }
-      final trust = await installation.readCompanyTrust(db);
+      final trust = heldTrust ?? await installation.readCompanyTrust(db);
       if (trust == null) {
         throw const CompanyBootstrapRefusal('Company trust missing');
       }
@@ -272,9 +279,10 @@ final class CompanyUserStateRecord {
         _userBase64(value['r'], 64);
         final local = CompanyEnrollment(installation: installation, db: db)
             ._userPeerBinding(
-              await resolveCompanyMembership(
+              await _resolveCompanyMembership(
                 db: db,
                 installation: installation,
+                trust: trust,
               ),
               installation.receivingStoreGeneration!.value,
             );

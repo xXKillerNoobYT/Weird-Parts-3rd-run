@@ -140,23 +140,34 @@ final class HeldPeerCreateContext {
     if (certificate is! String) {
       throw const CompanyBootstrapRefusal('User proof missing');
     }
-    final actor = await _resolveUserAuthority(
-      peer._owner.enrollment.db,
-      _trust,
-      _floors,
-      certificate,
-    );
-    _createActor = actor;
-    validateAuthorization(assertion);
-    final account = await peer._owner.enrollment._readUserAccount();
-    if (account == null || account.certificate != certificate) {
+    final enrollment = peer._owner.enrollment;
+    final account = await enrollment._readUserAccount();
+    if (account == null) {
       throw const CompanyBootstrapRefusal('Current user account unavailable');
     }
-    await peer._owner.enrollment._checkUserAccount(
+    final currentUser = await enrollment._checkUserAccount(
       account,
       requireActive: false,
     );
-    return account.isDisabled;
+    final actor = await _resolveUserAuthority(
+      enrollment.db,
+      _trust,
+      _historicalUserFloors(_floors, currentUser.user['id'] as String),
+      certificate,
+    );
+    if (currentUser.user['id'] != actor.user['id']) {
+      throw const CompanyBootstrapRefusal('Current user identity differs');
+    }
+    _createActor = actor;
+    validateAuthorization(assertion);
+    if (account.certificate != certificate &&
+        (currentUser.user['credential'] as int) <=
+            (actor.user['credential'] as int)) {
+      throw const CompanyBootstrapRefusal('Conflicting current user epoch');
+    }
+    return account.isDisabled ||
+        (currentUser.user['credential'] as int) >
+            (actor.user['credential'] as int);
   }
 
   Future<void> admitCreateActor(Map<String, Object?> proof) async {

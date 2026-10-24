@@ -118,6 +118,8 @@ void main() {
       try {
         raw.execute('DROP TABLE warehouse_counts');
         raw.execute('DROP TABLE warehouse_locations');
+        raw.execute('DROP TABLE company_user_events');
+        raw.execute('DROP TABLE company_user_deliveries');
         raw.execute('PRAGMA user_version = 11');
       } finally {
         raw.dispose();
@@ -351,7 +353,9 @@ void main() {
           createdAt: DateTime.utc(2026, 10, 20),
           sourceDeviceId: 'synthetic-source',
           sqliteBytes: Uint8List.fromList(badFile.readAsBytesSync()),
-          photos: {'replacement.jpg': Uint8List.fromList([1, 2])},
+          photos: {
+            'replacement.jpg': Uint8List.fromList([1, 2]),
+          },
         );
 
         Object? replacementFailure;

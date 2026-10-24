@@ -39,7 +39,7 @@ final class _Fixture {
   final String userId;
   final ProtectedInstallationState active;
 
-  static Future<_Fixture> create() async {
+  static Future<_Fixture> create({bool disable = true}) async {
     final root = Directory.systemTemp.createTempSync(
       'disabled-api-probe-test-',
     );
@@ -85,11 +85,13 @@ final class _Fixture {
       ),
       ownerSession: owner,
     );
-    await enrollment.disableRestrictedUser(
-      owner: owner,
-      userId: user.userId,
-      requestId: const Uuid().v4(),
-    );
+    if (disable) {
+      await enrollment.disableRestrictedUser(
+        owner: owner,
+        userId: user.userId,
+        requestId: const Uuid().v4(),
+      );
+    }
     await enrollment.signOut();
     final fixture = _Fixture(
       root,
@@ -125,6 +127,44 @@ final class _Fixture {
 }
 
 void main() {
+  test('safe native projection reports actual replacement epoch without credential material', () async {
+    final f = await _Fixture.create(disable: false);
+    final owner = await f.enrollment.signIn('1234');
+    await f.enrollment.resetRestrictedUserPin(
+      owner: owner,
+      userId: f.userId,
+      requestId: const Uuid().v4(),
+      expectedCredentialVersion: 1,
+      pin: '4567',
+    );
+    final result = await readCompanyUserValidationProjection(
+      f.enrollment,
+      f.installation,
+      run: _run,
+      roleName: 'sender',
+    );
+    expect((result['certificatePublic'] as Map)['credentialVersion'], 2);
+    expect(result['awaitingCredential'], isFalse);
+    expect(result['credentialReceiptSaved'], isFalse);
+    expect(
+      result.keys,
+      unorderedEquals([
+        'present',
+        'byteLength',
+        'available',
+        'disabled',
+        'attemptsRemaining',
+        'disableReceiptSaved',
+        'awaitingCredential',
+        'credentialReceiptSaved',
+        'certificatePublic',
+      ]),
+    );
+    expect(
+      (result['certificatePublic'] as Map).keys,
+      unorderedEquals(['userId', 'credentialVersion', 'permissionVersion']),
+    );
+  });
   test(
     'default-off probe makes no authorization or protected-store calls',
     () async {

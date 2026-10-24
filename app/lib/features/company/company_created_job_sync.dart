@@ -41,8 +41,8 @@ final class CompanyJobSyncAvailability implements NearbyCompanyDisclosure {
 }
 
 const _syncKind = 'created-jobs';
-const _syncProtocol = 'company.job.sync@6';
-const _syncActorProfile = 'company.user.disable@1/job.create.authorization@4';
+const _syncProtocol = 'company.job.sync@7';
+const _syncActorProfile = 'company.user.state@1/job.create.authorization@4';
 const _syncAckDomain = 'wiredpart.company.job.create.ack@1:';
 const _nameSyncAckDomain = 'wiredpart.company.job.name.ack@1:';
 const _lifecycleSyncAckDomain = 'wiredpart.company.job.lifecycle.ack@1:';
@@ -600,7 +600,7 @@ final class CreatedJobSyncResult {
   String get message => complete
       ? 'Job snapshot synced. Sent $sent, received $received.'
       : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${held > 0
-            ? ' Disabled-user work is held for attention with original bytes retained and no applied confirmation.'
+            ? ' User work is held for attention under the current account policy, with original bytes retained and no applied confirmation.'
             : unsupported > 0
             ? ' Unsupported author scope remains pending.'
             : ''}${failure == null ? '' : ' ${failure!.message}'}';
@@ -619,6 +619,7 @@ final class CompanyCreatedJobSync {
   String? _lifecycleProfileRun;
   String? _lifecyclePolicyRun;
   String? _lifecycleReadyRun;
+  bool _lifecycleMore = false;
   VerifiedUserLifecycleTarget? _lifecycleTarget;
   final Set<String> _heldJobKeys = {};
   final Set<String> _heldCreationJobs = {};
@@ -1208,7 +1209,13 @@ final class CompanyCreatedJobSync {
     final body = ((jsonDecode(row.operationBytes) as Map)['body']) as Map;
     final user = body['user'] as String;
     if (user == availability.owner.identity.userId) return false;
-    return availability.enrollment.isCompanyUserDisabled(user);
+    final proof =
+        (jsonDecode(row.operationBytes) as Map)['authorization'] as Map;
+    final assertion = proof['body'] as Map;
+    return availability.enrollment.isCompanyUserOperationHeld(
+      user,
+      assertion['credential'] as int,
+    );
   }
 
   void _requireInventories() {
@@ -1335,6 +1342,7 @@ final class CompanyCreatedJobSync {
       _lifecycleReadyRun = null;
       _lifecyclePolicyRun = null;
       _lifecycleTarget = null;
+      _lifecycleMore = false;
       return _seal(wire['request'] as String, {
         'action': 'profile.reply',
         'run': body['run'],
@@ -1374,10 +1382,15 @@ final class CompanyCreatedJobSync {
             peer,
             target,
           );
-          result = {
-            'receipt': receipt,
-            'policy': await enrollment.prepareUserDisablePolicy(peer, target),
-          };
+          final outgoingPolicy = await enrollment.prepareUserDisablePolicy(
+            peer,
+            target,
+          );
+          _lifecycleMore =
+              (data['policy'] is Map &&
+                  (data['policy'] as Map)['more'] == true) ||
+              outgoingPolicy?['more'] == true;
+          result = {'receipt': receipt, 'policy': outgoingPolicy};
           _lifecyclePolicyRun = body['run'] as String;
         } else {
           if (_lifecyclePolicyRun != body['run']) {
@@ -1392,7 +1405,7 @@ final class CompanyCreatedJobSync {
                 : Map<String, Object?>.from(data['receipt'] as Map),
             peer,
           );
-          _lifecycleReadyRun = body['run'] as String;
+          if (!_lifecycleMore) _lifecycleReadyRun = body['run'] as String;
           result = {};
         }
       }
@@ -1854,10 +1867,12 @@ final class CompanyCreatedJobSync {
         Map<String, Object?>.from(offered['offer'] as Map),
         peer,
       );
+      final outgoingPolicy = await enrollment.prepareUserDisablePolicy(
+        peer,
+        target,
+      );
       final policy = _joinObject(
-        await _rpc('policy', {
-          'policy': await enrollment.prepareUserDisablePolicy(peer, target),
-        }),
+        await _rpc('policy', {'policy': outgoingPolicy}),
         {'policy', 'receipt'},
       );
       await enrollment.acceptUserDisableReceipt(
@@ -1874,6 +1889,13 @@ final class CompanyCreatedJobSync {
         target,
       );
       await _rpc('policyAck', {'receipt': receipt});
+      if (outgoingPolicy?['more'] == true ||
+          (policy['policy'] is Map &&
+              (policy['policy'] as Map)['more'] == true)) {
+        throw const CompanyBootstrapRefusal(
+          'More public user history pending. Pair again and retry Sync Now.',
+        );
+      }
       stage = CreatedJobSyncStage.localInventory;
       await _freeze(run);
       _requireRun(run);
