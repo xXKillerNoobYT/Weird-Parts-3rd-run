@@ -1,0 +1,29 @@
+---
+description: WiredPart project scope, offline behavior, and data safety
+alwaysApply: true
+---
+
+# Wired Parts / WiredPart — agent rules
+
+## Project scope
+
+- Follow the current repository `AGENTS.md`, roadmap, and governing issue for scope and acceptance.
+- Keep changes within the authorized work; roadmap ideas and end-goal drafts do not authorize implementation by themselves.
+
+## Architecture hard rules
+
+- Preserve offline operation for the workflows that support it, and follow current company enrollment and authorization contracts where they apply.
+- Treat backup, one-way replacement, and changes-only two-way sync as distinct behaviors.
+- Keep catalog writes behind the current PIN and authorization gates. Do not replicate device credentials or unrelated local settings.
+
+## Stack
+
+- Flutter app lives under `app/`.
+- Persistence: **Drift** + SQLite.
+- After schema/DAO changes: `dart run build_runner build --delete-conflicting-outputs` from `app/`.
+
+## Product model reminders
+
+- **General Part** is default identity; brand versions and supplier listings are optional.
+- Job lines track needed / shop-pull separately from **order splits** (supplier+qty rows).
+- Preserve stable IDs, relationships, tombstones, and attributed history according to the current data contract.

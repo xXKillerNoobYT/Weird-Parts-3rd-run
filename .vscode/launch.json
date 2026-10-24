@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "wired_parts (Windows)",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/app/lib/main.dart",
+      "cwd": "${workspaceFolder}/app",
+      "deviceId": "windows",
+      "toolArgs": []
+    },
+    {
+      "name": "wired_parts (profile mode)",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/app/lib/main.dart",
+      "cwd": "${workspaceFolder}/app",
+      "flutterMode": "profile",
+      "deviceId": "windows"
+    },
+    {
+      "name": "wired_parts (release mode)",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/app/lib/main.dart",
+      "cwd": "${workspaceFolder}/app",
+      "flutterMode": "release",
+      "deviceId": "windows"
+    }
+  ]
+}
