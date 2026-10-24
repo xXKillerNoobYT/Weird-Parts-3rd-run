@@ -43,6 +43,7 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   CompanyCreatedJobSync? _jobSync;
   UserProvisionInvitation? _userInvitation;
   bool _userTransferPending = false;
+  bool _additionalUserDisabled = false;
   bool _userReceiving = false;
   Timer? _jobAvailabilityTimer;
   String? _lastConfirmedJobSync;
@@ -85,8 +86,13 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
         if (mounted) {
           setState(() {
             _retained = peers;
+            _additionalUserDisabled = provisioning?.disabled == true;
             if (provisioning?.targetDeviceId case final target?) {
-              _status = provisioning!.confirmed
+              _status = provisioning!.disabled
+                  ? (provisioning.confirmed
+                        ? 'Additional user disabled. The retained installation confirmed the decision.'
+                        : 'Additional user disabled here. Verify the retained peer and Sync Now to deliver the decision. Remote confirmation is pending.')
+                  : provisioning.confirmed
                   ? 'Additional user provisioning was confirmed by $target. A repeated transfer preserves its PIN attempts.'
                   : 'Additional user provisioning to $target is pending. Verify that same peer and retry the additional user transfer.';
             }
@@ -670,7 +676,8 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
               child: const Text('Verify selected retained peer'),
             ),
             if (_peerMembership != null &&
-                widget.approver!.identity.isAuthorityOwner)
+                widget.approver!.identity.isAuthorityOwner &&
+                !_additionalUserDisabled)
               OutlinedButton(
                 key: const Key('company-user-provision'),
                 onPressed:

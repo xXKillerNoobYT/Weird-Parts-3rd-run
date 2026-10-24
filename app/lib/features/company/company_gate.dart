@@ -54,6 +54,8 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
   final _userName = TextEditingController();
   final _userPin = TextEditingController();
   String? _userCreateRequest;
+  String? _userDisableRequest;
+  CompanyUserLifecycleStatus? _userLifecycle;
   String? _error;
   String? _recoveryPath;
   String? _sourcePath;
@@ -170,6 +172,12 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     final users = status == CompanyBootstrapStatus.active
         ? await _enrollment.listCompanyUsers()
         : <CompanyUserChoice>[];
+    CompanyUserLifecycleStatus? lifecycle;
+    if (status == CompanyBootstrapStatus.active) {
+      try {
+        lifecycle = await _enrollment.userLifecycleStatus();
+      } catch (_) {}
+    }
     var legacy = status == CompanyBootstrapStatus.legacyUnsupported;
     if (status == CompanyBootstrapStatus.unjoined) {
       try {
@@ -188,6 +196,7 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
     if (!mounted) return;
     setState(() {
       _users = users;
+      _userLifecycle = lifecycle;
       if (!users.any((u) => u.userId == _selectedUser && u.available)) {
         _selectedUser = users.where((u) => u.available).firstOrNull?.userId;
       }
@@ -358,6 +367,41 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         setState(
           () => _error =
               'User creation may already be saved. Retry the same details.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _disableUser() async {
+    final owner = _session;
+    final user = _users.skip(1).firstOrNull;
+    if (_busy ||
+        owner is! OwnerSession ||
+        !owner.identity.isAuthorityOwner ||
+        user == null ||
+        !user.available) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      _userDisableRequest ??= const Uuid().v4();
+      await _enrollment.disableRestrictedUser(
+        owner: owner,
+        userId: user.userId,
+        requestId: _userDisableRequest!,
+      );
+      await _load();
+    } on CompanyBootstrapRefusal catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'Disablement may already be saved. Retry or reopen the user status.',
         );
       }
     } finally {
@@ -691,7 +735,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
               DropdownMenuItem(
                 value: user.userId,
                 enabled: user.available,
-                child: Text(user.name),
+                child: Text(
+                  '${user.name}${user.disabled ? ' (disabled)' : ''}',
+                ),
               ),
           ],
           onChanged: _busy
@@ -740,6 +786,12 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         const Text(
           'Create Job permission only. Sign in as the owner to exchange pending Jobs with a retained peer.',
         ),
+      if (session is OwnerSession &&
+          !identity.isAuthorityOwner &&
+          _userLifecycle?.disabled == true)
+        Text(
+          '${_userLifecycle!.name} is disabled on this installation by the authority owner.',
+        ),
       const SizedBox(height: 16),
       const Text(
         'Local continuity is selected. The encrypted authority package cannot restore shop data. Parts and Job line editing remain unavailable until their company-authorized migration.',
@@ -756,7 +808,25 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
           'Company users. This version supports the owner and one additional Create Job user.',
         ),
         for (final user in _users)
-          Text('${user.name}${user.available ? '' : ' (unavailable)'}'),
+          Text(
+            '${user.name}${user.disabled
+                ? ' (disabled)'
+                : user.available
+                ? ''
+                : ' (unavailable)'}',
+          ),
+        if (_users.skip(1).any((user) => user.available))
+          OutlinedButton(
+            key: const Key('company-disable-user'),
+            onPressed: _busy ? null : _disableUser,
+            child: const Text('Disable additional user permanently'),
+          ),
+        if (_userLifecycle?.disabled == true)
+          Text(
+            _userLifecycle!.confirmed
+                ? 'Additional user disabled. The retained installation confirmed the decision.'
+                : 'Additional user disabled here. Remote confirmation is pending; disconnected devices retain their cached rights. Verify the retained peer and Sync Now.',
+          ),
         if (_users.length < 2) ...[
           TextField(
             key: const Key('company-user-name'),

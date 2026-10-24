@@ -41,8 +41,8 @@ final class CompanyJobSyncAvailability implements NearbyCompanyDisclosure {
 }
 
 const _syncKind = 'created-jobs';
-const _syncProtocol = 'company.job.sync@5';
-const _syncActorProfile = 'company.user.authority@1/job.create.authorization@4';
+const _syncProtocol = 'company.job.sync@6';
+const _syncActorProfile = 'company.user.disable@1/job.create.authorization@4';
 const _syncAckDomain = 'wiredpart.company.job.create.ack@1:';
 const _nameSyncAckDomain = 'wiredpart.company.job.name.ack@1:';
 const _lifecycleSyncAckDomain = 'wiredpart.company.job.lifecycle.ack@1:';
@@ -589,15 +589,21 @@ final class CreatedJobSyncResult {
     this.complete,
     this.unsupported, {
     this.failure,
+    this.held = 0,
   });
   final int sent;
   final int received;
   final bool complete;
   final int unsupported;
   final CreatedJobSyncFailure? failure;
+  final int held;
   String get message => complete
       ? 'Job snapshot synced. Sent $sent, received $received.'
-      : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${unsupported > 0 ? ' Unsupported author scope remains pending.' : ''}${failure == null ? '' : ' ${failure!.message}'}';
+      : 'Job sync incomplete. Confirmed sent $sent, received $received. Pair again and retry Sync Now.${held > 0
+            ? ' Disabled-user work is held for attention with original bytes retained and no applied confirmation.'
+            : unsupported > 0
+            ? ' Unsupported author scope remains pending.'
+            : ''}${failure == null ? '' : ' ${failure!.message}'}';
 }
 
 enum _CreatedJobRunDirection { initiating, receiving }
@@ -610,16 +616,33 @@ final class _CreatedJobRun {
 }
 
 final class CompanyCreatedJobSync {
+  String? _lifecycleProfileRun;
+  String? _lifecyclePolicyRun;
+  String? _lifecycleReadyRun;
+  VerifiedUserLifecycleTarget? _lifecycleTarget;
+  final Set<String> _heldJobKeys = {};
+  final Set<String> _heldCreationJobs = {};
+  int get _heldJobs => _heldJobKeys.length;
+  void _markHeld(Map<String, Object?> descriptor) {
+    _heldJobKeys.add(_descriptorKey(descriptor));
+    if (descriptor['kind'] == null) {
+      _heldCreationJobs.add(descriptor['job'] as String);
+    }
+  }
+
   static Future<Map<String, int>> confirmedPeerCounts(
     CompanyEnrollment enrollment,
-    OwnerSession owner,
-  ) async {
+    OwnerSession owner, {
+    bool creationOnly = false,
+  }) async {
     final commands = CompanyJobCommands(enrollment: enrollment);
     final records = <Object>[
       ...await commands.syncHoldings(ownerSession: owner),
-      ...await commands.nameSyncHoldings(ownerSession: owner),
-      ...await commands.detailsSyncHoldings(ownerSession: owner),
-      ...await commands.lifecycleSyncHoldings(ownerSession: owner),
+      if (!creationOnly) ...[
+        ...await commands.nameSyncHoldings(ownerSession: owner),
+        ...await commands.detailsSyncHoldings(ownerSession: owner),
+        ...await commands.lifecycleSyncHoldings(ownerSession: owner),
+      ],
     ];
     final peers = await CompanyPeerAuthentication(enrollment: enrollment)
         .retainedPeers(session: owner);
@@ -637,9 +660,11 @@ final class CompanyCreatedJobSync {
     final confirmed = <String, Map<String, Set<String>>>{};
     for (final kind in [
       null,
-      'job.name.set@1',
-      'job.details.patch@1',
-      'job.lifecycle.set@1',
+      if (!creationOnly) ...[
+        'job.name.set@1',
+        'job.details.patch@1',
+        'job.lifecycle.set@1',
+      ],
     ]) {
       final family = _jobFamily(kind);
       final table = family.table;
@@ -1175,6 +1200,17 @@ final class CompanyCreatedJobSync {
       descriptor['installation'] == _installation.identity!.id.value &&
       descriptor['origin'] == _installation.identity!.generation.value;
 
+  Future<bool> _disabledDescriptor(Map<String, Object?> descriptor) async {
+    if (descriptor['kind'] != null) {
+      return _heldCreationJobs.contains(descriptor['job']);
+    }
+    final row = await _record(descriptor);
+    final body = ((jsonDecode(row.operationBytes) as Map)['body']) as Map;
+    final user = body['user'] as String;
+    if (user == availability.owner.identity.userId) return false;
+    return availability.enrollment.isCompanyUserDisabled(user);
+  }
+
   void _requireInventories() {
     if (_local?.complete != true || _remote?.complete != true) {
       throw const CompanyBootstrapRefusal(
@@ -1295,14 +1331,85 @@ final class CompanyCreatedJobSync {
           'Unsupported or busy Job user profile',
         );
       }
+      _lifecycleProfileRun = body['run'] as String;
+      _lifecycleReadyRun = null;
+      _lifecyclePolicyRun = null;
+      _lifecycleTarget = null;
       return _seal(wire['request'] as String, {
         'action': 'profile.reply',
         'run': body['run'],
         'data': {'profile': _syncActorProfile},
       });
     }
+    if (action == 'policyOffer' ||
+        action == 'policy' ||
+        action == 'policyAck') {
+      if (_lifecycleProfileRun != body['run'] || _activeRun != null) {
+        throw const CompanyBootstrapRefusal(
+          'Complete lifecycle capability negotiation first',
+        );
+      }
+      final data = Map<String, Object?>.from(body['data'] as Map);
+      final peer = availability.peer;
+      final enrollment = availability.enrollment;
+      Map<String, Object?> result;
+      if (action == 'policyOffer') {
+        _joinObject(data, {'offer'});
+        _lifecycleTarget = await enrollment.verifyUserLifecycleOffer(
+          Map<String, Object?>.from(data['offer'] as Map),
+          peer,
+        );
+        result = {'offer': await enrollment.createUserLifecycleOffer(peer)};
+      } else {
+        final target = _lifecycleTarget;
+        if (target == null) {
+          throw const CompanyBootstrapRefusal('Lifecycle target not verified');
+        }
+        if (action == 'policy') {
+          _joinObject(data, {'policy'});
+          final receipt = await enrollment.acceptUserDisablePolicy(
+            data['policy'] == null
+                ? null
+                : Map<String, Object?>.from(data['policy'] as Map),
+            peer,
+            target,
+          );
+          result = {
+            'receipt': receipt,
+            'policy': await enrollment.prepareUserDisablePolicy(peer, target),
+          };
+          _lifecyclePolicyRun = body['run'] as String;
+        } else {
+          if (_lifecyclePolicyRun != body['run']) {
+            throw const CompanyBootstrapRefusal(
+              'Persist user policy before its acknowledgment',
+            );
+          }
+          _joinObject(data, {'receipt'});
+          await enrollment.acceptUserDisableReceipt(
+            data['receipt'] == null
+                ? null
+                : Map<String, Object?>.from(data['receipt'] as Map),
+            peer,
+          );
+          _lifecycleReadyRun = body['run'] as String;
+          result = {};
+        }
+      }
+      await availability.requireCurrent();
+      return _seal(wire['request'] as String, {
+        'action': '$action.reply',
+        'run': body['run'],
+        'data': result,
+      });
+    }
     late _CreatedJobRun run;
     if (action == 'start') {
+      if (_lifecycleReadyRun != body['run']) {
+        throw const CompanyBootstrapRefusal(
+          'Persist compatible user lifecycle state before inventory',
+        );
+      }
       atStage(CreatedJobSyncStage.startRequest);
       if (_activeRun != null) {
         throw const CompanyBootstrapRefusal('A Job sync is already running');
@@ -1316,6 +1423,8 @@ final class CompanyCreatedJobSync {
       _activeRun = run;
       _sentJobs = 0;
       _receivedJobs = 0;
+      _heldJobKeys.clear();
+      _heldCreationJobs.clear();
       receiverInitialized(run);
       const CreatedJobSyncDiagnostic.started(receiverCallbackReached: true)
           .notify(onDiagnostic);
@@ -1393,6 +1502,7 @@ final class CompanyCreatedJobSync {
           received,
           complete,
           unsupported,
+          held: _heldJobs,
           failure: complete
               ? null
               : CreatedJobSyncFailure(
@@ -1408,12 +1518,12 @@ final class CompanyCreatedJobSync {
     return reply;
   }
 
-  Future<String> _apply(
+  Future<IncomingCreateJobOutcome> _apply(
     Map<String, Object?> descriptor,
     Uint8List bytes, {
     required OwnerSession ownerSession,
     required CompanyJobSyncAvailability availability,
-  }) {
+  }) async {
     final body = (jsonDecode(utf8.decode(bytes)) as Map)['body'] as Map;
     final family = _jobFamily(descriptor['kind']);
     final name =
@@ -1443,12 +1553,14 @@ final class CompanyCreatedJobSync {
         'Job payload differs from frozen descriptor',
       );
     }
-    return switch (descriptor['kind']) {
-      null => _commands.applyIncomingCreate(
+    if (descriptor['kind'] == null) {
+      return _commands.applyIncomingCreateOutcome(
         bytes,
         ownerSession: ownerSession,
         availability: availability,
-      ),
+      );
+    }
+    return AppliedIncomingCreateJob(await switch (descriptor['kind']) {
       'job.name.set@1' || 'job.name.set@2' => _commands.applyIncomingName(
         bytes,
         ownerSession: ownerSession,
@@ -1468,7 +1580,7 @@ final class CompanyCreatedJobSync {
       _ => throw const CompanyBootstrapRefusal(
         'Unsupported Job operation family',
       ),
-    };
+    });
   }
 
   List<Map<String, Object?>> _dependencyOrder() {
@@ -1588,6 +1700,17 @@ final class CompanyCreatedJobSync {
     }
     final descriptor = _parseDescriptor(data['descriptor']);
     final key = _descriptorKey(descriptor);
+    if (action == 'admission') {
+      _joinObject(data, {'descriptor'});
+      if (!_authoredHere(descriptor) || !_local!.byKey.containsKey(key)) {
+        throw const CompanyBootstrapRefusal(
+          'Admission check is outside local holdings',
+        );
+      }
+      final held = await _disabledDescriptor(descriptor);
+      if (held) _markHeld(descriptor);
+      return {'held': held};
+    }
     if (action == 'put') {
       _joinObject(data, {'descriptor', 'offset', 'bytes'});
       final remote = _remote!.byKey[key];
@@ -1619,7 +1742,7 @@ final class CompanyCreatedJobSync {
       }
       _incoming!.append(data['offset'], data['bytes']);
       if (_incoming!.complete) {
-        await _apply(
+        final applied = await _apply(
           descriptor,
           _incoming!.bytes,
           ownerSession: availability.owner,
@@ -1628,6 +1751,10 @@ final class CompanyCreatedJobSync {
         _requireRun(run);
         _incoming = null;
         _incomingDescriptor = null;
+        if (applied is HeldIncomingCreateJob) {
+          _markHeld(descriptor);
+          return {'held': true};
+        }
         final ack = await _ack(descriptor);
         _requireRun(run);
         _receivedJobs++;
@@ -1692,6 +1819,8 @@ final class CompanyCreatedJobSync {
   Future<CreatedJobSyncResult> _syncNow(_CreatedJobRun run) async {
     _sentJobs = 0;
     _receivedJobs = 0;
+    _heldJobKeys.clear();
+    _heldCreationJobs.clear();
     var unsupported = 0;
     var complete = false;
     var stage = CreatedJobSyncStage.preflight;
@@ -1713,6 +1842,38 @@ final class CompanyCreatedJobSync {
           'Peer does not support additional-user Jobs. Jobs remain pending.',
         );
       }
+      final enrollment = availability.enrollment;
+      final peer = availability.peer;
+      final offered = _joinObject(
+        await _rpc('policyOffer', {
+          'offer': await enrollment.createUserLifecycleOffer(peer),
+        }),
+        {'offer'},
+      );
+      final target = await enrollment.verifyUserLifecycleOffer(
+        Map<String, Object?>.from(offered['offer'] as Map),
+        peer,
+      );
+      final policy = _joinObject(
+        await _rpc('policy', {
+          'policy': await enrollment.prepareUserDisablePolicy(peer, target),
+        }),
+        {'policy', 'receipt'},
+      );
+      await enrollment.acceptUserDisableReceipt(
+        policy['receipt'] == null
+            ? null
+            : Map<String, Object?>.from(policy['receipt'] as Map),
+        peer,
+      );
+      final receipt = await enrollment.acceptUserDisablePolicy(
+        policy['policy'] == null
+            ? null
+            : Map<String, Object?>.from(policy['policy'] as Map),
+        peer,
+        target,
+      );
+      await _rpc('policyAck', {'receipt': receipt});
       stage = CreatedJobSyncStage.localInventory;
       await _freeze(run);
       _requireRun(run);
@@ -1776,33 +1937,47 @@ final class CompanyCreatedJobSync {
               await _saveAck(d, reply['ack']);
             }
           } else if (outgoing.contains(_descriptorKey(d))) {
-            _status('Sending a Job change to the retained peer.');
-            final row = await _record(d);
-            final bytes = utf8.encode(row.operationBytes);
-            if (!_canExchange(
-              (bytes.length + chunkBytes - 1) ~/ chunkBytes + 2,
-            )) {
-              throw const CompanyBootstrapRefusal('More Jobs pending');
-            }
-            for (var offset = 0; offset < bytes.length; offset += chunkBytes) {
-              final end = offset + chunkBytes > bytes.length
-                  ? bytes.length
-                  : offset + chunkBytes;
-              final reply = await _rpc('put', {
-                'descriptor': d,
-                'offset': offset,
-                'bytes': base64Encode(bytes.sublist(offset, end)),
-              });
-              if (end == bytes.length) {
-                await _saveAck(d, reply['ack']);
-                final confirmed = await _rpc('ackBoth', {
+            if (await _disabledDescriptor(d)) {
+              unsupported++;
+              _markHeld(d);
+            } else {
+              _status('Sending a Job change to the retained peer.');
+              final row = await _record(d);
+              final bytes = utf8.encode(row.operationBytes);
+              if (!_canExchange(
+                (bytes.length + chunkBytes - 1) ~/ chunkBytes + 2,
+              )) {
+                throw const CompanyBootstrapRefusal('More Jobs pending');
+              }
+              for (
+                var offset = 0;
+                offset < bytes.length;
+                offset += chunkBytes
+              ) {
+                final end = offset + chunkBytes > bytes.length
+                    ? bytes.length
+                    : offset + chunkBytes;
+                final reply = await _rpc('put', {
                   'descriptor': d,
-                  'ack': await _ack(d),
+                  'offset': offset,
+                  'bytes': base64Encode(bytes.sublist(offset, end)),
                 });
-                await _saveAck(d, confirmed['ack']);
-                _sentJobs++;
-              } else if (reply.isNotEmpty) {
-                throw const CompanyBootstrapRefusal('Premature Job ACK');
+                if (end == bytes.length) {
+                  if (reply['held'] == true && reply.length == 1) {
+                    unsupported++;
+                    _markHeld(d);
+                    break;
+                  }
+                  await _saveAck(d, reply['ack']);
+                  final confirmed = await _rpc('ackBoth', {
+                    'descriptor': d,
+                    'ack': await _ack(d),
+                  });
+                  await _saveAck(d, confirmed['ack']);
+                  _sentJobs++;
+                } else if (reply.isNotEmpty) {
+                  throw const CompanyBootstrapRefusal('Premature Job ACK');
+                }
               }
             }
           } else {
@@ -1814,6 +1989,18 @@ final class CompanyCreatedJobSync {
           if (ourKeys.containsKey(_descriptorKey(d))) continue;
           if (!incoming.contains(_descriptorKey(d))) {
             unsupported++;
+            continue;
+          }
+          final admission = _joinObject(
+            await _rpc('admission', {'descriptor': d}),
+            {'held'},
+          );
+          if (admission['held'] is! bool) {
+            throw const CompanyBootstrapRefusal('Invalid admission status');
+          }
+          if (admission['held'] == true) {
+            unsupported++;
+            _markHeld(d);
             continue;
           }
           if (!_canExchange(
@@ -1835,12 +2022,17 @@ final class CompanyCreatedJobSync {
             _joinObject(reply, {'offset', 'bytes'});
             buffer.append(reply['offset'], reply['bytes']);
           }
-          await _apply(
+          final applied = await _apply(
             d,
             buffer.bytes,
             ownerSession: availability.owner,
             availability: availability,
           );
+          if (applied is HeldIncomingCreateJob) {
+            unsupported++;
+            _markHeld(d);
+            continue;
+          }
           final confirmed = await _rpc('ackBoth', {
             'descriptor': d,
             'ack': await _ack(d),
@@ -1874,6 +2066,7 @@ final class CompanyCreatedJobSync {
       complete,
       unsupported,
       failure: failure,
+      held: _heldJobs,
     );
     _terminal(result);
     return result;

@@ -84,6 +84,81 @@ final class HeldPeerCreateContext {
   final _CompanyCustody _custody;
   ResolvedCompanyUserAuthority? _createActor;
 
+  List<int> get createDevicePublicKey =>
+      base64Decode(peer._held.peer._membership.device['key'] as String);
+
+  void validateHistoricalCreateDevice(Map<String, Object?> body) {
+    final member = peer._held.peer._membership;
+    if (body['company'] != _trust.companyId.value ||
+        body['shop'] != peer._held.owner.identity.shopId ||
+        body['device'] != member.device['id'] ||
+        body['installation'] != member.device['installation'] ||
+        body['generation'] != member.device['generation']) {
+      throw const CompanyBootstrapRefusal(
+        'Historical create belongs to another device',
+      );
+    }
+  }
+
+  Future<bool> isCreateActorDisabled(Map<String, Object?> proof) async {
+    final assertion = Map<String, Object?>.from(proof['body'] as Map);
+    if (assertion['v'] != 4) return false;
+    final member = peer._held.peer._membership;
+    _joinObject(proof, {
+      'body',
+      'signature',
+      'userAuthority',
+      if (member.certificateBytes != null) 'membership',
+    });
+    _joinObject(assertion, {
+      'v',
+      'deviceProof',
+      'userAuthority',
+      'company',
+      'shop',
+      'job',
+      'request',
+      'command',
+      'user',
+      'device',
+      'installation',
+      'generation',
+      'grant',
+      'credential',
+      'permission',
+      'authority',
+      'facts',
+      'session',
+      if (member.certificateBytes != null) 'membership',
+    });
+    _joinId(assertion, 'session');
+    if (member.certificateBytes != null &&
+        proof['membership'] != member.certificateBytes) {
+      throw const CompanyBootstrapRefusal('Held device certificate differs');
+    }
+    final certificate = proof['userAuthority'];
+    if (certificate is! String) {
+      throw const CompanyBootstrapRefusal('User proof missing');
+    }
+    final actor = await _resolveUserAuthority(
+      peer._owner.enrollment.db,
+      _trust,
+      _floors,
+      certificate,
+    );
+    _createActor = actor;
+    validateAuthorization(assertion);
+    final account = await peer._owner.enrollment._readUserAccount();
+    if (account == null || account.certificate != certificate) {
+      throw const CompanyBootstrapRefusal('Current user account unavailable');
+    }
+    await peer._owner.enrollment._checkUserAccount(
+      account,
+      requireActive: false,
+    );
+    return account.isDisabled;
+  }
+
   Future<void> admitCreateActor(Map<String, Object?> proof) async {
     final assertion = Map<String, Object?>.from(proof['body'] as Map);
     if (assertion['v'] != 4) return;
@@ -91,8 +166,9 @@ final class HeldPeerCreateContext {
     if (certificate is! String) {
       throw const CompanyBootstrapRefusal('Create user authority is missing');
     }
-    final actor = await _resolveUserAuthority(
+    final actor = await _resolveActiveUserAuthority(
       peer._owner.enrollment.db,
+      peer._owner.enrollment.installation,
       _trust,
       _floors,
       certificate,
@@ -161,19 +237,6 @@ final class HeldPeerCreateContext {
       throw const CompanyBootstrapRefusal('No held peer create command');
     }
     final authority = await _membershipAuthority(db, _trust);
-    if (_createActor case final actor?) {
-      final currentActor = await _resolveUserAuthority(
-        db,
-        _trust,
-        _floors,
-        actor.certificateBytes,
-      );
-      if (currentActor.commitment != actor.commitment) {
-        throw const CompanyBootstrapRefusal(
-          'Held create user authority changed',
-        );
-      }
-    }
     final retained = peer._held.peer._membership;
     final ResolvedCompanyMembership current;
     if (retained.certificateBytes case final String certificate) {
@@ -226,6 +289,20 @@ final class HeldPeerCreateContext {
         record.storeGeneration.value != intent.storeGeneration ||
         state.revision != installation._persisted?.revision) {
       throw const CompanyBootstrapRefusal('Held peer authority changed');
+    }
+    if (_createActor case final actor?) {
+      final currentActor = await _resolveActiveUserAuthority(
+        db,
+        installation,
+        _trust,
+        _floors,
+        actor.certificateBytes,
+      );
+      if (currentActor.commitment != actor.commitment) {
+        throw const CompanyBootstrapRefusal(
+          'Held create user authority changed',
+        );
+      }
     }
     peer._held.owner.validateAuthority(_trust, _floors);
     peer._held.channel._requireLive();

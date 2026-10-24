@@ -20,7 +20,6 @@ const _revision = String.fromEnvironment('COMPANY_USER_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_USER_SOURCE_TREE');
 const _syntheticPin = '1234';
 const _syntheticRecoveryPhrase = 'Synthetic Goal 2 recovery authority 123';
-const _pinAttemptLimit = 8;
 
 ValidationWorkspace? _heldWorkspace;
 AppDatabase? _openedDatabase;
@@ -96,7 +95,8 @@ Future<void> main() async {
       'installation': {
         'id': identity.id.value,
         'generation': identity.generation.value,
-        'receivingStoreGeneration': installation.receivingStoreGeneration?.value,
+        'receivingStoreGeneration':
+            installation.receivingStoreGeneration?.value,
         'publicKeySha256': sha256.convert(identity.publicKey).toString(),
       },
       'companyIdentity': receiptCompany == null
@@ -122,12 +122,13 @@ Future<void> main() async {
       'appOwnsOrdinaryDatabaseExit': true,
       'normalQuitEvidence': 'external host process observation required',
     };
-    final receiptId =
-        '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
-    final file = File(p.join(
-      _heldWorkspace!.receipts.path,
-      'company-user-startup-$receiptId.json',
-    ));
+    final receiptId = '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    final file = File(
+      p.join(
+        _heldWorkspace!.receipts.path,
+        'company-user-startup-$receiptId.json',
+      ),
+    );
     file.createSync(exclusive: true);
     file.writeAsStringSync(
       const JsonEncoder.withIndent('  ').convert(receipt),
@@ -200,21 +201,15 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
     return {'present': false, 'available': false};
   }
   try {
-    final text = utf8.decode(saved.bytes);
-    final raw = jsonDecode(text);
-    if (raw is! Map<String, dynamic> || raw['a'] is! int) {
-      throw const FormatException('unavailable');
-    }
-    final attemptCount = raw['a'] as int;
-    if (attemptCount < 0 || attemptCount > _pinAttemptLimit) {
-      throw const FormatException('unavailable');
-    }
+    final lifecycle = await enrollment.userLifecycleStatus();
     final choices = await enrollment.listCompanyUsers();
-    final additional = choices.skip(1).where((choice) => choice.available).toList();
-    if (additional.length != 1) {
+    final additional = choices.skip(1).toList();
+    if (lifecycle == null ||
+        additional.length != 1 ||
+        additional.single.userId != lifecycle.userId ||
+        additional.single.disabled != lifecycle.disabled) {
       throw const FormatException('unavailable');
     }
-    // The production list validates the signed certificate and pins both versions at 1.
     final latest = await installation.store.readState(slot);
     if (latest == null ||
         latest.revision != saved.revision ||
@@ -225,8 +220,10 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
     return {
       'present': true,
       'byteLength': saved.bytes.length,
-      'available': true,
-      'attemptCount': attemptCount,
+      'available': choice.available,
+      'disabled': lifecycle.disabled,
+      'attemptsRemaining': lifecycle.attemptsRemaining,
+      'disableReceiptSaved': lifecycle.confirmed,
       'certificatePublic': {
         'userId': choice.userId,
         'credentialVersion': 1,
@@ -234,7 +231,11 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
       },
     };
   } catch (_) {
-    return {'present': true, 'byteLength': saved.bytes.length, 'available': false};
+    return {
+      'present': true,
+      'byteLength': saved.bytes.length,
+      'available': false,
+    };
   }
 }
 
