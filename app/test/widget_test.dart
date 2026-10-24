@@ -1,27 +1,289 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/app.dart';
+import 'package:wired_parts/core/new_id.dart';
 import 'package:wired_parts/data/app_database.dart';
+import 'package:wired_parts/features/backup/backup_store.dart';
+import 'package:wired_parts/features/edit_drafts/edit_drafts.dart';
+import 'package:wired_parts/features/nearby/nearby_page.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/shell/home_shell.dart';
 
+/// Opt-in UI dumps. Unset during `flutter test` / CI so nothing writes
+/// outside the workspace. Set `WP_UI_DUMP_DIR` to a writable folder to capture.
+
+Finder _navLabel(String label) => find.descendant(
+      of: find.byType(NavigationBar),
+      matching: find.text(label),
+    );
+
+Finder _pinField() => find.descendant(
+      of: find.byType(AlertDialog).last,
+      matching: find.byType(TextField),
+    );
+
+Future<void> _pumpShell(
+  WidgetTester tester, {
+  required AppDatabase db,
+  required PinService pin,
+  required String deviceId,
+  EditDrafts? edits,
+  Future<void> Function()? wipeLocalData,
+}) async {
+  tester.view.physicalSize = const Size(800, 1600);
+  tester.view.devicePixelRatio = 1.0;
+  await tester.binding.setSurfaceSize(const Size(800, 1600));
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(
+    AppScope(
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      edits: edits ?? EditDrafts(db: db, pin: pin, deviceId: deviceId),
+      wipeLocalData: wipeLocalData ?? () async {},
+      restoreFromBackup: (_, _) async {},
+      child: const RepaintBoundary(
+        child: MaterialApp(home: HomeShell()),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _dumpUi(WidgetTester tester, String name) async {
+  final dirPath = Platform.environment['WP_UI_DUMP_DIR'];
+  if (dirPath == null || dirPath.isEmpty) return;
+  await tester.runAsync(() async {
+    final dir = Directory(dirPath);
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
+    }
+    final found = find.byType(RepaintBoundary);
+    if (found.evaluate().isEmpty) return;
+    final boundary = tester.renderObject(found.first) as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 1.25);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    File('${dir.path}/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+  });
+}
+
+Future<void> _openCatalogNewPart(WidgetTester tester, String name) async {
+  await tester.tap(_navLabel('Catalog'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byType(FloatingActionButton));
+  await tester.pumpAndSettle();
+  expect(find.text('New part'), findsOneWidget);
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(AlertDialog).last,
+      matching: find.byType(TextField),
+    ),
+    name,
+  );
+}
+
+Future<void> _expandFolder(WidgetTester tester, String label) async {
+  await tester.ensureVisible(find.text(label).first);
+  await tester.tap(find.text(label).first);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _addNamedFolder(
+  WidgetTester tester, {
+  required String label,
+  required String name,
+}) async {
+  await tester.ensureVisible(find.text(label));
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+  await typeTopDialogName(tester, name);
+}
+
+Future<void> _fillEmptyShopTree(WidgetTester tester) async {
+  await _openCatalogNewPart(tester, 'Decora GFI');
+  await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
+  await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
+  await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
+}
+
+Future<void> _fileEmptyShopTree(WidgetTester tester) async {
+  await _fillEmptyShopTree(tester);
+  await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+  await tester.pumpAndSettle();
+  expect(find.text('New part'), findsNothing);
+  expect(find.text('Part'), findsOneWidget);
+}
+
+Future<void> _addLevitonWhiteVariance(WidgetTester tester) async {
+  await tester.ensureVisible(find.text('Add variance').first);
+  await tester.tap(find.text('Add variance').first);
+  await tester.pumpAndSettle();
+  expect(find.text('Add brand'), findsOneWidget);
+  await tester.tap(
+    find.descendant(
+      of: find.byType(AlertDialog).last,
+      matching: find.widgetWithText(TextButton, 'Add brand'),
+    ),
+  );
+  await tester.pumpAndSettle();
+  expect(
+    tester.widget<AlertDialog>(find.byType(AlertDialog).last).title,
+    isA<Text>().having((title) => title.data, 'data', 'Add brand'),
+  );
+  await typeTopDialogName(tester, 'Leviton');
+  expect(find.text('Add variance'), findsWidgets);
+  final varianceFields = find.descendant(
+    of: find.byType(AlertDialog),
+    matching: find.byType(TextField),
+  );
+  await tester.enterText(varianceFields.at(0), 'White');
+  await tester.enterText(varianceFields.at(1), 'R50-W');
+  await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+  await tester.pumpAndSettle();
+  expect(find.text('Leviton'), findsWidgets);
+  expect(find.text('White · R50-W'), findsOneWidget);
+  final varianceSavedNotice = find.widgetWithText(SnackBar, 'Variance saved');
+  expect(varianceSavedNotice, findsOneWidget);
+  await tester.drag(varianceSavedNotice, const Offset(0, 100));
+  await tester.pumpAndSettle();
+  expect(varianceSavedNotice, findsNothing);
+}
+
+Future<void> _openPinAndType1234(WidgetTester tester) async {
+  expect(find.text('Editor PIN'), findsOneWidget);
+  tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+  addTearDown(tester.view.resetViewInsets);
+  await tester.pump();
+  await tester.enterText(_pinField(), '1234');
+  await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> typeTopDialogName(WidgetTester tester, String name) async {
+  final dialog = find.byType(AlertDialog).last;
+  await tester.enterText(
+    find.descendant(of: dialog, matching: find.byType(TextField)).first,
+    name,
+  );
+  await tester.tap(
+    find.descendant(
+      of: dialog,
+      matching: find.widgetWithText(FilledButton, 'Save'),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openNewJobCustomLine(
+  WidgetTester tester, {
+  String jobName = 'Shop job',
+  String customName = 'Decora GFI',
+}) async {
+  await tester.tap(_navLabel('Jobs'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(jobName));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('Add line'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Custom'));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextField).first, customName);
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  const nearbyAvailability = {
+    TargetPlatform.android: false,
+    TargetPlatform.fuchsia: false,
+    TargetPlatform.iOS: false,
+    TargetPlatform.linux: false,
+    TargetPlatform.macOS: true,
+    TargetPlatform.windows: true,
+  };
+  for (final entry in nearbyAvailability.entries) {
+    testWidgets('More Nearby availability on ${entry.key.name}', (tester) async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      const channel = MethodChannel('wired_parts/nearby_wifi');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      final nativeCalls = <String>[];
+      addTearDown(() async {
+        try {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pumpAndSettle();
+        } finally {
+          messenger.setMockMethodCallHandler(channel, null);
+          await db.close();
+        }
+      });
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        nativeCalls.add(call.method);
+        expect(call.method, 'ipv4Interfaces');
+        return <dynamic>[];
+      });
+      final deviceId = await db.settingsDao.ensureDeviceId();
+      final pin = PinService(db.settingsDao);
+
+      await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+      await tester.tap(_navLabel('More'));
+      await tester.pumpAndSettle();
+
+      for (final label in [
+        'Inventory / Warehouses',
+        'Maintenance',
+        'Backup & restore',
+        'Set PIN',
+        'Lock catalog',
+        'Reset / wipe all data',
+      ]) {
+        expect(find.widgetWithText(ListTile, label), findsOneWidget);
+      }
+      expect(nativeCalls, isEmpty);
+      final nearbyTile = find.widgetWithText(ListTile, 'Nearby');
+      if (entry.value) {
+        expect(nearbyTile, findsOneWidget);
+        expect(tester.widget<ListTile>(nearbyTile).enabled, isTrue);
+        expect(tester.widget<ListTile>(nearbyTile).onTap, isNotNull);
+        await tester.tap(nearbyTile);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(NearbyPage), findsOneWidget);
+        expect(nativeCalls, ['ipv4Interfaces']);
+        final failureNotice = find.widgetWithText(ListTile, 'Nearby failed');
+        expect(failureNotice, findsOneWidget);
+        expect(
+          find.descendant(
+            of: failureNotice,
+            matching: find.textContaining(
+              'Connect to the same Wi-Fi as the other device.',
+            ),
+          ),
+          findsOneWidget,
+        );
+      } else {
+        expect(nearbyTile, findsNothing);
+        expect(find.byType(NearbyPage), findsNothing);
+        expect(nativeCalls, isEmpty);
+      }
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant({entry.key}));
+  }
+
   testWidgets('HomeShell shows navigation destinations', (WidgetTester tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final deviceId = await db.settingsDao.ensureDeviceId();
     final pin = PinService(db.settingsDao);
 
-    await tester.pumpWidget(
-      AppScope(
-        db: db,
-        pin: pin,
-        deviceId: deviceId,
-        child: const MaterialApp(home: HomeShell()),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('Jobs'), findsWidgets);
@@ -29,4 +291,1026 @@ void main() {
     expect(find.text('More'), findsWidgets);
     expect(find.byType(FloatingActionButton), findsOneWidget);
   });
+
+  testWidgets('Jobs search matches job number and explains no matches', (
+    WidgetTester tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    final riversideId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Riverside Apartments',
+      deviceId: deviceId,
+    );
+    final mountainId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Mountain Shop',
+      deviceId: deviceId,
+    );
+    await db.customStatement('UPDATE jobs SET job_number = ? WHERE id = ?', [
+      'WP-2048',
+      riversideId,
+    ]);
+    await db.customStatement('UPDATE jobs SET job_number = ? WHERE id = ?', [
+      'WP-4096',
+      mountainId,
+    ]);
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+
+    await tester.enterText(find.byType(TextField).first, '2048');
+    await tester.pump();
+    expect(find.text('Riverside Apartments'), findsOneWidget);
+    expect(find.text('Mountain Shop'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).first, 'missing');
+    await tester.pump();
+    expect(find.text('No jobs match your search'), findsOneWidget);
+    expect(find.text('No active jobs'), findsNothing);
+  });
+
+  testWidgets('PIN unlock from catalog edit does not crash with folders',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    await db.taxonomyDao.insertCategory(
+      id: 'cat-filters',
+      name: 'Filters',
+      deviceId: deviceId,
+    );
+    final pin = PinService(db.settingsDao);
+    await pin.setPin('1234');
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.text('Filters'), findsOneWidget);
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await _openPinAndType1234(tester);
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Editor PIN'), findsNothing);
+    expect(find.text('New part'), findsOneWidget);
+    expect(find.text('Filters'), findsOneWidget);
+  });
+
+  testWidgets('PIN unlock from More tab does not crash with folders',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    await db.taxonomyDao.insertCategory(
+      id: 'cat-filters',
+      name: 'Filters',
+      deviceId: deviceId,
+    );
+    final pin = PinService(db.settingsDao);
+    await pin.setPin('1234');
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.text('Filters'), findsOneWidget);
+
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Change PIN'));
+    await tester.pumpAndSettle();
+    await _openPinAndType1234(tester);
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Editor PIN'), findsNothing);
+    expect(find.text('New PIN'), findsOneWidget);
+    expect(find.text('Confirm PIN'), findsOneWidget);
+  });
+
+  testWidgets('wrong PIN stays on the unlock dialog', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    await pin.setPin('1234');
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Editor PIN'), findsOneWidget);
+    await tester.enterText(_pinField(), '0000');
+    await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Wrong PIN'), findsOneWidget);
+    expect(find.text('Editor PIN'), findsOneWidget);
+    expect(pin.isUnlocked, isFalse);
+    expect(await db.partsDao.listParts(), isEmpty);
+    expect(find.text('New part'), findsNothing);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsNothing);
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets('Reset cancel does not wipe local data', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    var wiped = false;
+
+    await _pumpShell(
+      tester,
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      wipeLocalData: () async => wiped = true,
+    );
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset / wipe all data'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Wipe all local data?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(wiped, isFalse);
+    expect(find.text('Wipe all local data?'), findsNothing);
+  });
+
+  testWidgets('Reset confirm wipes local data', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    var wiped = false;
+
+    await _pumpShell(
+      tester,
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      wipeLocalData: () async => wiped = true,
+    );
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset / wipe all data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Wipe everything'));
+    await tester.pumpAndSettle();
+    expect(wiped, isTrue);
+  });
+
+  testWidgets('empty shop can create nested taxonomy on the first part',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No folders or parts yet'), findsOneWidget);
+    await _dumpUi(tester, '00-empty-catalog');
+
+    await _openCatalogNewPart(tester, 'Decora GFI');
+
+    expect(find.text('New part'), findsOneWidget);
+    expect(find.text('Add Category'), findsOneWidget);
+    expect(find.text('Add Type'), findsOneWidget);
+    expect(find.text('Add Variant'), findsOneWidget);
+    expect(find.text('Add supplier'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
+    await _addNamedFolder(tester, label: 'Add Type', name: 'Decora');
+    await _addNamedFolder(tester, label: 'Add Variant', name: 'GFI');
+
+    expect(await db.partsDao.listParts(), isEmpty);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(find.text('Part'), findsOneWidget);
+    expect(find.text('Add supplier'), findsOneWidget);
+
+    final category = (await db.taxonomyDao.listCategories()).single;
+    final style = (await db.taxonomyDao.listStyles()).single;
+    final variant = (await db.taxonomyDao.listTypes()).single;
+    final part = (await db.partsDao.listParts()).single;
+    expect(category.name, 'Outlet');
+    expect(style.name, 'Decora');
+    expect(style.categoryId, category.id);
+    expect(variant.name, 'GFI');
+    expect(variant.styleId, style.id);
+    expect(part.name, 'Decora GFI');
+    expect(part.categoryId, category.id);
+    expect(part.styleId, style.id);
+    expect(part.typeId, variant.id);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+    await _expandFolder(tester, 'Outlet');
+    expect(find.text('Decora'), findsOneWidget);
+    await _expandFolder(tester, 'Decora');
+    expect(find.text('GFI'), findsWidgets);
+    await _expandFolder(tester, 'GFI');
+    expect(find.text('Decora GFI'), findsOneWidget);
+    await _dumpUi(tester, '00b-catalog-tree-expanded');
+  });
+
+  testWidgets('part save without taxonomy is rejected', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openCatalogNewPart(tester, 'Unfiled');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+    expect(find.text('New part'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets('cannot add variant before type', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openCatalogNewPart(tester, 'Skip type');
+
+    await tester.ensureVisible(find.text('Add Variant'));
+    await tester.tap(find.text('Add Variant'));
+    await tester.pumpAndSettle();
+    expect(find.text('Set Type first'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+    expect(await db.taxonomyDao.listTypes(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets('cannot add type before category', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openCatalogNewPart(tester, 'Skip category');
+
+    await tester.ensureVisible(find.text('Add Type'));
+    await tester.tap(find.text('Add Type'));
+    await tester.pumpAndSettle();
+    expect(find.text('Set Category first'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+    expect(await db.taxonomyDao.listStyles(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets('category alone is not enough to save', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openCatalogNewPart(tester, 'Outlet only');
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Outlet');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+    expect(find.text('New part'), findsOneWidget);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets('PIN still gates in-place folder create', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+    await pin.setPin('1234');
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await _openPinAndType1234(tester);
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.byType(TextField),
+      ),
+      'Gated',
+    );
+    pin.lock();
+
+    await tester.ensureVisible(find.text('Add Category'));
+    await tester.tap(find.text('Add Category'));
+    await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsOneWidget);
+    await tester.enterText(_pinField(), '0000');
+    await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
+    await tester.pumpAndSettle();
+    expect(find.text('Wrong PIN'), findsOneWidget);
+    expect(pin.isUnlocked, isFalse);
+    expect(await db.taxonomyDao.listCategories(), isEmpty);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.widgetWithText(TextButton, 'Cancel'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Editor PIN'), findsNothing);
+    expect(find.text('New part'), findsOneWidget);
+    expect(await db.taxonomyDao.listCategories(), isEmpty);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.ensureVisible(find.text('Add Category'));
+    await tester.tap(find.text('Add Category'));
+    await tester.pumpAndSettle();
+    await _openPinAndType1234(tester);
+    expect(find.text('Editor PIN'), findsNothing);
+    await typeTopDialogName(tester, 'Outlet');
+    expect(find.text('Outlet'), findsWidgets);
+    expect((await db.taxonomyDao.listCategories()).single.name, 'Outlet');
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets(
+      'adding a variance before Save keeps unsaved Category Type Variant',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _fileEmptyShopTree(tester);
+    final originalPart = (await db.partsDao.listParts()).single;
+    final originalCategory = (await db.taxonomyDao.listCategories()).single;
+    final originalStyle = (await db.taxonomyDao.listStyles()).single;
+    final originalVariant = (await db.taxonomyDao.listTypes()).single;
+    expect(originalPart.categoryId, originalCategory.id);
+    expect(originalPart.styleId, originalStyle.id);
+    expect(originalPart.typeId, originalVariant.id);
+
+    await _addNamedFolder(tester, label: 'Add Category', name: 'Switch');
+    await _addNamedFolder(tester, label: 'Add Type', name: 'Toggle');
+    await _addNamedFolder(tester, label: 'Add Variant', name: 'Single pole');
+    final pendingCategory = (await db.taxonomyDao.listCategories())
+        .singleWhere((category) => category.name == 'Switch');
+    final pendingStyle = (await db.taxonomyDao.listStyles())
+        .singleWhere((style) => style.name == 'Toggle');
+    final pendingVariant = (await db.taxonomyDao.listTypes())
+        .singleWhere((variant) => variant.name == 'Single pole');
+    expect(pendingCategory.id, isNot(originalCategory.id));
+    expect(pendingStyle.id, isNot(originalStyle.id));
+    expect(pendingVariant.id, isNot(originalVariant.id));
+    expect(pendingStyle.categoryId, pendingCategory.id);
+    expect(pendingVariant.styleId, pendingStyle.id);
+    expect(find.text('Switch'), findsWidgets);
+    expect(find.text('Toggle'), findsWidgets);
+    expect(find.text('Single pole'), findsWidgets);
+
+    await _addLevitonWhiteVariance(tester);
+    expect(find.text('Switch'), findsWidgets);
+    expect(find.text('Toggle'), findsWidgets);
+    expect(find.text('Single pole'), findsWidgets);
+    final afterVariance = (await db.partsDao.listParts()).single;
+    expect(afterVariance.id, originalPart.id);
+    expect(afterVariance.categoryId, originalCategory.id);
+    expect(afterVariance.styleId, originalStyle.id);
+    expect(afterVariance.typeId, originalVariant.id);
+
+    expect(find.text('Add listing'), findsWidgets);
+    await tester.tap(find.text('Add listing').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Add supplier'), findsWidgets);
+    await typeTopDialogName(tester, 'SupplyHouse');
+    expect(find.text('Add supplier listing'), findsOneWidget);
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'SH-100',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('SKU SH-100'), findsOneWidget);
+    expect(find.text('Switch'), findsWidgets);
+    expect(find.text('Toggle'), findsWidgets);
+    expect(find.text('Single pole'), findsWidgets);
+    final beforeSave = (await db.partsDao.listParts()).single;
+    expect(beforeSave.id, originalPart.id);
+    expect(beforeSave.categoryId, originalCategory.id);
+    expect(beforeSave.styleId, originalStyle.id);
+    expect(beforeSave.typeId, originalVariant.id);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsNothing);
+    expect(find.text('Saved'), findsOneWidget,
+        reason: tester.widgetList<Text>(find.byType(Text))
+            .map((widget) => widget.data).whereType<String>().join('\n'));
+    final savedPart = (await db.partsDao.listParts()).single;
+    expect(savedPart.id, originalPart.id);
+    expect(savedPart.categoryId, pendingCategory.id);
+    expect(savedPart.styleId, pendingStyle.id);
+    expect(savedPart.typeId, pendingVariant.id);
+    expect(
+      (await db.taxonomyDao.listStyles())
+          .singleWhere((style) => style.id == originalStyle.id)
+          .categoryId,
+      originalCategory.id,
+    );
+    expect(
+      (await db.taxonomyDao.listTypes())
+          .singleWhere((variant) => variant.id == originalVariant.id)
+          .styleId,
+      originalStyle.id,
+    );
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Switch'), findsOneWidget);
+    await _expandFolder(tester, 'Switch');
+    await _expandFolder(tester, 'Toggle');
+    await _expandFolder(tester, 'Single pole');
+    expect(find.text('Decora GFI'), findsOneWidget);
+  });
+
+  testWidgets('in-place brand variance and supplier listing on empty shop',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _fileEmptyShopTree(tester);
+    await _dumpUi(tester, '01-empty-shop-tree-filed');
+
+    await _addLevitonWhiteVariance(tester);
+
+    expect(find.text('Add listing'), findsWidgets);
+    await tester.tap(find.text('Add listing').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Add supplier'), findsWidgets);
+    await typeTopDialogName(tester, 'SupplyHouse');
+
+    expect(find.text('Add supplier listing'), findsOneWidget);
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'SH-100',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('SKU SH-100'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Default supplier'));
+    expect(find.text('None'), findsWidgets);
+    await _dumpUi(tester, '02-brand-supplier-in-place');
+  });
+
+  testWidgets('maintenance category is selectable on the part editor',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Maintenance'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add category'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Switch');
+    expect(find.text('Switch'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await _openCatalogNewPart(tester, 'Toggle');
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Switch').hitTestable(), findsWidgets);
+    await tester.tap(find.text('Switch').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Switch'), findsWidgets);
+    expect(await db.partsDao.listParts(), isEmpty);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('New part'), findsNothing);
+    expect(await db.partsDao.listParts(), isEmpty);
+  });
+
+  testWidgets('job picker can take a part filed from an empty shop',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _fileEmptyShopTree(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+    await _dumpUi(tester, '03-catalog-tree-after-first-part');
+
+    await tester.tap(_navLabel('Jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Shop job'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add line'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Pick from catalog tree'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pick a part'), findsOneWidget);
+
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (w) =>
+            w is TextField &&
+            (w.decoration?.hintText == 'Search the tree'),
+      ),
+      'Decora GFI',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decora GFI').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Decora GFI'), findsWidgets);
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Decora GFI'), findsOneWidget);
+    await _dumpUi(tester, '05-job-line-picked');
+  });
+
+  testWidgets('wiped empty shop can still bootstrap the tree',
+      (WidgetTester tester) async {
+    final first = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(first.close);
+    final deviceId = await first.settingsDao.ensureDeviceId();
+    final pin = PinService(first.settingsDao);
+
+    await _pumpShell(tester, db: first, pin: pin, deviceId: deviceId);
+    await _fileEmptyShopTree(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    final wiped = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(wiped.close);
+    final wipedId = await wiped.settingsDao.ensureDeviceId();
+    final wipedPin = PinService(wiped.settingsDao);
+    await _pumpShell(tester, db: wiped, pin: wipedPin, deviceId: wipedId);
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No folders or parts yet'), findsOneWidget);
+    await _dumpUi(tester, '04-wiped-empty-shop');
+    expect(await wiped.partsDao.listParts(), isEmpty);
+    await _fileEmptyShopTree(tester);
+    final category = (await wiped.taxonomyDao.listCategories()).single;
+    final style = (await wiped.taxonomyDao.listStyles()).single;
+    final variant = (await wiped.taxonomyDao.listTypes()).single;
+    final part = (await wiped.partsDao.listParts()).single;
+    expect(part.name, 'Decora GFI');
+    expect(part.categoryId, category.id);
+    expect(part.styleId, style.id);
+    expect(part.typeId, variant.id);
+    expect(style.categoryId, category.id);
+    expect(variant.styleId, style.id);
+  });
+
+  testWidgets(
+      'empty shop job custom Promote adds Category Type Variant on the tree',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openNewJobCustomLine(tester);
+
+    await tester.tap(find.text('Promote to catalog'));
+    await tester.pumpAndSettle();
+    expect(find.text('Promote to catalog'), findsWidgets);
+    expect(find.text('Add Category'), findsOneWidget);
+    expect(find.text('Add Type'), findsOneWidget);
+    expect(find.text('Add Variant'), findsOneWidget);
+
+    await tester.tap(find.text('Add Category'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Outlet');
+
+    await tester.tap(find.text('Add Type'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Decora');
+
+    await tester.ensureVisible(find.text('Add Variant'));
+    await tester.tap(find.text('Add Variant'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'GFI');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Promote'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('On this job as a catalog part. Back out when you are done.'),
+      findsOneWidget,
+    );
+    expect(find.text('Decora GFI'), findsWidgets);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Decora GFI'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back to jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(_navLabel('Catalog'));
+    await tester.pumpAndSettle();
+    expect(find.text('Outlet'), findsOneWidget);
+    await _expandFolder(tester, 'Outlet');
+    expect(find.text('Decora'), findsOneWidget);
+    await _expandFolder(tester, 'Decora');
+    expect(find.text('GFI'), findsWidgets);
+    await _expandFolder(tester, 'GFI');
+    expect(find.text('Decora GFI'), findsOneWidget);
+  });
+
+  testWidgets('Promote without folders is refused', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openNewJobCustomLine(tester, customName: 'Unfiled');
+
+    await tester.tap(find.text('Promote to catalog'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add Type'));
+    await tester.pumpAndSettle();
+    expect(find.text('Set Category first'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Promote'));
+    await tester.pumpAndSettle();
+    expect(find.text('Category, Type, and Variant are required'), findsOneWidget);
+    expect(find.text('Promote to catalog'), findsWidgets);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Custom name'), findsOneWidget);
+  });
+
+  testWidgets('job split can add a supplier in place', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _openNewJobCustomLine(tester, customName: 'Temp valve');
+
+    await tester.ensureVisible(find.text('Add supplier'));
+    expect(find.text('Add supplier'), findsOneWidget);
+    await tester.tap(find.text('Add supplier'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Codale');
+    expect(find.text('Codale'), findsWidgets);
+  });
+
+  testWidgets(
+      'job split Add supplier on a brand version keeps a listing',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Leviton',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Decora GFI',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'R50-W',
+      deviceId: deviceId,
+      varianceName: 'White',
+    );
+    final jobId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Shop job',
+      deviceId: deviceId,
+    );
+    await db.jobsDao.insertJobLine(
+      id: newId(),
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: bvId,
+      neededQty: 1,
+      shopPullQty: 0,
+      deviceId: deviceId,
+    );
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Shop job'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decora GFI'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Add supplier'));
+    await tester.tap(find.text('Add supplier'));
+    await tester.pumpAndSettle();
+    await typeTopDialogName(tester, 'Codale');
+    expect(find.text('Codale'), findsWidgets);
+
+    final listings = await db.partsDao.listingsForBrandVersion(bvId);
+    expect(listings, hasLength(1));
+    expect(listings.first.sku, '');
+
+    await tester.enterText(find.widgetWithText(TextField, 'Qty'), '1');
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decora GFI'));
+    await tester.pumpAndSettle();
+    expect(find.text('Codale'), findsWidgets);
+  });
+
+  testWidgets('listing can be added with empty SKU', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await _fileEmptyShopTree(tester);
+    await _addLevitonWhiteVariance(tester);
+
+    expect(find.text('Add listing'), findsWidgets);
+    await tester.tap(find.text('Add listing').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Add supplier'), findsWidgets);
+    await typeTopDialogName(tester, 'SupplyHouse');
+    expect(find.text('Add supplier listing'), findsOneWidget);
+    expect(find.text('SKU (optional)'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('No SKU'), findsOneWidget);
+  });
+
+  testWidgets(
+      'deleted catalog part still shows job name, splits, and no Open catalog',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    final supplierId = await db.taxonomyDao.insertSupplier(
+      id: newId(),
+      name: 'SupplyHouse',
+      deviceId: deviceId,
+    );
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Watts',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Isolation valve',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'W-123',
+      deviceId: deviceId,
+      varianceName: 'White',
+    );
+    await db.partsDao.insertSupplierListing(
+      id: newId(),
+      brandVersionId: bvId,
+      supplierId: supplierId,
+      sku: 'SH-1',
+      deviceId: deviceId,
+    );
+    final jobId = await db.jobsDao.insertJob(
+      id: newId(),
+      name: 'Boiler',
+      deviceId: deviceId,
+    );
+    final lineId = await db.jobsDao.insertJobLine(
+      id: newId(),
+      jobId: jobId,
+      partId: partId,
+      brandVersionId: bvId,
+      neededQty: 10,
+      shopPullQty: 4,
+      deviceId: deviceId,
+    );
+    await db.jobsDao.replaceOrderSplits(
+      lineId: lineId,
+      splits: [(supplierId: supplierId, qty: 6)],
+      deviceId: deviceId,
+    );
+    await db.partsDao.softDeletePart(partId);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('Jobs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Boiler'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Isolation valve (removed)'), findsOneWidget);
+    expect(find.textContaining('SupplyHouse 6'), findsOneWidget);
+
+    await tester.tap(find.text('Isolation valve (removed)'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('removed from catalog'),
+      findsOneWidget,
+    );
+    expect(find.text('Open catalog part'), findsNothing);
+    expect(find.text('SupplyHouse'), findsWidgets);
+    expect(find.text('Add supplier'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Isolation valve (removed)'), findsOneWidget);
+    expect(find.textContaining('SupplyHouse 6'), findsOneWidget);
+
+    final splits = await db.jobsDao.orderSplitsForLine(lineId);
+    expect(splits, hasLength(1));
+    expect(splits.first.supplierId, supplierId);
+    expect(splits.first.quantity, 6);
+  });
+
+  testWidgets('Job detail has back control; FAB hover does not assert',
+      (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(
+      tester,
+      db: db,
+      pin: pin,
+      deviceId: deviceId,
+      edits: EditDrafts(db: db, pin: pin, deviceId: deviceId),
+    );
+
+    await tester.tap(find.byTooltip('New job'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'Test #1',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Create'))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No parts on this job yet'), findsOneWidget);
+    expect(find.byTooltip('Back to jobs'), findsWidgets);
+    expect(find.text('Back to jobs'), findsOneWidget);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(find.byTooltip('Add line')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Back to jobs'));
+    await tester.pumpAndSettle();
+    expect(find.text('No parts on this job yet'), findsNothing);
+    expect(find.text('Test #1'), findsOneWidget);
+  });
+
+  testWidgets('More shows backup date and source device', (WidgetTester tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    await db.settingsDao.setSetting(
+      kLastBackupAtKey,
+      '2026-09-13T20:15:00.000Z',
+    );
+    await db.settingsDao.setSetting(kLastBackupSourceKey, 'dev-source-1');
+    final pin = PinService(db.settingsDao);
+
+    await _pumpShell(tester, db: db, pin: pin, deviceId: deviceId);
+    await tester.tap(_navLabel('More'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Backup & restore'), findsOneWidget);
+    expect(find.textContaining('dev-source-1'), findsOneWidget);
+    expect(find.textContaining('2026-09-13'), findsOneWidget);
+
+    await tester.tap(find.text('Backup & restore'));
+    await tester.pumpAndSettle();
+    expect(find.text('Last backup'), findsOneWidget);
+    expect(find.text('Export encrypted backup'), findsOneWidget);
+    expect(find.text('Restore encrypted backup'), findsOneWidget);
+  });
 }
+

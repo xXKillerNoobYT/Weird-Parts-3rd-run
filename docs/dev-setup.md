@@ -4,8 +4,8 @@ Local-first Flutter app lives in `app/`. Spec and phases: `roadmap.md`, `docs/su
 
 ## Prerequisites
 
-1. **Flutter SDK** — this machine typically uses `C:\Users\weird\flutter`.
-   - Add `C:\Users\weird\flutter\bin` to your user `PATH`, or rely on `.vscode/settings.json` (`dart.flutterSdkPath`).
+1. **Flutter SDK** — install Flutter using the location and setup that suit your machine.
+   - Make the SDK available through your user `PATH` or your editor's user-level Dart/Flutter settings. Keep machine-specific SDK paths out of the shared workspace settings.
 2. **Windows Developer Mode** (required for `flutter run -d windows` when plugins use symlinks):
    - Settings → System → For developers → **Developer Mode** → On
    - Without it, Windows builds often fail creating plugin symlink junctions.
@@ -19,7 +19,6 @@ Recommended extensions: Dart + Flutter (see `.vscode/extensions.json`).
 2. Install recommended extensions if prompted.
 3. Pick a launch config (Run and Debug):
    - **wired_parts (Windows)** — primary desktop target
-   - **wired_parts (Chrome)** — quick UI iteration (not a v1 ship target); enable once with `cd app && flutter create . --platforms=web` if `app/web` is missing
    - profile / release variants for Windows when needed
 4. Press **F5** (or Start Debugging).
 
@@ -28,8 +27,9 @@ First Windows run may take a while (CMake / NuGet). If symlink errors appear, en
 ## CLI
 
 ```powershell
-# PATH for this shell if Flutter is not on PATH yet
-$env:Path = "C:\Users\weird\flutter\bin;" + $env:Path
+# Add your Flutter SDK's bin directory to this shell's PATH if needed.
+# Replace <flutter-sdk> with the location used on your machine.
+$env:Path = "<flutter-sdk>\bin;" + $env:Path
 
 cd app
 flutter pub get

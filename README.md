@@ -13,7 +13,7 @@ flutter run -d windows
 
 Open the **repo root**, then see **[docs/dev-setup.md](docs/dev-setup.md)** for:
 
-- Flutter path (`C:\Users\weird\flutter`) and Windows **Developer Mode** (plugin symlinks)
-- **F5** debug configs (Windows / Chrome)
+- Flutter SDK discovery and Windows **Developer Mode** (plugin symlinks)
+- **F5** debug configs for Windows
 - `flutter analyze` / `flutter test` / Drift `build_runner`
 - Project Cursor rules under `.cursor/rules/`

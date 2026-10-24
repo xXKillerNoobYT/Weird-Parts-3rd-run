@@ -12,6 +12,7 @@ class CatalogTreeView extends StatelessWidget {
     this.onPick,
     this.onAddChild,
     this.onRename,
+    this.onRemove,
     this.selectedPartId,
     this.selectedBrandVersionId,
     this.expandAll = false,
@@ -24,6 +25,7 @@ class CatalogTreeView extends StatelessWidget {
   final void Function(CatalogTreeNode node)? onPick;
   final void Function(CatalogTreeNode parent)? onAddChild;
   final void Function(CatalogTreeNode node)? onRename;
+  final void Function(CatalogTreeNode node)? onRemove;
   final String? selectedPartId;
   final String? selectedBrandVersionId;
   final bool expandAll;
@@ -31,18 +33,40 @@ class CatalogTreeView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (nodes.isEmpty) {
-      return const Center(child: Text('No folders or parts yet'));
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No folders or parts yet. Add a part, then create Category → Type → Variant on that part.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
     }
     return ListView(
       children: [
-        for (final node in nodes) _Tile(node: node, view: this, depth: 0),
+        for (final node in nodes)
+          _Tile(
+            key: _tileKey(node, expandAll),
+            node: node,
+            view: this,
+            depth: 0,
+          ),
       ],
     );
   }
 }
 
+Key _tileKey(CatalogTreeNode node, bool expandAll) =>
+    ValueKey<String>(expandAll ? 'search-${node.id}' : node.id);
+
 class _Tile extends StatelessWidget {
-  const _Tile({required this.node, required this.view, required this.depth});
+  const _Tile({
+    super.key,
+    required this.node,
+    required this.view,
+    required this.depth,
+  });
 
   final CatalogTreeNode node;
   final CatalogTreeView view;
@@ -88,36 +112,41 @@ class _Tile extends StatelessWidget {
     final trailing = _trailing(context);
 
     if (_useExpansion) {
-      return Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          key: PageStorageKey<String>(node.id),
-          initiallyExpanded: view.expandAll,
-          tilePadding: pad,
-          leading: Icon(icon),
-          title: Text(node.label),
-          subtitle: node.subtitle == null ? null : Text(node.subtitle!),
-          trailing: trailing,
-          onExpansionChanged: (_) {},
-          children: [
-            if (node.kind == CatalogTreeKind.part)
-              ListTile(
-                contentPadding: EdgeInsets.only(left: 24.0 + depth * 8),
-                leading: Icon(
-                  view.mode == CatalogTreeMode.picker
-                      ? (_selected
-                          ? Icons.radio_button_checked
-                          : Icons.radio_button_off)
-                      : Icons.inventory_2_outlined,
-                ),
-                title: const Text('General (no brand)'),
-                selected: _selected,
-                onTap: _activate,
+      return ExpansionTile(
+        key: view.expandAll
+            ? ValueKey<String>('search-${node.id}')
+            : PageStorageKey<String>(node.id),
+        initiallyExpanded: view.expandAll,
+        tilePadding: pad,
+        shape: const Border(),
+        collapsedShape: const Border(),
+        leading: Icon(icon),
+        title: Text(node.label),
+        subtitle: node.subtitle == null ? null : Text(node.subtitle!),
+        trailing: trailing,
+        children: [
+          if (node.kind == CatalogTreeKind.part)
+            ListTile(
+              contentPadding: EdgeInsets.only(left: 24.0 + depth * 8),
+              leading: Icon(
+                view.mode == CatalogTreeMode.picker
+                    ? (_selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off)
+                    : Icons.inventory_2_outlined,
               ),
-            for (final child in node.children)
-              _Tile(node: child, view: view, depth: depth + 1),
-          ],
-        ),
+              title: const Text('General (no brand)'),
+              selected: _selected,
+              onTap: _activate,
+            ),
+          for (final child in node.children)
+            _Tile(
+              key: _tileKey(child, view.expandAll),
+              node: child,
+              view: view,
+              depth: depth + 1,
+            ),
+        ],
       );
     }
 
@@ -142,22 +171,29 @@ class _Tile extends StatelessWidget {
     }
     if (view.mode != CatalogTreeMode.editor &&
         view.onAddChild == null &&
-        view.onRename == null) {
+        view.onRename == null &&
+        view.onRemove == null) {
       return null;
     }
     final items = <PopupMenuEntry<String>>[
       if (view.onRename != null &&
           node.kind != CatalogTreeKind.unassigned &&
           node.kind != CatalogTreeKind.variance)
-        const PopupMenuItem(value: 'rename', child: Text('Rename')),
+        PopupMenuItem(
+          value: 'rename',
+          child: Text(node.kind == CatalogTreeKind.part ? 'Edit part' : 'Rename'),
+        ),
       if (view.onAddChild != null && _canAdd(node.kind))
         PopupMenuItem(value: 'add', child: Text(_addLabel(node.kind))),
+      if (view.onRemove != null && _canRemove(node))
+        PopupMenuItem(value: 'remove', child: Text(_removeLabel(node.kind))),
     ];
     if (items.isEmpty) return null;
     return PopupMenuButton<String>(
       onSelected: (value) {
         if (value == 'rename') view.onRename?.call(node);
         if (value == 'add') view.onAddChild?.call(node);
+        if (value == 'remove') view.onRemove?.call(node);
       },
       itemBuilder: (_) => items,
     );
@@ -191,6 +227,16 @@ bool _canAdd(CatalogTreeKind kind) {
       kind == CatalogTreeKind.brand;
 }
 
+bool _canRemove(CatalogTreeNode node) {
+  if (node.kind == CatalogTreeKind.part) return true;
+  if (node.kind == CatalogTreeKind.category ||
+      node.kind == CatalogTreeKind.type ||
+      node.kind == CatalogTreeKind.variant) {
+    return node.children.isEmpty;
+  }
+  return false;
+}
+
 String _addLabel(CatalogTreeKind kind) {
   switch (kind) {
     case CatalogTreeKind.category:
@@ -206,4 +252,8 @@ String _addLabel(CatalogTreeKind kind) {
     default:
       return 'Add';
   }
+}
+
+String _removeLabel(CatalogTreeKind kind) {
+  return kind == CatalogTreeKind.part ? 'Remove part' : 'Remove folder';
 }

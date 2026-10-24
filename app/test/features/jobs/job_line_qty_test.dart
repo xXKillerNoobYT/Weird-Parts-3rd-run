@@ -2,6 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wired_parts/features/jobs/job_line_qty.dart';
 
 void main() {
+  test('large finite and nonfinite preview results format without integer conversion', () {
+    expect(formatQty(1e20), '100000000000000000000');
+    expect(formatQty(1e308), '1e+308');
+    expect(formatQty(double.infinity), 'Infinity');
+    expect(formatQty(double.negativeInfinity), '-Infinity');
+    expect(formatQty(double.nan), 'NaN');
+  });
   test('requested 10, shop 4, A 3, B 3 → left 0', () {
     const qty = JobLineQty(
       requested: 10,
@@ -18,13 +25,71 @@ void main() {
     expect(qty.listSubtitle, contains('Left to Pull/Order 0'));
   });
 
+  test('tombstoned listings still keep saved split supplier ids', () {
+    const supplierId = 'supply-a';
+    final wiped = jobLineEditorSupplierIds(
+      listingSupplierIds: const [],
+      existingSplitSupplierIds: const [supplierId],
+    );
+    expect(wiped, isEmpty);
+
+    final kept = jobLineEditorSupplierIds(
+      listingSupplierIds: const [],
+      existingSplitSupplierIds: const [supplierId],
+      preserveExistingSplits: true,
+    );
+    expect(kept, contains(supplierId));
+
+    final fromListings = jobLineEditorSupplierIds(
+      listingSupplierIds: const [supplierId],
+      existingSplitSupplierIds: const [supplierId],
+    );
+    expect(fromListings, contains(supplierId));
+  });
+
+  test('picking a live variance drops suppliers not listed on it', () {
+    const saved = 'supply-a';
+    const listed = 'supply-b';
+    final dropped = jobLineEditorSupplierIds(
+      listingSupplierIds: const [listed],
+      existingSplitSupplierIds: const [saved],
+    );
+    expect(dropped, equals({listed}));
+    expect(dropped, isNot(contains(saved)));
+  });
+
+  test('job list and pick labels mark a removed catalog part', () {
+    expect(
+      jobLinePartListLabel(name: 'Isolation valve', removedFromCatalog: false),
+      'Isolation valve',
+    );
+    expect(
+      jobLinePartListLabel(name: 'Isolation valve', removedFromCatalog: true),
+      'Isolation valve (removed)',
+    );
+    expect(
+      jobLineCatalogPickLabel(
+        name: 'Isolation valve',
+        brandVersionLabel: 'Watts · W-123',
+        removedFromCatalog: false,
+      ),
+      'Isolation valve · Watts · W-123',
+    );
+    expect(
+      jobLineCatalogPickLabel(
+        name: 'Isolation valve',
+        brandVersionLabel: 'Watts · W-123',
+        removedFromCatalog: true,
+      ),
+      'Isolation valve · Watts · W-123 (removed from catalog)',
+    );
+  });
+
   test('over-split shows a negative left', () {
     const qty = JobLineQty(
       requested: 10,
       shop: 4,
-      supplierSplits: [
-        JobSupplierSplit(supplierName: 'A', qty: 7),
-      ],
+      supplierSplits: [JobSupplierSplit(supplierName: 'A', qty: 7)],
     );
     expect(qty.leftToPullOrder, -1);
     expect(qty.listSubtitle, contains('Left to Pull/Order -1'));

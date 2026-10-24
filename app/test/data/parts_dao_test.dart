@@ -50,4 +50,78 @@ void main() {
     final listings = await db.partsDao.listingsForBrandVersion(bvId);
     expect(listings, hasLength(1));
   });
+
+  test('softDeletePart tombstones the part and brand versions', () async {
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final brandId = await db.taxonomyDao.insertBrand(
+      id: newId(),
+      name: 'Watts',
+      deviceId: deviceId,
+    );
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Valve',
+      deviceId: deviceId,
+    );
+    final bvId = await db.partsDao.insertBrandVersion(
+      id: newId(),
+      partId: partId,
+      brandId: brandId,
+      mpn: 'W-1',
+      deviceId: deviceId,
+    );
+    await db.partsDao.insertSupplierListing(
+      id: newId(),
+      brandVersionId: bvId,
+      supplierId: await db.taxonomyDao.insertSupplier(
+        id: newId(),
+        name: 'Co',
+        deviceId: deviceId,
+      ),
+      sku: 'X',
+      deviceId: deviceId,
+    );
+
+    await db.partsDao.softDeletePart(partId);
+    expect(await db.partsDao.getPart(partId), isNull);
+    expect(await db.partsDao.listBrandVersionsForPart(partId), isEmpty);
+    expect(await db.partsDao.listingsForBrandVersion(bvId), isEmpty);
+
+    final tombstoned = await db.partsDao.getPart(partId, includeDeleted: true);
+    expect(tombstoned, isNotNull);
+    expect(tombstoned!.name, 'Valve');
+    expect(
+      await db.partsDao.listBrandVersionsForPart(partId, includeDeleted: true),
+      hasLength(1),
+    );
+    expect(
+      await db.partsDao.listingsForBrandVersion(bvId, includeDeleted: true),
+      hasLength(1),
+    );
+    expect(
+      (await db.partsDao.listParts(activeOnly: false, includeDeleted: true))
+          .map((p) => p.id),
+      contains(partId),
+    );
+    expect(
+      (await db.partsDao.listParts(activeOnly: false)).map((p) => p.id),
+      isNot(contains(partId)),
+    );
+  });
+
+  test('relativizeAbsolutePhotoPaths keeps basename after restore', () async {
+    final deviceId = await db.settingsDao.ensureDeviceId();
+    final partId = await db.partsDao.insertGeneralPart(
+      id: newId(),
+      name: 'Valve',
+      deviceId: deviceId,
+    );
+    await db.partsDao.setPhotoPath(
+      partId,
+      r'C:\Users\weird\AppData\part_photos\part-1-1.jpg',
+    );
+    await db.partsDao.relativizeAbsolutePhotoPaths();
+    final part = await db.partsDao.getPart(partId);
+    expect(part!.photoPath, 'part-1-1.jpg');
+  });
 }

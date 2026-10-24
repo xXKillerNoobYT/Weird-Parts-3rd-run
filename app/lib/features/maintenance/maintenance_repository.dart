@@ -1,5 +1,6 @@
 import '../../core/new_id.dart';
 import '../../data/app_database.dart';
+import '../company/company_store_markers.dart';
 import '../pin/pin_service.dart';
 
 class MaintenanceRepository {
@@ -23,10 +24,10 @@ class MaintenanceRepository {
 
   Future<List<Supplier>> listSuppliers() => _db.taxonomyDao.listSuppliers();
 
-  Future<String> createCategory(String name) async {
+  Future<String> createCategory(String name, {String? reservedId}) async {
     await _pin.requireUnlocked();
     return _db.taxonomyDao.insertCategory(
-      id: newId(),
+      id: _recordId(reservedId),
       name: name,
       deviceId: _deviceId,
     );
@@ -35,27 +36,46 @@ class MaintenanceRepository {
   Future<String> createStyle({
     required String categoryId,
     required String name,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
-    return _db.taxonomyDao.insertStyle(
-      id: newId(),
-      categoryId: categoryId,
-      name: name,
-      deviceId: _deviceId,
-    );
+    return legacyBusinessWrite(_db, () async {
+      final categories = await _db.taxonomyDao.listCategories();
+      if (!categories.any((c) => c.id == categoryId)) {
+        throw StateError('Category must exist');
+      }
+      await _pin.requireUnlocked();
+      return _db.taxonomyDao.insertStyle(
+        id: _recordId(reservedId),
+        categoryId: categoryId,
+        name: name,
+        deviceId: _deviceId,
+      );
+    });
   }
 
   Future<String> createType({
     required String styleId,
     required String name,
+    String? reservedId,
   }) async {
     await _pin.requireUnlocked();
-    return _db.taxonomyDao.insertType(
-      id: newId(),
-      styleId: styleId,
-      name: name,
-      deviceId: _deviceId,
-    );
+    return legacyBusinessWrite(_db, () async {
+      final styles = await _db.taxonomyDao.listStyles();
+      final categories = await _db.taxonomyDao.listCategories();
+      if (!styles.any(
+        (s) => s.id == styleId && categories.any((c) => c.id == s.categoryId),
+      )) {
+        throw StateError('Type must belong to an existing Category');
+      }
+      await _pin.requireUnlocked();
+      return _db.taxonomyDao.insertType(
+        id: _recordId(reservedId),
+        styleId: styleId,
+        name: name,
+        deviceId: _deviceId,
+      );
+    });
   }
 
   Future<String> createDevice(String name) async {
@@ -67,19 +87,19 @@ class MaintenanceRepository {
     );
   }
 
-  Future<String> createBrand(String name) async {
+  Future<String> createBrand(String name, {String? reservedId}) async {
     await _pin.requireUnlocked();
     return _db.taxonomyDao.insertBrand(
-      id: newId(),
+      id: _recordId(reservedId),
       name: name,
       deviceId: _deviceId,
     );
   }
 
-  Future<String> createSupplier(String name) async {
+  Future<String> createSupplier(String name, {String? reservedId}) async {
     await _pin.requireUnlocked();
     return _db.taxonomyDao.insertSupplier(
-      id: newId(),
+      id: _recordId(reservedId),
       name: name,
       deviceId: _deviceId,
     );
@@ -103,5 +123,12 @@ class MaintenanceRepository {
   Future<void> renameBrand(String id, String name) async {
     await _pin.requireUnlocked();
     await _db.taxonomyDao.renameBrand(id, name);
+  }
+
+  String _recordId(String? reservedId) {
+    if (reservedId != null && reservedId.trim().isEmpty) {
+      throw StateError('Reserved catalog ID must not be empty');
+    }
+    return reservedId ?? newId();
   }
 }
