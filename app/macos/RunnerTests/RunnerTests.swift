@@ -6,6 +6,99 @@ import XCTest
 #endif
 
 class RunnerTests: XCTestCase {
+  #if NATIVE_NETWORK_DIAGNOSTIC_GUARDS
+  private func diagnosticArguments() -> [String: Any] {
+    ["attempt": "12345678-1234-4234-8234-123456789abc", "run": "g2-users-20261024-pin-a",
+      "controller": 2, "generation": 1, "request": 3, "address": "192.168.10.40",
+      "port": 6809, "sourceAddress": "192.168.10.20", "interfaceIndex": 7, "prefixLength": 24]
+  }
+
+  func testNearbyDiagnosticAcceptedTarget() throws {
+    for (source, peer, prefix) in [("192.168.10.20", "192.168.10.40", 24),
+      ("10.20.30.40", "10.20.30.41", 24), ("172.16.1.2", "172.16.2.3", 16)] {
+      var args = diagnosticArguments()
+      args["sourceAddress"] = source
+      args["address"] = peer
+      args["prefixLength"] = prefix
+      let target = try XCTUnwrap(NearbyDiagnosticTarget.parse(args))
+      XCTAssertEqual(target.sourceAddress, source)
+      XCTAssertEqual(target.address, peer)
+      XCTAssertEqual(target.port, 6809)
+      XCTAssertEqual(target.interfaceIndex, 7)
+      XCTAssertEqual(target.controller, 2)
+      XCTAssertEqual(target.generation, 1)
+      XCTAssertEqual(target.request, 3)
+    }
+  }
+
+  func testNearbyDiagnosticUnsafeTarget() {
+    for peer in ["example.invalid", "::1", "8.8.8.8", "192.168.11.40", "192.168.10.20",
+      "192.168.10.0", "192.168.10.255", "224.0.0.1", "255.255.255.255"] {
+      var args = diagnosticArguments()
+      args["address"] = peer
+      XCTAssertNil(NearbyDiagnosticTarget.parse(args), peer)
+    }
+    for source in ["8.8.8.8", "127.0.0.1", "192.168.10.0", "192.168.10.255"] {
+      var args = diagnosticArguments()
+      args["sourceAddress"] = source
+      XCTAssertNil(NearbyDiagnosticTarget.parse(args), source)
+    }
+  }
+
+  func testNearbyDiagnosticPrefixMasks() {
+    for prefix in 1...30 {
+      XCTAssertEqual(NearbyDiagnosticTarget.prefixLength(UInt32.max << (32 - prefix)), prefix)
+    }
+    let masks: [UInt32] = [0, 0xffffffff, 0xfffffffe, 0xff00ff00, 0x00ffffff]
+    for mask in masks {
+      XCTAssertNil(NearbyDiagnosticTarget.prefixLength(mask))
+    }
+  }
+
+  func testNearbyDiagnosticTypedBounds() {
+    let invalid: [(String, Any)] = [
+      ("port", 0), ("port", 65536), ("port", true), ("port", 6809.0), ("port", "6809"),
+      ("interfaceIndex", 0), ("interfaceIndex", 7.0), ("generation", -1),
+      ("controller", true), ("request", Int64.max), ("prefixLength", 0), ("prefixLength", 31),
+      ("run", "production"), ("run", "g2-users-20261024-pin-a\n"), ("attempt", "not-a-uuid")
+    ]
+    for (key, value) in invalid {
+      var args = diagnosticArguments()
+      args[key] = value
+      XCTAssertNil(NearbyDiagnosticTarget.parse(args), key)
+    }
+    var maximum = diagnosticArguments()
+    maximum["port"] = 65535
+    maximum["interfaceIndex"] = Int32.max
+    XCTAssertNotNil(NearbyDiagnosticTarget.parse(maximum))
+  }
+
+  func testNearbyDiagnosticExactFields() {
+    let valid = diagnosticArguments()
+    for key in valid.keys {
+      var args = valid
+      args.removeValue(forKey: key)
+      XCTAssertNil(NearbyDiagnosticTarget.parse(args), key)
+    }
+    var extra = valid
+    extra["payload"] = "must-not-be-accepted"
+    XCTAssertNil(NearbyDiagnosticTarget.parse(extra))
+    XCTAssertNil(NearbyDiagnosticTarget.parse(["arbitrary"]))
+    XCTAssertNil(NearbyDiagnosticTarget.parse(nil))
+  }
+
+  func testNearbyDiagnosticIPv4Syntax() {
+    for address in ["", "1.2.3", "1.2.3.4.5", "192.168.010.40", "192.168.10.256",
+      "192.168.10.-1", "192.168.10.40\n", " 192.168.10.40", "192.168.10.40:6809"] {
+      XCTAssertNil(NearbyDiagnosticTarget.ipv4(address), address)
+    }
+    XCTAssertEqual(NearbyDiagnosticTarget.ipv4("192.168.10.40"), 0xc0a80a28)
+    XCTAssertFalse(NearbyDiagnosticTarget.isPrivate(0x08080808))
+    XCTAssertFalse(NearbyDiagnosticTarget.isPrivate(0xac200001))
+    XCTAssertTrue(NearbyDiagnosticTarget.isPrivate(0xac1ffffe))
+  }
+  #endif
+
   func testInstallationSecurityNamespaceAcceptsCompanyUserSlot() throws {
     let namespace = try InstallationSecurityNamespace("production.company-user-1")
 

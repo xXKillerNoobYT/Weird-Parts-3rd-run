@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,6 +19,7 @@ import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 import 'nearby_lan_validation.dart'
     show validationApplication, validationInstallationNamespace;
 import 'nearby_lan_workspace.dart';
+import 'company_user_network_diagnostic.dart';
 
 const _enabled = bool.fromEnvironment('NATIVE_COMPANY_USER_VALIDATION');
 const _run = String.fromEnvironment('LAN_VALIDATION_RUN');
@@ -26,6 +28,9 @@ const _revision = String.fromEnvironment('COMPANY_USER_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_USER_SOURCE_TREE');
 const _disabledApiProbe = bool.fromEnvironment(
   'NATIVE_COMPANY_USER_DISABLED_API_PROBE',
+);
+const _networkDiagnostic = bool.fromEnvironment(
+  'NATIVE_COMPANY_USER_NETWORK_DIAGNOSTIC',
 );
 const _disabledApiProbeRun = 'g2-users-20261024-disable-a';
 const _disabledApiProbeUser = '8bca98b6-de9d-4816-ad4e-54290686f16c';
@@ -70,6 +75,7 @@ Future<void> main() async {
       sourceRevision: _revision,
       sourceTree: _tree,
       processId: pid,
+      localNetworkDiagnostic: _networkDiagnostic,
     );
     final app = await validationApplication(
       workspace,
@@ -172,6 +178,13 @@ Future<void> main() async {
         'maxRecords': CompanyUserTransportReceipts.maxRecords,
         'maxRecordBytes': CompanyUserTransportReceipts.maxRecordBytes,
         'maxTotalBytes': CompanyUserTransportReceipts.maxTotalBytes,
+        if (_networkDiagnostic && Platform.isMacOS)
+          'localNetworkDiagnostic': {
+            'maxAttempts': 1,
+            'deadlineMillis': 10000,
+            'maxEvents': 8,
+            'scope': 'separate zero-payload app-context TCP diagnosis only',
+          },
       },
     };
     final receiptId = '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
@@ -342,6 +355,7 @@ final class CompanyUserTransportReceipts {
     required String sourceRevision,
     required String sourceTree,
     required int processId,
+    bool localNetworkDiagnostic = false,
   }) : _metadata = Map.unmodifiable({
          'kind': 'company-user-transport@1',
          'passed': false,
@@ -367,6 +381,9 @@ final class CompanyUserTransportReceipts {
         processId > 2147483647) {
       throw ArgumentError('Invalid local transport measurement metadata');
     }
+    _networkDiagnostic = localNetworkDiagnostic && Platform.isMacOS
+        ? CompanyUserNetworkDiagnostic(enabled: true, run: run, record: _append)
+        : null;
   }
   static const maxRecords = 128;
   static const maxRecordBytes = 1024;
@@ -380,23 +397,41 @@ final class CompanyUserTransportReceipts {
   bool _closed = false;
   RandomAccessFile? _handle;
   Future<void>? _flushing;
+  late final CompanyUserNetworkDiagnostic? _networkDiagnostic;
   String get filePath => _file.path;
   int get capturedCount => _records.length;
 
-  NearbyController createController(String alias) => NearbyController(
-    deviceId: alias,
-    deviceName: 'Nearby ${alias.substring(0, 6)}',
-    discovery: LanNearbyDiscovery(),
-    companyJoin: true,
-    onTransportObservation: record,
-  );
+  NearbyController createController(String alias) {
+    final diagnostic = _networkDiagnostic;
+    if (diagnostic == null) {
+      return NearbyController(
+        deviceId: alias,
+        deviceName: 'Nearby ${alias.substring(0, 6)}',
+        discovery: LanNearbyDiscovery(),
+        companyJoin: true,
+        onTransportObservation: record,
+      );
+    }
+    int? controller;
+    return _DiagnosticNearbyController(
+      alias: alias,
+      observe: (event) {
+        controller ??= event.controller;
+        record(event);
+      },
+      cancel: () => diagnostic.cancelController(controller),
+    );
+  }
 
   void record(NearbyTransportObservation event) {
+    _networkDiagnostic?.observe(event);
+    _append(event.toJson());
+  }
+
+  void _append(Map<String, Object?> event) {
     if (_disabled || _closed || _records.length >= maxRecords) return;
     try {
-      final bytes = utf8.encode(
-        '${jsonEncode({..._metadata, ...event.toJson()})}\n',
-      );
+      final bytes = utf8.encode('${jsonEncode({..._metadata, ...event})}\n');
       if (bytes.length > maxRecordBytes ||
           _bytes + bytes.length > maxTotalBytes) {
         return;
@@ -451,11 +486,35 @@ final class CompanyUserTransportReceipts {
 
   Future<void> close() async {
     _closed = true;
+    await _networkDiagnostic?.close();
     await drain();
     try {
       await _handle?.close();
     } catch (_) {}
     _handle = null;
+  }
+}
+
+final class _DiagnosticNearbyController extends NearbyController {
+  _DiagnosticNearbyController({
+    required String alias,
+    required NearbyTransportObserver observe,
+    required this.cancel,
+  }) : super(
+         deviceId: alias,
+         deviceName: 'Nearby ${alias.substring(0, 6)}',
+         discovery: LanNearbyDiscovery(),
+         companyJoin: true,
+         onTransportObservation: observe,
+       );
+  final Future<void> Function() cancel;
+
+  @override
+  Future<void> stop({
+    NearbyTransportStopReason reason = NearbyTransportStopReason.requested,
+  }) {
+    unawaited(cancel());
+    return super.stop(reason: reason);
   }
 }
 
