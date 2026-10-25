@@ -1,0 +1,2939 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "mock-electrical-shop-v1",
+  "shop_id": "SHOP-001",
+  "created_on": "2026-10-20",
+  "timezone": "America/Denver",
+  "purpose": "Standalone acceptance scenarios for one synthetic electrical shop. This file is a test plan, not an implemented runner or app import format.",
+  "execution_status": "NOT_RUN",
+  "scenario_count": 28,
+  "source_contract": {
+    "inspected_revision": "cc60e1db9d292525ef1313e387969968c727e16a",
+    "source_snapshot": "Schema version 2 foundation checkout. Current installed app behavior is unverified.",
+    "source_present_entities": [
+      "parts",
+      "brands",
+      "suppliers",
+      "brand versions",
+      "supplier listings",
+      "jobs",
+      "job material lines",
+      "supplier allocations",
+      "sync metadata"
+    ],
+    "adapter_required_entities": [
+      "shop and company ownership",
+      "inventory locations and stock ledger",
+      "reservations",
+      "purchase orders and receipts",
+      "returns and credits",
+      "per-user permissions",
+      "automations",
+      "attachments",
+      "cross-device sync behavior"
+    ],
+    "policy_boundary": "Job statuses, inventory, financial, permission, conflict, and scheduling policies in this fixture are proposed acceptance requirements. They are not guarantees of the inspected source."
+  },
+  "requirements": [
+    {
+      "id": "REQ-CAT-001",
+      "acceptance_requirement": "Preserve every sellable variant, retail identifier, pack quantity, source, and supplier offer.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-COST-001",
+      "acceptance_requirement": "Keep unknown prices null and report a priced subtotal plus an unknown-price count.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-JOB-001",
+      "acceptance_requirement": "Preserve job requirements, shop pulls, supplier allocations, and lifecycle state without cross-job changes.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-STOCK-001",
+      "acceptance_requirement": "Account for stock movements, reservations, receipts, returns, and location balances exactly once.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-PO-001",
+      "acceptance_requirement": "Keep approved purchase order snapshots separate from later catalog prices and proposed drafts.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-AUTH-001",
+      "acceptance_requirement": "Reject actions outside the actor, company, environment, and external-action authority.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-SYNC-001",
+      "acceptance_requirement": "Preserve data across retries, interrupted transfers, reconnects, and cold restarts with explicit terminal receipts.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-CONFLICT-001",
+      "acceptance_requirement": "Expose conflicts without silent stock loss or an invented conflict-resolution policy.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-TIME-001",
+      "acceptance_requirement": "Preserve local job dates and deduplicate schedule occurrences across timezone and DST boundaries.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-FILE-001",
+      "acceptance_requirement": "Expose missing or corrupt attachments without blocking unrelated job records or fabricating file contents.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-AUTO-001",
+      "acceptance_requirement": "Create only proposed local outputs, use stable idempotency keys, and persist terminal run receipts.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    },
+    {
+      "id": "REQ-TEST-001",
+      "acceptance_requirement": "Keep each scenario isolated and report source support, adapter coverage, and observed outcomes separately.",
+      "status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL"
+    }
+  ],
+  "runner_target_protocol": {
+    "implementation_status": "ADAPTER_REQUIRED",
+    "target_selection": "Pin the exact app revision and declare a disposable app workspace or in-memory database. Never infer the target from whichever app is foreground.",
+    "capability_declaration": "Before actions, list supported operations and persistence types. Block each unsupported assertion explicitly.",
+    "operation_envelope_required": [
+      "run_id",
+      "scenario_id",
+      "shop_id",
+      "actor_id",
+      "device_id",
+      "operation_id",
+      "idempotency_key",
+      "base_record_revision",
+      "fixture_sha256",
+      "synthetic_data=true"
+    ],
+    "proposed_operations": [
+      "seed isolated fixture",
+      "read persisted records",
+      "execute supported user action",
+      "advance test clock",
+      "set test transport state",
+      "inject declared fault",
+      "restart isolated app",
+      "collect terminal receipt"
+    ],
+    "polling": "Wait for a supported completion signal or terminal receipt with a bounded timeout. An elapsed delay is not completion evidence.",
+    "timeout": "The adapter declares each operation timeout and captures its last known state. Timeout is FAIL for a supported operation or BLOCKED for a missing prerequisite.",
+    "result_statuses": {
+      "PASS": "The action ran on the pinned target and every applicable assertion matched persisted evidence.",
+      "FAIL": "A supported action ran and an assertion, required terminal signal, or required evidence check failed.",
+      "NOT_RUN": "The scenario has not executed against the target. Fixture validation or a dry plan does not change this status.",
+      "BLOCKED": "A named prerequisite, policy, capability, authority, or device is missing. No success is inferred."
+    },
+    "receipt_fields": [
+      "run_id",
+      "scenario_id",
+      "status",
+      "reason",
+      "app_revision",
+      "adapter_version",
+      "fixture_sha256",
+      "started_at_utc",
+      "finished_at_utc",
+      "actor_id",
+      "device_ids",
+      "operation_receipt_ids",
+      "assertion_results",
+      "before_snapshot_refs",
+      "after_snapshot_refs",
+      "evidence_refs",
+      "blocked_prerequisite",
+      "next_action"
+    ],
+    "receipt_storage": "Write one immutable receipt per scenario attempt under the run namespace. A suite summary references receipts and does not overwrite them.",
+    "conflict_rule": "Do not choose a conflict policy in the runner. If no approved product policy exists, preserve both operations and report BLOCKED.",
+    "receipt_template": "RECEIPT-TEMPLATE.json from the parent package. Its actual fields take precedence over this proposed minimum field list.",
+    "fixture_policy_boundary": "A fixture can exercise its synthetic policy in a mock domain adapter. App acceptance requires the pinned app to implement an approved product policy. Keep mock-domain results separate from app results.",
+    "selector_resolution": "Every fixture_selectors expression variants[id=VALUE] resolves against the top-level variants array in source-catalog.json by exact id equality. Expected-result JSON pointers resolve against expected-results.json. Shop entities resolve against their named shop.json maps. Zero or multiple matches are BLOCKED."
+  },
+  "scenarios": [
+    {
+      "id": "SCN-001",
+      "title": "Load one isolated shop and seven jobs twice",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "priority": "P0",
+      "suite": "fixture",
+      "requirements": [
+        "REQ-CAT-001",
+        "REQ-JOB-001",
+        "REQ-TEST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Validate the source catalog and fixture before import.",
+        "The adapter declares which fixture entities it can persist."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-001",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-EMPTY-IMPORT"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Create an empty isolated workspace for SHOP-001."
+        },
+        {
+          "step": 2,
+          "action": "Import the catalog and shop using stable fixture IDs."
+        },
+        {
+          "step": 3,
+          "action": "Read all supported persisted records. Repeat the identical import with the same import key."
+        },
+        {
+          "step": 4,
+          "action": "Close the test app, verify process exit, reopen it, and read the same records."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-001-A01",
+          "expected": "There is exactly one shop and seven jobs with IDs JOB-001 through JOB-007 in the fixture workspace."
+        },
+        {
+          "assertion_id": "SCN-001-A02",
+          "expected": "The catalog has 59 unique variants, 66 supplier offers, four suppliers, and eight brands."
+        },
+        {
+          "assertion_id": "SCN-001-A03",
+          "expected": "The second import creates no duplicate records or extra stock movements."
+        },
+        {
+          "assertion_id": "SCN-001-A04",
+          "expected": "Cold-start persisted readback matches the first completed import for every supported entity."
+        },
+        {
+          "assertion_id": "SCN-001-A05",
+          "expected": "Unsupported fixture entities appear in the adapter report as BLOCKED, rather than silently discarded or claimed as imported."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/counts",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-002",
+      "title": "Keep black and white products and pack sizes separate",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002"
+      ],
+      "priority": "P0",
+      "suite": "catalog",
+      "requirements": [
+        "REQ-CAT-001",
+        "REQ-JOB-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The isolated catalog import has completed."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-002",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [
+        "variants[id=part-leviton-r55-t5320-00e]",
+        "variants[id=part-leviton-t5320-w]",
+        "variants[id=part-lutron-cw-1-bl]",
+        "variants[id=part-lutron-cw-1-wh]"
+      ],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Search Leviton tamper-resistant duplex outlets and Lutron one-gang Claro plates."
+        },
+        {
+          "step": 2,
+          "action": "Add black and white items to the cafe job using their stable variant IDs."
+        },
+        {
+          "step": 3,
+          "action": "Add a white single outlet and its separately listed ten-pack to distinct test lines."
+        },
+        {
+          "step": 4,
+          "action": "Save, reload, and export the cafe material list."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-002-A01",
+          "expected": "part-leviton-r55-t5320-00e remains black and part-leviton-t5320-w remains white."
+        },
+        {
+          "assertion_id": "SCN-002-A02",
+          "expected": "part-lutron-cw-1-bl and part-lutron-cw-1-wh remain separate variants."
+        },
+        {
+          "assertion_id": "SCN-002-A03",
+          "expected": "The ten-pack part-leviton-m22-t5320-wmp keeps a pack quantity of 10. The single part-leviton-t5320-w keeps a pack quantity of 1."
+        },
+        {
+          "assertion_id": "SCN-002-A04",
+          "expected": "The selected black, white, and pack variants keep their own supplier identifiers and prices. Equal observed prices do not cause variant merging."
+        },
+        {
+          "assertion_id": "SCN-002-A05",
+          "expected": "The Maple job remains unchanged."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-003",
+      "title": "Compare three supplier offers for the same white plate",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-002"
+      ],
+      "priority": "P0",
+      "suite": "catalog",
+      "requirements": [
+        "REQ-CAT-001",
+        "REQ-COST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Load the three offers for part-lutron-cw-1-wh."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-003",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [
+        "variants[id=part-lutron-cw-1-wh]"
+      ],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Open the white Claro plate supplier choices."
+        },
+        {
+          "step": 2,
+          "action": "Select Home Depot, then Lowe's, then Platt in a test draft."
+        },
+        {
+          "step": 3,
+          "action": "Return to Home Depot and save. Read every supplier offer after save."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-003-A01",
+          "expected": "The same variant retains three separate supplier offers."
+        },
+        {
+          "assertion_id": "SCN-003-A02",
+          "expected": "The Home Depot snapshot is 4.97 USD and the Lowe's snapshot is 4.98 USD per each."
+        },
+        {
+          "assertion_id": "SCN-003-A03",
+          "expected": "Platt SKU 0181973 keeps its leading zero and its unknown price remains null."
+        },
+        {
+          "assertion_id": "SCN-003-A04",
+          "expected": "Choosing one supplier does not overwrite the other offers or create a new color variant."
+        },
+        {
+          "assertion_id": "SCN-003-A05",
+          "expected": "Online item IDs remain distinct from store SKUs."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "home_depot_price_cents": 497,
+        "lowes_price_cents": 498,
+        "platt_price_cents": null,
+        "platt_sku": "0181973",
+        "supplier_offer_count": 3
+      }
+    },
+    {
+      "id": "SCN-004",
+      "title": "Convert packs and 500-foot rolls once",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-004"
+      ],
+      "priority": "P0",
+      "suite": "units",
+      "requirements": [
+        "REQ-CAT-001",
+        "REQ-STOCK-001",
+        "REQ-COST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The adapter declares stock units, sell units, and rounding rules explicitly.",
+        "Use a fresh scenario-only transaction for the literal quantities below."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-004",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [
+        "variants[id=part-leviton-m22-t5320-wmp]",
+        "variants[id=part-southwire-11587358]"
+      ],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Receive two sell units of part-leviton-m22-t5320-wmp into LOC-SHOP."
+        },
+        {
+          "step": 2,
+          "action": "Receive one sell unit of part-southwire-11587358 into LOC-SHOP."
+        },
+        {
+          "step": 3,
+          "action": "Transfer 125 stock feet of that wire to LOC-JOB-001."
+        },
+        {
+          "step": 4,
+          "action": "Read sell-unit costs and stock-unit balances after a save and reload."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-004-A01",
+          "expected": "Receiving two ten-packs adds exactly 20 each of part-leviton-m22-t5320-wmp. Preserve an explicit 10-each-per-pack conversion and the original catalog identity."
+        },
+        {
+          "assertion_id": "SCN-004-A02",
+          "expected": "For part-southwire-11587358, LOC-SHOP starts at 1000 ft. One new roll and a 125-ft transfer leave 1375 ft at the shop. LOC-JOB-001 starts at 20 ft and ends at 145 ft."
+        },
+        {
+          "assertion_id": "SCN-004-A03",
+          "expected": "The 145.00 USD catalog price remains the price of one 500-ft roll. The derived price is 0.29 USD per ft."
+        },
+        {
+          "assertion_id": "SCN-004-A04",
+          "expected": "The 10.98 USD outlet pack price remains per ten-pack. Any derived per-each cost retains exact decimal precision until display rounding."
+        },
+        {
+          "assertion_id": "SCN-004-A05",
+          "expected": "Replaying either new receipt with its same operation key leaves these post-operation balances unchanged."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/stock_by_location/LOC-SHOP/part-southwire-11587358"
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/stock_by_location/LOC-JOB-001/part-southwire-11587358"
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-005",
+      "title": "Show pending material cost when a price is unknown",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-004"
+      ],
+      "priority": "P0",
+      "suite": "costing",
+      "requirements": [
+        "REQ-COST-001",
+        "REQ-PO-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use the Costco shop-light offer and a known-price lamp in a scenario-only draft."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-005",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [
+        "variants[id=part-feit-electric-shop840-mot-4-rp]"
+      ],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Add one sell unit of part-feit-electric-shop840-mot-4-rp and one each of part-feit-electric-t24-850-ledg2-rp to a draft."
+        },
+        {
+          "step": 2,
+          "action": "Open the cost summary and attempt to finalize the draft under the proposed approval policy."
+        },
+        {
+          "step": 3,
+          "action": "Generate a quote-request draft through AUTO-007."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-005-A01",
+          "expected": "The known-price subtotal is 10.98 USD, the unknown-price line count is 1, and the total remains pending."
+        },
+        {
+          "assertion_id": "SCN-005-A02",
+          "expected": "The Costco line has four lights per sell unit and a null offer price."
+        },
+        {
+          "assertion_id": "SCN-005-A03",
+          "expected": "Neither the UI nor automation substitutes 0.00 USD for null."
+        },
+        {
+          "assertion_id": "SCN-005-A04",
+          "expected": "Finalization follows the declared pending-price policy. If the policy is absent, finalization is BLOCKED and creates no commitment."
+        },
+        {
+          "assertion_id": "SCN-005-A05",
+          "expected": "The quote request is a local draft and sends no supplier message."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "known_subtotal_cents": 1098,
+        "unknown_line_count": 1,
+        "total_cents": null,
+        "shop_light_quantity_per_sell_unit": 4
+      },
+      "policy_required": "The fixture unknown-price policy blocks order approval. Test this in the mock-domain adapter. App acceptance remains BLOCKED until the target product policy is approved and implemented."
+    },
+    {
+      "id": "SCN-006",
+      "title": "Plan the Maple duplex material allocation",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001"
+      ],
+      "priority": "P1",
+      "suite": "jobs",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-STOCK-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use Maple material lines and planned allocations from the fixture.",
+        "The source job-line subcase uses an explicit adapter mapping. Fixture reserved, issued, and consumed quantities are not automatically native shopPullQty."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-006",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Open the Maple job and inspect requested, shop-pull, supplier-split, and remaining quantities."
+        },
+        {
+          "step": 2,
+          "action": "Save the existing allocation without changing quantities."
+        },
+        {
+          "step": 3,
+          "action": "Change a scenario-only supplier allocation and inspect the remaining quantity."
+        },
+        {
+          "step": 4,
+          "action": "Restore the fixture allocation and reload the job."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-006-A01",
+          "expected": "Each line follows remaining = needed - shop pull - sum of supplier allocations in the same stock unit."
+        },
+        {
+          "assertion_id": "SCN-006-A02",
+          "expected": "A no-change save preserves the user-visible quantities."
+        },
+        {
+          "assertion_id": "SCN-006-A03",
+          "expected": "The changed allocation affects only its material line and job."
+        },
+        {
+          "assertion_id": "SCN-006-A04",
+          "expected": "The restored quantities equal expected-results.json for JOB-001."
+        },
+        {
+          "assertion_id": "SCN-006-A05",
+          "expected": "A supplier allocation is not reported as a submitted purchase order, received stock, or installed material."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/job_quantity_snapshots/JOB-001",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-007",
+      "title": "Replay the cafe black-and-white change request",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-002"
+      ],
+      "priority": "P1",
+      "suite": "jobs",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-CAT-001",
+        "REQ-STOCK-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Start with the cafe job change request and allocations from shop.json."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-007",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Read JOB-002 change request CHANGE-002-01. It is already approved and applied in the named baseline."
+        },
+        {
+          "step": 2,
+          "action": "Replay CHANGE-002-01 with the original logical key as the fixture owner STAFF-001."
+        },
+        {
+          "step": 3,
+          "action": "Read the black outlet and plate demand, reservations, historical white replacement references, and all stock balances."
+        },
+        {
+          "step": 4,
+          "action": "Reload the cafe and Maple job records."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-007-A01",
+          "expected": "The change keeps old and replacement variant IDs in its audit history."
+        },
+        {
+          "assertion_id": "SCN-007-A02",
+          "expected": "Black outlets and black plates use their own supplier offers."
+        },
+        {
+          "assertion_id": "SCN-007-A03",
+          "expected": "The replay releases no additional white reservation and creates no additional black reservation, issue, or demand."
+        },
+        {
+          "assertion_id": "SCN-007-A04",
+          "expected": "Cafe MAT-002-01 and MAT-002-02 each keep planned quantity 8, reserved quantity 4, and issued quantity 4."
+        },
+        {
+          "assertion_id": "SCN-007-A05",
+          "expected": "No other job's white materials or quantities change."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/job_quantity_snapshots/JOB-002",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/reservation_snapshots",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-008",
+      "title": "Receive Cedar outlets in two shipments and replay receipts",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-003"
+      ],
+      "priority": "P0",
+      "suite": "receiving",
+      "requirements": [
+        "REQ-STOCK-001",
+        "REQ-PO-001",
+        "REQ-SYNC-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use Cedar material MAT-003-01 and PO-002-LINE-01. In the named baseline, its shop stock is 16 each, reserved is 10, free stock is 6, unallocated demand is 10, and the shortfall is 4. The existing approved incoming order is 20 each as two ten-packs.",
+        "The receiver actor has the proposed receiving permission."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-008",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Replay existing baseline receipt events MOV-0105 and MOV-0106 with their existing keys as an independent no-change dedupe check."
+        },
+        {
+          "step": 2,
+          "action": "Record a scenario-only unique first receipt of one sell unit on PO-002-LINE-01. Convert its ten-pack to 10 each. Read the order and stock."
+        },
+        {
+          "step": 3,
+          "action": "Replay that first Cedar receipt with the same operation key, then record a second unique receipt for the remaining one sell unit."
+        },
+        {
+          "step": 4,
+          "action": "Reopen the order after verified test-app exit and restart. Do not change job reservations without a separate explicit allocation operation."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-008-A01",
+          "expected": "Replaying MOV-0105 and MOV-0106 changes neither stock nor received quantities."
+        },
+        {
+          "assertion_id": "SCN-008-A02",
+          "expected": "After the first Cedar receipt, PO-002-LINE-01 received quantity is 10 each and outstanding quantity is 10 each. Its 20-each order is partially received."
+        },
+        {
+          "assertion_id": "SCN-008-A03",
+          "expected": "The first receipt raises the matching LOC-SHOP on-hand quantity from 16 to 26 each. Reserved remains 10 and available becomes 16 each until an explicit reservation change."
+        },
+        {
+          "assertion_id": "SCN-008-A04",
+          "expected": "Replaying the first Cedar receipt changes no quantity. After the second unique receipt, received quantity is 20 each and outstanding is 0. LOC-SHOP on-hand is 36 each, reserved is 10, and available is 26 each."
+        },
+        {
+          "assertion_id": "SCN-008-A05",
+          "expected": "The parent PO-002 remains partially received while PO-002-LINE-02 is still outstanding. PO and receipt prices stay at their original snapshots. Persisted quantities match after restart."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/purchase_order_snapshots/lines/PO-002-LINE-01"
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/purchase_order_snapshots/lines/PO-002-LINE-02"
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/supply_shortfalls/MAT-003-01"
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/receipt_movements"
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "baseline": {
+          "on_hand_each": 16,
+          "reserved_each": 10,
+          "available_each": 6,
+          "shortfall_each": 4,
+          "ordered_each": 20,
+          "received_each": 0
+        },
+        "after_first_receipt": {
+          "on_hand_each": 26,
+          "reserved_each": 10,
+          "available_each": 16,
+          "received_each": 10,
+          "outstanding_each": 10
+        },
+        "after_duplicate_first_receipt": {
+          "on_hand_each": 26,
+          "received_each": 10
+        },
+        "after_second_receipt": {
+          "on_hand_each": 36,
+          "reserved_each": 10,
+          "available_each": 26,
+          "received_each": 20,
+          "outstanding_each": 0
+        }
+      }
+    },
+    {
+      "id": "SCN-009",
+      "title": "Reject an over-receipt and quarantine damaged material",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-003"
+      ],
+      "priority": "P1",
+      "suite": "receiving",
+      "requirements": [
+        "REQ-STOCK-001",
+        "REQ-PO-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use the named baseline PO-002-LINE-01. It has 20 each outstanding for Cedar outlets as two ten-packs.",
+        "The scenario uses a copy of a receipt event with an intentionally excessive accepted quantity."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-009",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Attempt to accept 21 each against PO-002-LINE-01, whose outstanding quantity is 20 each. Represent the amount in stock units and preserve the sell-unit conversion."
+        },
+        {
+          "step": 2,
+          "action": "Inspect the synthetic reject-over-receipt rule. Missing approved target policy blocks the app assertion."
+        },
+        {
+          "step": 3,
+          "action": "In a separate independent attempt restored to the named baseline, record one delivered ten-pack on PO-002-LINE-01 containing nine usable outlets and one damaged outlet. Route the damaged outlet to LOC-QUARANTINE."
+        },
+        {
+          "step": 4,
+          "action": "Inspect available stock and the delivery variance task draft."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-009-A01",
+          "expected": "The excessive transaction commits no stock or receipt changes unless an explicit fixture override policy authorizes it."
+        },
+        {
+          "assertion_id": "SCN-009-A02",
+          "expected": "A missing override policy produces BLOCKED, not an inferred approval."
+        },
+        {
+          "assertion_id": "SCN-009-A03",
+          "expected": "The damaged-delivery attempt adds exactly nine each to matching LOC-SHOP stock and one each to matching LOC-QUARANTINE. On-hand at LOC-SHOP becomes 25 each. The damaged outlet is unavailable to pick."
+        },
+        {
+          "assertion_id": "SCN-009-A04",
+          "expected": "The delivery accounts for exactly ten physical outlets. Its usable-accepted quantity is nine and its damaged quantity is one. Order-received and outstanding accounting follows an explicit target damage policy. A missing policy is BLOCKED."
+        },
+        {
+          "assertion_id": "SCN-009-A05",
+          "expected": "AUTO-003 can propose one local variance task without sending an external claim."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/purchase_order_snapshots/lines/PO-002-LINE-01"
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/supply_shortfalls/MAT-003-01"
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/stock_by_location/LOC-QUARANTINE/part-eaton-trbr20w-10-lw"
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "over_receipt_attempt_each": 21,
+        "outstanding_before_each": 20,
+        "new_physical_delivery_each": 10,
+        "new_usable_each": 9,
+        "new_damaged_each": 1,
+        "on_hand_after_usable_receipt_each": 25
+      },
+      "isolated_subcases": [
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "reject 21-each over-receipt"
+        },
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "nine usable and one damaged outlet in a ten-pack"
+        }
+      ]
+    },
+    {
+      "id": "SCN-010",
+      "title": "Replay Willow cancellation and returns without a second stock credit",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-007"
+      ],
+      "priority": "P0",
+      "suite": "returns",
+      "requirements": [
+        "REQ-STOCK-001",
+        "REQ-JOB-001",
+        "REQ-PO-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use the fixture cancelled Willow job, original issues, and return events."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-010",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Open the cancelled job and inspect remaining reservations."
+        },
+        {
+          "step": 2,
+          "action": "Replay the existing JOB-007 return events and cancellation fact with their original logical IDs. Their returns are already applied in the named baseline."
+        },
+        {
+          "step": 3,
+          "action": "Replay the same cancellation and return event IDs."
+        },
+        {
+          "step": 4,
+          "action": "Attempt a return quantity greater than the quantity eligible for return."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-010-A01",
+          "expected": "The job remains cancelled and is absent from new purchase suggestions."
+        },
+        {
+          "assertion_id": "SCN-010-A02",
+          "expected": "Replayed cancellation keeps open reservations at zero and preserves historical issues and return records."
+        },
+        {
+          "assertion_id": "SCN-010-A03",
+          "expected": "Replayed returns do not increase stock. MAT-007-01 keeps returned quantity 10 each and staged quantity 0. Other Willow returned quantities match the expected snapshot."
+        },
+        {
+          "assertion_id": "SCN-010-A04",
+          "expected": "Supplier credit stays pending until a separate mock credit event exists. A stock return alone is not a refund."
+        },
+        {
+          "assertion_id": "SCN-010-A05",
+          "expected": "An additional return for already fully returned MAT-007-01 is rejected without a partial stock change."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/job_quantity_snapshots/JOB-007",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/return_movements",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/stock_by_location",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "MAT-007-01_returned_qty": 10,
+        "MAT-007-01_staged_qty": 0,
+        "additional_return_accepted_qty": 0
+      }
+    },
+    {
+      "id": "SCN-011",
+      "title": "Respect seven different job lifecycle stories",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "priority": "P1",
+      "suite": "jobs",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-AUTO-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The adapter declares the fixture's proposed lifecycle policy separately from source freeform status storage."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-011",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Inspect all seven job statuses."
+        },
+        {
+          "step": 2,
+          "action": "Attempt to complete Cedar while its required delivery or unresolved materials remain."
+        },
+        {
+          "step": 3,
+          "action": "Run draft replenishment eligibility for active, scheduled, on-hold, completed, and cancelled jobs."
+        },
+        {
+          "step": 4,
+          "action": "Attempt to reopen completed Riverbend and cancelled Willow as an unauthorized fixture viewer."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-011-A01",
+          "expected": "Maple and Copper Kettle remain active. Cedar awaits materials. Northstar is scheduled. Juniper is on hold. Riverbend is completed. Willow is cancelled."
+        },
+        {
+          "assertion_id": "SCN-011-A02",
+          "expected": "Cedar completion follows the declared completion rule and retains an explicit unmet-material warning or rejection."
+        },
+        {
+          "assertion_id": "SCN-011-A03",
+          "expected": "Juniper does not start or place an order because time elapsed."
+        },
+        {
+          "assertion_id": "SCN-011-A04",
+          "expected": "Riverbend and Willow do not generate new material demand from closed requirements."
+        },
+        {
+          "assertion_id": "SCN-011-A05",
+          "expected": "The unauthorized reopen changes no status. If the target has no lifecycle or actor policy, these assertions are BLOCKED rather than source-proven."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/counts/jobs",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-012",
+      "title": "Deny unapproved catalog, receiving, and job changes",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-003",
+        "JOB-006"
+      ],
+      "priority": "P0",
+      "suite": "authorization",
+      "requirements": [
+        "REQ-AUTH-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use the fixture allowlist. STAFF-001 is owner, STAFF-004 is stockkeeper, and STAFF-008 is apprentice.",
+        "For the inspected native source, test the shared catalog PIN separately from proposed role permissions."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-012",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "As a locked catalog editor, try to change a catalog price."
+        },
+        {
+          "step": 2,
+          "action": "As STAFF-008 apprentice, try to receive PO-001 stock and edit Riverbend. Both actions are absent from that role's fixture allowlist."
+        },
+        {
+          "step": 3,
+          "action": "As STAFF-004 stockkeeper, perform a valid scenario-only receipt with a unique receipt ID."
+        },
+        {
+          "step": 4,
+          "action": "Read persisted state and denial receipts for every attempt."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-012-A01",
+          "expected": "A locked catalog edit fails and keeps the original price."
+        },
+        {
+          "assertion_id": "SCN-012-A02",
+          "expected": "The proposed apprentice receiving and job-edit denials create no stock, financial, or job-state mutation."
+        },
+        {
+          "assertion_id": "SCN-012-A03",
+          "expected": "The permitted receipt succeeds once and has an actor-authored operation receipt."
+        },
+        {
+          "assertion_id": "SCN-012-A04",
+          "expected": "A shared catalog PIN is not treated as per-user role enforcement."
+        },
+        {
+          "assertion_id": "SCN-012-A05",
+          "expected": "If role-aware authorization is absent, role-denial cases are BLOCKED. The adapter must not simulate a passing app permission check."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-013",
+      "title": "Merge offline edits to separate jobs after reconnect",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002"
+      ],
+      "priority": "P0",
+      "suite": "sync",
+      "requirements": [
+        "REQ-SYNC-001",
+        "REQ-JOB-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Two isolated devices start from identical committed fixture state.",
+        "The target declares a supported sync protocol and test-only network partition control."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-013",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A",
+          "DEVICE-B"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Disconnect DEVICE-A and DEVICE-B using the test transport."
+        },
+        {
+          "step": 2,
+          "action": "Edit a Maple line note on DEVICE-A and a cafe line note on DEVICE-B."
+        },
+        {
+          "step": 3,
+          "action": "Commit both locally. Reconnect and wait for terminal sync receipts."
+        },
+        {
+          "step": 4,
+          "action": "Read both jobs on both devices, then cold-restart both test apps and read again."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-013-A01",
+          "expected": "Both disjoint edits appear on both devices without lost content."
+        },
+        {
+          "assertion_id": "SCN-013-A02",
+          "expected": "Catalog identities, stock quantities, and unrelated jobs remain unchanged."
+        },
+        {
+          "assertion_id": "SCN-013-A03",
+          "expected": "Each local edit is applied once after reconnect and after replay."
+        },
+        {
+          "assertion_id": "SCN-013-A04",
+          "expected": "Sync success requires receiver readback and terminal receipts for both directions. A spinner, focused window, or elapsed time is insufficient."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/stock_by_location",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/job_quantity_snapshots",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results.",
+        "Sender terminal result, receiver terminal result, receiver persisted readback, and cold-restart comparison."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "native_sync_acceptance",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-014",
+      "title": "Preserve receiver data after failed or cancelled transfer",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-003"
+      ],
+      "priority": "P0",
+      "suite": "recovery",
+      "requirements": [
+        "REQ-SYNC-001",
+        "REQ-TEST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The receiver contains committed baseline records and an additional receiver-only test note.",
+        "The adapter can inject a transfer failure before commit and cancel an in-flight transfer."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-014",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A",
+          "DEVICE-B"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Capture receiver persisted records and content hashes."
+        },
+        {
+          "step": 2,
+          "action": "Start a test transfer and fail it after payload receipt but before commit."
+        },
+        {
+          "step": 3,
+          "action": "Repeat with a new operation and cancel before commit."
+        },
+        {
+          "step": 4,
+          "action": "Cold-restart the receiver and read its committed records and receiver-only note."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-014-A01",
+          "expected": "Both failed and cancelled operations end with distinct terminal receipts."
+        },
+        {
+          "assertion_id": "SCN-014-A02",
+          "expected": "The receiver keeps its pre-transfer committed data and receiver-only note."
+        },
+        {
+          "assertion_id": "SCN-014-A03",
+          "expected": "A failed or cancelled operation adds no partial catalog, stock, job, or allocation state."
+        },
+        {
+          "assertion_id": "SCN-014-A04",
+          "expected": "A retry uses the same logical operation key when it resumes the same transfer and commits at most once."
+        },
+        {
+          "assertion_id": "SCN-014-A05",
+          "expected": "Hash equality is supporting evidence. Record identity, revision, terminal result, and receiver readback are also checked."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results.",
+        "Sender terminal result, receiver terminal result, receiver persisted readback, and cold-restart comparison."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "native_sync_acceptance",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-015",
+      "title": "Reject a payload addressed to a different shop",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001"
+      ],
+      "priority": "P0",
+      "suite": "authorization",
+      "requirements": [
+        "REQ-AUTH-001",
+        "REQ-SYNC-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The proposed adapter declares SHOP-001 ownership and test actor scope.",
+        "Create an intentionally invalid copy of the fixture payload addressed to SHOP-OTHER."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-015",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Attempt import and sync of the wrong-shop payload as a SHOP-001 actor."
+        },
+        {
+          "step": 2,
+          "action": "Inspect denial receipts and read the existing SHOP-001 records."
+        },
+        {
+          "step": 3,
+          "action": "Run a valid SHOP-001 import as the positive control."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-015-A01",
+          "expected": "The wrong-shop payload is rejected before any record mutation."
+        },
+        {
+          "assertion_id": "SCN-015-A02",
+          "expected": "SHOP-001 counts, stock, jobs, and actor scope remain unchanged after rejection."
+        },
+        {
+          "assertion_id": "SCN-015-A03",
+          "expected": "The same actor can complete the valid isolated SHOP-001 import."
+        },
+        {
+          "assertion_id": "SCN-015-A04",
+          "expected": "No company isolation claim is made for a target version without company ownership enforcement. Such execution is BLOCKED."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-016",
+      "title": "Resume interrupted import without duplicate rows or movements",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "priority": "P0",
+      "suite": "recovery",
+      "requirements": [
+        "REQ-SYNC-001",
+        "REQ-STOCK-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The adapter exposes transaction boundaries or deterministic failure injection.",
+        "The expected initial import key is stable across process restarts."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-016",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A",
+          "DEVICE-B"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-EMPTY-IMPORT"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Import a fresh fixture and crash the test process at each declared import boundary in separate isolated runs."
+        },
+        {
+          "step": 2,
+          "action": "Verify process exit. Restart the test app and reissue the same logical import key."
+        },
+        {
+          "step": 3,
+          "action": "Compare the resumed result with a clean completed import."
+        },
+        {
+          "step": 4,
+          "action": "Repeat the completed import once more."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-016-A01",
+          "expected": "Every declared boundary either rolls back fully or resumes to the same committed result as a clean import."
+        },
+        {
+          "assertion_id": "SCN-016-A02",
+          "expected": "Each final variant, offer, job, line, movement, receipt, and return ID exists at most once."
+        },
+        {
+          "assertion_id": "SCN-016-A03",
+          "expected": "No reservation, stock, or cost is counted twice."
+        },
+        {
+          "assertion_id": "SCN-016-A04",
+          "expected": "A crash before a durable receipt is reconciled from persisted state before a retry creates new records."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/counts",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/stock_by_location",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        },
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/purchase_order_snapshots",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results.",
+        "Sender terminal result, receiver terminal result, receiver persisted readback, and cold-restart comparison."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "native_sync_acceptance",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-017",
+      "title": "Resolve simultaneous picks without spending the same stock twice",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002"
+      ],
+      "priority": "P0",
+      "suite": "concurrency",
+      "requirements": [
+        "REQ-CONFLICT-001",
+        "REQ-STOCK-001",
+        "REQ-SYNC-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use part-leviton-t5320-w at LOC-SHOP in BASELINE-CONCURRENT-TEN-EACH.",
+        "Both devices share the named 10-each stock revision with no reservation, then each requests 8 each.",
+        "An explicit stock conflict policy is required before execution."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-017",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A",
+          "DEVICE-B"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-CONCURRENT-TEN-EACH"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Start both picks from the same 10-each revision on separate devices."
+        },
+        {
+          "step": 2,
+          "action": "Commit or reconnect both operations concurrently using a barrier."
+        },
+        {
+          "step": 3,
+          "action": "Read accepted, rejected, or pending conflict results on both devices."
+        },
+        {
+          "step": 4,
+          "action": "Retry both operation keys after a cold restart."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-017-A01",
+          "expected": "At most 10 each are accepted as issued from the shared stock."
+        },
+        {
+          "assertion_id": "SCN-017-A02",
+          "expected": "No device silently reports 16 each accepted or a hidden negative available balance."
+        },
+        {
+          "assertion_id": "SCN-017-A03",
+          "expected": "The losing or partially accepted request stays visible with its exact unfilled quantity."
+        },
+        {
+          "assertion_id": "SCN-017-A04",
+          "expected": "The declared conflict policy decides ordering or partial fulfillment. The test does not invent last-write-wins, automatic stock creation, or a preferred device."
+        },
+        {
+          "assertion_id": "SCN-017-A05",
+          "expected": "Retries do not turn the pending or rejected request into a second accepted issue."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results.",
+        "Sender terminal result, receiver terminal result, receiver persisted readback, and cold-restart comparison."
+      ],
+      "blocked_if": [
+        "No explicit stock conflict policy exists. Report BLOCKED and preserve both requests.",
+        "The target cannot provide deterministic concurrency control or persisted outcome readback.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "native_sync_acceptance",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-018",
+      "title": "Keep a deleted line and its allocations deleted after replay",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-005"
+      ],
+      "priority": "P0",
+      "suite": "sync",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-SYNC-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use a scenario-only Juniper material line with at least one supplier split.",
+        "DEVICE-B retains an older copy from before deletion."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-018",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A",
+          "DEVICE-B"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Delete the line on DEVICE-A through the supported job-line operation."
+        },
+        {
+          "step": 2,
+          "action": "Read the line and split tombstones."
+        },
+        {
+          "step": 3,
+          "action": "Reconnect the stale DEVICE-B and replay its older payload."
+        },
+        {
+          "step": 4,
+          "action": "Cold-restart both devices and query active and deleted records."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-018-A01",
+          "expected": "The line and its active supplier splits have deletion metadata after the local delete."
+        },
+        {
+          "assertion_id": "SCN-018-A02",
+          "expected": "The deleted line is absent from active demand and draft ordering."
+        },
+        {
+          "assertion_id": "SCN-018-A03",
+          "expected": "The stale payload does not resurrect the line or its allocations under the declared deletion conflict policy."
+        },
+        {
+          "assertion_id": "SCN-018-A04",
+          "expected": "The historical records remain available for audit where the target supports tombstones."
+        },
+        {
+          "assertion_id": "SCN-018-A05",
+          "expected": "Native transactional tombstones and cross-device stale-replay behavior receive separate results."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results.",
+        "Sender terminal result, receiver terminal result, receiver persisted readback, and cold-restart comparison."
+      ],
+      "blocked_if": [
+        "The deletion conflict policy is missing for the sync phase. Local deletion may be tested independently.",
+        "The target lacks an isolated sync adapter."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-019",
+      "title": "Keep job dates and automation runs correct across DST",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-004",
+        "JOB-005"
+      ],
+      "priority": "P1",
+      "suite": "time",
+      "requirements": [
+        "REQ-TIME-001",
+        "REQ-AUTO-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use timezone America/Denver and a controllable fixture clock.",
+        "The schedule policy must define nonexistent spring times and repeated fall times."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-019",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Set a Northstar service date as a local calendar date and view it from devices configured for Denver and UTC."
+        },
+        {
+          "step": 2,
+          "action": "Evaluate AUTO-008 at both occurrences of 2026-11-01 01:30 in Denver, one at UTC-06:00 and one at UTC-07:00."
+        },
+        {
+          "step": 3,
+          "action": "Evaluate a scenario-only 02:30 daily schedule on 2027-03-14 in Denver."
+        },
+        {
+          "step": 4,
+          "action": "Replay all scheduler observations after a restart."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-019-A01",
+          "expected": "The Northstar service date stays the same local calendar date. Timestamp conversion does not move it to the prior day."
+        },
+        {
+          "assertion_id": "SCN-019-A02",
+          "expected": "AUTO-008 creates at most one run for the Denver local date 2026-11-01. Its key uses the local date, not the UTC offset."
+        },
+        {
+          "assertion_id": "SCN-019-A03",
+          "expected": "The spring schedule follows its declared skip or shift policy and records that decision. Missing policy is BLOCKED."
+        },
+        {
+          "assertion_id": "SCN-019-A04",
+          "expected": "Retries and repeated wall-clock observations do not duplicate reminders or regression runs."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "isolated_subcases": [
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "UTC viewer and local calendar date"
+        },
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "2026 fall-back duplicate scheduler observations"
+        },
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "2027 nonexistent spring schedule time"
+        }
+      ]
+    },
+    {
+      "id": "SCN-020",
+      "title": "Refresh catalog prices without rewriting a purchase order",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-003",
+        "JOB-004"
+      ],
+      "priority": "P0",
+      "suite": "purchasing",
+      "requirements": [
+        "REQ-PO-001",
+        "REQ-COST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use a fixture purchase order with its original line-price snapshot.",
+        "Choose a priced catalog offer referenced by a new scenario-only draft."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-020",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Capture the existing order line unit price, quantity, currency, and total."
+        },
+        {
+          "step": 2,
+          "action": "In the test catalog copy, change the selected offer price by exactly 1.00 USD and mark the change synthetic."
+        },
+        {
+          "step": 3,
+          "action": "Create a new draft using the updated offer."
+        },
+        {
+          "step": 4,
+          "action": "Read the original order and its receipt valuation after reload."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-020-A01",
+          "expected": "The original purchase order keeps its captured unit price and total."
+        },
+        {
+          "assertion_id": "SCN-020-A02",
+          "expected": "The new draft shows the synthetic price increase."
+        },
+        {
+          "assertion_id": "SCN-020-A03",
+          "expected": "The source catalog file and its real-world price snapshot remain unchanged."
+        },
+        {
+          "assertion_id": "SCN-020-A04",
+          "expected": "A historical receipt or return uses the documented order valuation policy and retains its original reference."
+        },
+        {
+          "assertion_id": "SCN-020-A05",
+          "expected": "An unknown supplier price remains null unless a separate quote fact supplies a price."
+        }
+      ],
+      "expected_results_refs": [
+        {
+          "file": "expected-results.json",
+          "json_pointer": "/purchase_order_snapshots",
+          "resolution": "Compare only the fields affected by this scenario and assert all stated unchanged fields. Stop as BLOCKED if the pointer is missing."
+        }
+      ],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-021",
+      "title": "Open a job with missing or corrupt attachment placeholders",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-004",
+        "JOB-006"
+      ],
+      "priority": "P1",
+      "suite": "attachments",
+      "requirements": [
+        "REQ-FILE-001",
+        "REQ-JOB-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use only scenario placeholders. No real customer document is needed.",
+        "The adapter can mark a local placeholder as missing or inject invalid test bytes."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-021",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Associate one missing placeholder with Northstar and one corrupt test placeholder with Riverbend."
+        },
+        {
+          "step": 2,
+          "action": "Open each job and attempt to view its attachment."
+        },
+        {
+          "step": 3,
+          "action": "Edit an unrelated permitted job note and reload it."
+        },
+        {
+          "step": 4,
+          "action": "Replace the corrupt test placeholder with a valid test attachment through the proposed attachment operation."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-021-A01",
+          "expected": "The job opens with its correct materials and status despite the attachment problem."
+        },
+        {
+          "assertion_id": "SCN-021-A02",
+          "expected": "The missing or corrupt attachment has an explicit readable state and no fabricated preview or parsed content."
+        },
+        {
+          "assertion_id": "SCN-021-A03",
+          "expected": "The unrelated note persists."
+        },
+        {
+          "assertion_id": "SCN-021-A04",
+          "expected": "Repair produces a new attachment receipt with size and checksum. It does not alter material quantities or job completion."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-022",
+      "title": "Deduplicate repeated automation triggers",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-003",
+        "JOB-004"
+      ],
+      "priority": "P0",
+      "suite": "automation",
+      "requirements": [
+        "REQ-AUTO-001",
+        "REQ-STOCK-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Enable AUTO-001, AUTO-002, AUTO-003, and AUTO-007 in an isolated fake scheduler only.",
+        "Use the fixture eligibility facts and an output sink that stores local drafts."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-022",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Deliver each eligible source event twice with the same event ID."
+        },
+        {
+          "step": 2,
+          "action": "Deliver a later copy of the same business fact after a scheduler restart."
+        },
+        {
+          "step": 3,
+          "action": "Inspect drafts and terminal receipts by idempotency key."
+        },
+        {
+          "step": 4,
+          "action": "Deliver an ineligible event from a completed or cancelled job as a negative control."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-022-A01",
+          "expected": "Each logical business fact creates at most one unresolved output for its idempotency key."
+        },
+        {
+          "assertion_id": "SCN-022-A02",
+          "expected": "A repeat event can attach an observation receipt without creating another draft."
+        },
+        {
+          "assertion_id": "SCN-022-A03",
+          "expected": "Closed jobs do not create new material-purchase suggestions."
+        },
+        {
+          "assertion_id": "SCN-022-A04",
+          "expected": "Drafts retain their source record revisions, triggering event IDs, and status PLANNED_NOT_CONFIGURED for any routine not enabled in the fake scheduler."
+        },
+        {
+          "assertion_id": "SCN-022-A05",
+          "expected": "No actual scheduler, supplier order, message, payment, or live stock write occurs."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "automation_dry_run",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-023",
+      "title": "Recover an automation crash and serialize duplicate claims",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-003"
+      ],
+      "priority": "P0",
+      "suite": "automation",
+      "requirements": [
+        "REQ-AUTO-001",
+        "REQ-CONFLICT-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use the isolated fake scheduler and a persistent test receipt store.",
+        "Two worker identities can race to claim the same event."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-023",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Have both test workers claim the same AUTO-002 event through a barrier."
+        },
+        {
+          "step": 2,
+          "action": "Crash the winning worker after it stores a draft but before it stores the final receipt."
+        },
+        {
+          "step": 3,
+          "action": "Restart the worker and retry the same idempotency key."
+        },
+        {
+          "step": 4,
+          "action": "Inject transient failures until the declared retry budget expires."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-023-A01",
+          "expected": "Only one logical draft exists for the event despite concurrent claims."
+        },
+        {
+          "assertion_id": "SCN-023-A02",
+          "expected": "The resumed worker reconciles the existing draft before creating a replacement."
+        },
+        {
+          "assertion_id": "SCN-023-A03",
+          "expected": "The receipt links the original and resumed attempts."
+        },
+        {
+          "assertion_id": "SCN-023-A04",
+          "expected": "Retry intervals and the maximum attempt count match automation-plans.json."
+        },
+        {
+          "assertion_id": "SCN-023-A05",
+          "expected": "Exhausted retries produce one failed or blocked receipt and one local attention item. No infinite retry loop or duplicated output occurs."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "automation_dry_run",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-024",
+      "title": "Prevent plans from making unauthorized real-world changes",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "priority": "P0",
+      "suite": "authorization",
+      "requirements": [
+        "REQ-AUTH-001",
+        "REQ-AUTO-001",
+        "REQ-TEST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use a fake output sink with recorded calls.",
+        "Make live supplier, messaging, payment, app production, and scheduler credentials unavailable to the test."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-024",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Run every proposed automation against eligible fixture facts."
+        },
+        {
+          "step": 2,
+          "action": "Attempt to promote a draft into a real order or outgoing supplier message without a separate authorization capability."
+        },
+        {
+          "step": 3,
+          "action": "Attempt to use a production database path or create a live schedule."
+        },
+        {
+          "step": 4,
+          "action": "Inspect all recorded output attempts and persisted fixture state."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-024-A01",
+          "expected": "Every successful output is a local test draft, test alert, test run request, or test receipt inside its namespace."
+        },
+        {
+          "assertion_id": "SCN-024-A02",
+          "expected": "The unauthorized promotion, message, production write, and schedule creation are rejected before the external action."
+        },
+        {
+          "assertion_id": "SCN-024-A03",
+          "expected": "A passing test includes a permitted local draft as a positive control and exact rejected request payloads as negative evidence."
+        },
+        {
+          "assertion_id": "SCN-024-A04",
+          "expected": "The test uses no real payments, orders, customer messages, or credentials."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-025",
+      "title": "Reject invalid job inputs and expose over-allocation",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001"
+      ],
+      "priority": "P1",
+      "suite": "jobs",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-TEST-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use a supported job-line editor, rather than a direct DAO call, for the UI input guard checks."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-025",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Try negative requested and shop-pull quantities."
+        },
+        {
+          "step": 2,
+          "action": "Try an empty custom-line name, missing catalog selection, missing split supplier, and zero or negative split quantities."
+        },
+        {
+          "step": 3,
+          "action": "As a separate valid arithmetic subcase, request 20 each, set shop pull to 8 each, and supplier split to 7 each. Read remaining. Then add a second split of 6 each and read remaining again."
+        },
+        {
+          "step": 4,
+          "action": "Read the visible remaining quantity and persisted rows."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-025-A01",
+          "expected": "Each invalid input shows its field error and creates no invalid line or split through the editor."
+        },
+        {
+          "assertion_id": "SCN-025-A02",
+          "expected": "The literal source arithmetic subcase displays remaining = 5 each for requested 20, shop pull 8, and supplier split 7. After the second split of 6, it displays remaining = -1 each."
+        },
+        {
+          "assertion_id": "SCN-025-A03",
+          "expected": "A negative remaining quantity stays visible for review. The scenario does not claim the source silently caps it at zero or enforces stock limits."
+        },
+        {
+          "assertion_id": "SCN-025-A04",
+          "expected": "An asserted reject-over-allocation product policy requires a separate implementation and test."
+        },
+        {
+          "assertion_id": "SCN-025-A05",
+          "expected": "Direct DAO imports are not credited with editor-only guards."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "requested_qty": 20,
+        "shop_pull_qty": 8,
+        "first_supplier_split_qty": 7,
+        "remaining_after_first_split": 5,
+        "second_supplier_split_qty": 6,
+        "remaining_after_second_split": -1
+      },
+      "isolated_subcases": [
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "invalid editor field inputs"
+        },
+        {
+          "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+          "case": "literal source quantity arithmetic without stock-policy assertions"
+        }
+      ]
+    },
+    {
+      "id": "SCN-026",
+      "title": "Promote a custom emergency line without losing quantities",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-006"
+      ],
+      "priority": "P1",
+      "suite": "jobs",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-CAT-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "In a scenario copy of Riverbend, add a custom material line with requested 10 each, shop pull 3 each, and supplier split 4 each.",
+        "The completed job's proposed edit policy must explicitly permit the fixture test edit or provide an authorized reopen."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-026",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Promote the custom line to its selected catalog variant through the supported operation."
+        },
+        {
+          "step": 2,
+          "action": "Read the resulting line, requested quantity, shop pull, supplier splits, and notes."
+        },
+        {
+          "step": 3,
+          "action": "Reload the job and catalog variant."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-026-A01",
+          "expected": "Requested remains 10 each, shop pull remains 3 each, supplier split remains 4 each, and remaining remains 3 each."
+        },
+        {
+          "assertion_id": "SCN-026-A02",
+          "expected": "The line points to the selected catalog identity after promotion."
+        },
+        {
+          "assertion_id": "SCN-026-A03",
+          "expected": "Notes and split suppliers remain attached to the correct material line."
+        },
+        {
+          "assertion_id": "SCN-026-A04",
+          "expected": "The job status remains completed unless an explicit authorized scenario reopen changed it."
+        },
+        {
+          "assertion_id": "SCN-026-A05",
+          "expected": "A blocked lifecycle edit does not become a silent write through a lower-level import."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      },
+      "literal_expected_values": {
+        "requested_qty": 10,
+        "shop_pull_qty": 3,
+        "supplier_split_qty": 4,
+        "remaining_qty": 3
+      }
+    },
+    {
+      "id": "SCN-027",
+      "title": "Replace supplier allocations without active ghost rows",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-005"
+      ],
+      "priority": "P1",
+      "suite": "jobs",
+      "requirements": [
+        "REQ-JOB-001",
+        "REQ-CAT-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "source_present_unverified",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "Use a scenario-only Juniper line allocated to supplier A.",
+        "The source adapter records both active and tombstoned split rows."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-027",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Replace supplier A with supplier B using the supported replace-splits operation."
+        },
+        {
+          "step": 2,
+          "action": "Read active and deleted split rows and user-visible remaining quantity."
+        },
+        {
+          "step": 3,
+          "action": "Save the same visible selection again, then delete the line."
+        },
+        {
+          "step": 4,
+          "action": "Read the job demand and allocations after restart."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-027-A01",
+          "expected": "After replacement, only supplier B appears in the active allocation. Old supplier A rows are tombstoned."
+        },
+        {
+          "assertion_id": "SCN-027-A02",
+          "expected": "A second visible no-change save preserves allocation quantities even if the native operation generates new row IDs."
+        },
+        {
+          "assertion_id": "SCN-027-A03",
+          "expected": "The test does not claim row-level replay idempotency for the inspected split-replacement implementation."
+        },
+        {
+          "assertion_id": "SCN-027-A04",
+          "expected": "Deleting the line tombstones its active splits transactionally and removes its active demand."
+        },
+        {
+          "assertion_id": "SCN-027-A05",
+          "expected": "No active ghost allocation remains after restart."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "source_feature_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    },
+    {
+      "id": "SCN-028",
+      "title": "Run an isolated full-shop regression with honest receipts",
+      "shop_id": "SHOP-001",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "priority": "P0",
+      "suite": "regression",
+      "requirements": [
+        "REQ-TEST-001",
+        "REQ-SYNC-001",
+        "REQ-AUTO-001"
+      ],
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "acceptance_basis": "Synthetic fixture policy and proposed app acceptance. Source support, where noted, is unverified runtime behavior. It does not authorize a product policy.",
+      "preconditions": [
+        "The adapter version, app revision, fixture checksum, and supported capability list are pinned for the run.",
+        "Each scenario has a fresh namespace and an independent clock."
+      ],
+      "reset_isolation": {
+        "namespace": "mock-shop/{run_id}/SCN-028",
+        "start_from": "Reset to the named baseline before this independent scenario. Keep scenario-only changes inside its namespace.",
+        "devices": [
+          "DEVICE-A"
+        ],
+        "clock": "2026-10-20T09:00:00-06:00, unless a step explicitly advances the injected clock.",
+        "cleanup": "Archive receipts and snapshots, then discard this scenario namespace.",
+        "baseline_id": "BASELINE-SHOP-ASOF-20261020"
+      },
+      "fixture_selectors": [],
+      "steps": [
+        {
+          "step": 1,
+          "action": "Run SCN-001 through SCN-027 in their isolated namespaces."
+        },
+        {
+          "step": 2,
+          "action": "Collect fixture validation, local app, cross-device sync, and automation results separately."
+        },
+        {
+          "step": 3,
+          "action": "Rerun the failed or blocked cases only after an input, adapter, app revision, or prerequisite changes."
+        },
+        {
+          "step": 4,
+          "action": "Archive a run summary and per-scenario receipts with sender and receiver readbacks where applicable."
+        }
+      ],
+      "expected_assertions": [
+        {
+          "assertion_id": "SCN-028-A01",
+          "expected": "Every scenario has exactly one current result of PASS, FAIL, NOT_RUN, or BLOCKED with a concrete reason and evidence links."
+        },
+        {
+          "assertion_id": "SCN-028-A02",
+          "expected": "The suite never turns unsupported entities into passing assertions or counts fixture validation as app acceptance."
+        },
+        {
+          "assertion_id": "SCN-028-A03",
+          "expected": "The report names all seven jobs and every proposed automation, with coverage by scenario ID."
+        },
+        {
+          "assertion_id": "SCN-028-A04",
+          "expected": "PASS for sync requires terminal sender and receiver results plus persisted readback after verified cold restarts."
+        },
+        {
+          "assertion_id": "SCN-028-A05",
+          "expected": "No live app database, production schedule, supplier order, or external message changes during the suite."
+        }
+      ],
+      "expected_results_refs": [],
+      "required_evidence": [
+        "Scenario input hash, adapter version, exact app revision, device IDs, actor ID, and fixture namespace.",
+        "Before and after persisted-record exports for each affected entity.",
+        "Operation ID, idempotency key, terminal result, timestamps, and all assertion results."
+      ],
+      "blocked_if": [
+        "The target adapter or isolated execution environment is unavailable.",
+        "An app assertion depends on a product policy that has not been approved or implemented for the pinned target."
+      ],
+      "failure_rule": "An assertion mismatch is FAIL. A missing prerequisite is BLOCKED. A plan or successful fixture validation alone is NOT_RUN.",
+      "test_tier": "proposed_workflow_with_fixture_adapter",
+      "deterministic_completion_signal": {
+        "success": "A terminal operation receipt followed by persisted readback at the receipt revision.",
+        "failure": "A terminal rejection, cancellation, fault result, or bounded timeout with the last known operation state.",
+        "sync_addition": "For transfer cases, require terminal receipts on both devices and receiver readback after verified exit and restart.",
+        "forbidden_proxy": "A delay, spinner, focused window, launch event, or fixture validator result cannot replace a completion receipt."
+      }
+    }
+  ],
+  "catalog_source": "source-catalog.json. This is the exact-byte portable copy of the researched catalog.",
+  "synthetic_policy_notice": "Requirements in this file are synthetic fixture test policies and proposed app acceptance cases. They are not owner approval of product behavior. App assertions that require an absent adapter or approved product policy are BLOCKED.",
+  "named_baselines": {
+    "BASELINE-SHOP-ASOF-20261020": {
+      "source": "shop.json",
+      "as_of": "2026-10-20T09:00:00-06:00",
+      "semantics": "Replay immutable stock_movements by sequence and seed current catalog, job, order, and reservation snapshots. The approved cafe change, partial receipts, and completed returns are already applied.",
+      "expected_file": "expected-results.json"
+    },
+    "BASELINE-EMPTY-IMPORT": {
+      "source": "Empty disposable target",
+      "semantics": "No shop, catalog, stock, job, or operation receipt exists in this scenario namespace."
+    },
+    "BASELINE-CONCURRENT-TEN-EACH": {
+      "source": "BASELINE-SHOP-ASOF-20261020",
+      "semantics": "In the isolated scenario copy, select part-leviton-t5320-w at LOC-SHOP. Replace only that variant-location test balance with 10 each and no reservations. Record this synthetic adjustment explicitly before both devices share its revision. Do not alter the source fixture."
+    }
+  }
+}

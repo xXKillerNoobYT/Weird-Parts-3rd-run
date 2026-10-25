@@ -946,7 +946,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                             controller: _neededController,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
-                                RegExp(r'[0-9.]'),
+                                RegExp(r'[0-9.-]'),
                               ),
                             ],
                             decoration: const InputDecoration(
@@ -965,7 +965,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                             controller: _pullController,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
-                                RegExp(r'[0-9.]'),
+                                RegExp(r'[0-9.-]'),
                               ),
                             ],
                             decoration: const InputDecoration(
@@ -1055,7 +1055,7 @@ class _JobLineEditorState extends State<JobLineEditor> {
                                     controller: split.qtyController,
                                     inputFormatters: [
                                       FilteringTextInputFormatter.allow(
-                                        RegExp(r'[0-9.]'),
+                                        RegExp(r'[0-9.-]'),
                                       ),
                                     ],
                                     decoration: const InputDecoration(

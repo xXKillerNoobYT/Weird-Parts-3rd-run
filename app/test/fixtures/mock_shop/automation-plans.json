@@ -1,0 +1,846 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "mock-electrical-shop-v1",
+  "shop_id": "SHOP-001",
+  "created_on": "2026-10-20",
+  "timezone": "America/Denver",
+  "purpose": "Proposed automation acceptance plans for the standalone synthetic shop. No live schedule, account, or app behavior is configured by this file.",
+  "status": "PLANNED_NOT_CONFIGURED",
+  "execution_status": "NOT_RUN",
+  "plan_count": 8,
+  "global_policy": {
+    "outputs": "Local drafts, alerts, test run requests, and receipts inside an isolated fixture namespace only.",
+    "approval_boundary": "A routine cannot promote its proposal into a real supplier order, payment, outgoing message, production write, or live schedule.",
+    "eligibility_recheck": "Re-read source revisions and lifecycle eligibility when claiming work and before committing a local output.",
+    "atomicity": "Claim and commit by a supported atomic mechanism. An instruction to avoid duplicate work alone is not concurrency control.",
+    "unknown_policy": "Missing prices, unit conversions, authorization, company ownership, and conflict policy remain explicit blockers.",
+    "clock": "Use an injected test clock. Record UTC timestamps and the local date and timezone that drove calendar decisions.",
+    "test_status": "All plans are NOT_RUN until executed by a declared adapter. A configured fake scheduler is separate from an observed timed run.",
+    "fixture_boundary": "These are synthetic test policies. They do not approve product behavior or configure app automations."
+  },
+  "plans": [
+    {
+      "id": "AUTO-001",
+      "name": "Draft a low-stock requisition",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "stockkeeper",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002"
+      ],
+      "trigger": {
+        "kind": "event",
+        "event": "A committed stock or reservation fact changes available stock across its reorder threshold.",
+        "debounce": "Coalesce repeated facts by variant, location, and business revision."
+      },
+      "eligibility": [
+        "The stock identity has a declared stock unit and reorder threshold.",
+        "Available stock excludes quarantine and active reservations under the fixture policy.",
+        "No unresolved requisition exists for the same logical shortage.",
+        "Reconcile existing open draft and approved incoming quantities under an explicit fixture supply policy before proposing additional stock. Incoming supply does not change on-hand stock."
+      ],
+      "proposed_outputs": [
+        "One local draft requisition with variant, location, shortage, unit, source revision, and candidate supplier offers."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-001:{stock_identity}:{location_id}:{shortage_revision}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically keep at most one unresolved requisition per open_output_key. New shortage revisions update or supersede that requisition with history. Replay returns the existing output and receipt.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys.",
+        "open_output_key_template": "{test_namespace}:SHOP-001:open_reorder:{stock_identity}:{location_id}"
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "backoff_seconds": [
+          1,
+          5
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "transient local storage failure",
+          "temporary fake-sink unavailability"
+        ],
+        "retry_key": "same logical key for every attempt"
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "Cross the threshold with an accepted scenario stock movement and obtain one correctly sized draft.",
+        "Replay the event and restart the worker. The draft ID remains the same."
+      ],
+      "negative_tests": [
+        "Stock above threshold creates no requisition.",
+        "Quarantined material does not satisfy the threshold.",
+        "A duplicate event creates no duplicate draft."
+      ],
+      "scenario_ids": [
+        "SCN-004",
+        "SCN-007",
+        "SCN-017",
+        "SCN-022"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "inventory planner",
+      "responsible_staff_id": "STAFF-004",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-002",
+      "name": "Draft a material-shortage purchase plan",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "purchaser",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-001",
+        "JOB-003",
+        "JOB-004"
+      ],
+      "trigger": {
+        "kind": "event",
+        "event": "A committed job-line demand or allocation revision changes the unmet quantity."
+      },
+      "eligibility": [
+        "The synthetic test policy includes active and awaiting_materials jobs only. A scheduled job requires an explicit planning_enabled flag in the scenario copy. No such flag is inferred from the calendar.",
+        "The job is not on_hold, completed, or cancelled. Retained historical unallocated_qty on closed jobs creates no new demand.",
+        "The demand unit and each supplier sell unit have a declared conversion.",
+        "Reconcile known approved incoming supply and existing unresolved plans before proposing another purchase. Do not order again merely because current on-hand stock is short."
+      ],
+      "proposed_outputs": [
+        "One local proposed purchase plan grouped by supplier.",
+        "Known-price subtotal, unknown-price count, and pending-total state.",
+        "An explicit remainder after sell-unit rounding, without silently over-allocating job demand."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-002:{job_id}:{material_plan_revision}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "A new eligible business revision updates or supersedes the one unresolved job plan with an audit link. A repeated event keeps the same output. Recheck lifecycle eligibility before commit.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys.",
+        "open_output_key_template": "{test_namespace}:SHOP-001:open_material_plan:{job_id}"
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "backoff_seconds": [
+          1,
+          5
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "transient local storage failure",
+          "temporary fake-sink unavailability"
+        ],
+        "retry_key": "same logical key for every attempt"
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "For Cedar MAT-003-01, observe unallocated quantity 10, free stock 6, and shortfall 4. The existing approved incoming PO-002-LINE-01 for 20 each produces an awaiting-delivery explanation and no duplicate purchase proposal.",
+        "In a separate scenario copy, explicitly cancel the incoming line without deleting its history. If the synthetic policy permits a new draft, the four-each shortfall requires one ten-pack. Record six excess stock units for shop replenishment and allocate only four each to the shortage.",
+        "Replay the business revision and restart the worker. Keep one logical output and no duplicate draft."
+      ],
+      "negative_tests": [
+        "Juniper on hold, Riverbend completed, and Willow cancelled create no new purchase plan.",
+        "Unknown prices keep the total pending.",
+        "The plan does not call a supplier order endpoint.",
+        "Historical closed-job unallocated quantities and already-covered incoming supply create no duplicate material order."
+      ],
+      "scenario_ids": [
+        "SCN-005",
+        "SCN-006",
+        "SCN-011",
+        "SCN-020",
+        "SCN-022",
+        "SCN-023"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "purchasing planner",
+      "responsible_staff_id": "STAFF-003",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-003",
+      "name": "Draft a delivery variance task",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "stockkeeper",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-003"
+      ],
+      "trigger": {
+        "kind": "event",
+        "event": "An accepted receipt has a short, damaged, wrong-item, or over-delivery observation."
+      },
+      "eligibility": [
+        "The receipt references an existing mock purchase order and a unique receipt event ID.",
+        "The variance is not already represented by an unresolved task for the same receipt line."
+      ],
+      "proposed_outputs": [
+        "One local task with ordered, accepted, damaged, outstanding, and disputed quantities.",
+        "Links to the receipt and order snapshot. No outgoing supplier claim."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-003:{receipt_event_id}:{order_line_id}:{variance_kind}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys."
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "backoff_seconds": [
+          1,
+          5
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "transient local storage failure",
+          "temporary fake-sink unavailability"
+        ],
+        "retry_key": "same logical key for every attempt"
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "SCN-009 produces one Cedar delivery-variance draft with physical delivery 10 each, usable 9 each, and damaged 1 each. It does not invent a baseline damage event.",
+        "Receiving the remaining accepted material updates the unresolved task status without deleting its history."
+      ],
+      "negative_tests": [
+        "An exact delivery creates no variance task.",
+        "A replayed receipt creates no second task or stock increase.",
+        "An invalid receipt creates no task that implies accepted stock."
+      ],
+      "scenario_ids": [
+        "SCN-008",
+        "SCN-009",
+        "SCN-022"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "receiver",
+      "responsible_staff_id": "STAFF-004",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-004",
+      "name": "Create a local stale-job reminder",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "dispatcher",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003"
+      ],
+      "trigger": {
+        "kind": "calendar_proposal",
+        "local_time": "08:00",
+        "days": [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday"
+        ],
+        "timezone": "America/Denver",
+        "activation": "No schedule is installed.",
+        "dst_policy": "One occurrence per local date. Repeated scheduler observations deduplicate by local date."
+      },
+      "eligibility": [
+        "The job is active or awaiting materials.",
+        "Its last meaningful activity exceeds the fixture stale interval.",
+        "No reminder exists for that job, activity revision, and local date.",
+        "Use a synthetic stale interval of three business days after last meaningful activity. The adapter must define its business-day calendar and local-date comparison. No live scheduling preference is implied."
+      ],
+      "proposed_outputs": [
+        "One local reminder with the last activity time, job owner, unmet condition, and next suggested review."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-004:{job_id}:{last_activity_revision}:{local_date}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys."
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "backoff_seconds": [
+          30
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "temporary local reminder-store failure"
+        ],
+        "retry_key": "same logical key"
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "Advance the fixture clock beyond the stale interval and obtain one reminder."
+      ],
+      "negative_tests": [
+        "Recent activity creates no reminder.",
+        "On-hold Juniper requires its own explicit review date. It does not get an active-job reminder.",
+        "Completed Riverbend and cancelled Willow stay excluded."
+      ],
+      "scenario_ids": [
+        "SCN-011",
+        "SCN-019",
+        "SCN-022"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "shop coordinator",
+      "responsible_staff_id": "STAFF-002",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-005",
+      "name": "Report a daily stock reconciliation difference",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "stockkeeper",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "trigger": {
+        "kind": "calendar_proposal",
+        "local_time": "18:00",
+        "days": "every local day",
+        "timezone": "America/Denver",
+        "activation": "No schedule is installed.",
+        "dst_policy": "One reconciliation window per local date."
+      },
+      "eligibility": [
+        "The isolated ledger and snapshot export have a committed cutoff and common revision.",
+        "The adapter can distinguish available, reserved, quarantined, issued, and returned quantities."
+      ],
+      "proposed_outputs": [
+        "One local reconciliation report per cutoff.",
+        "An attention item for each mismatch with stock identity, location, expected balance, observed balance, and related event IDs."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-005:{local_date}:{cutoff_revision}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys."
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "backoff_seconds": [
+          60
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "incomplete consistent snapshot due to a concurrent committed write"
+        ],
+        "retry_key": "same logical key and cutoff"
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "A seeded one-unit discrepancy creates a report that names the exact variant, location, and difference.",
+        "The untouched fixture reconciles against expected-results.json. A separate scenario copy introduces exactly one stock-unit discrepancy."
+      ],
+      "negative_tests": [
+        "The routine never corrects stock automatically.",
+        "An inconsistent snapshot is retried or blocked. It does not become a false mismatch.",
+        "Duplicate scheduler observations do not duplicate attention items."
+      ],
+      "scenario_ids": [
+        "SCN-008",
+        "SCN-010",
+        "SCN-017",
+        "SCN-028"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "inventory controller",
+      "responsible_staff_id": "STAFF-004",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-006",
+      "name": "Retry a transient test sync within a bounded budget",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "owner",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003"
+      ],
+      "trigger": {
+        "kind": "event",
+        "event": "A test sync operation has a terminal retryable transport failure, or connectivity returns while that operation remains pending."
+      },
+      "eligibility": [
+        "The original operation key and sender and receiver identities remain valid.",
+        "The failure is transient and the operation was not cancelled, rejected, or superseded.",
+        "A declared sync protocol and conflict policy exist."
+      ],
+      "proposed_outputs": [
+        "A retry request for the same logical operation.",
+        "A local terminal receipt with both device results and receiver readback, or an attention item after exhaustion."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-006:{original_sync_operation_id}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys."
+      },
+      "retry_policy": {
+        "max_attempts": 4,
+        "backoff_seconds": [
+          1,
+          5,
+          30
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "declared transient transport failure",
+          "declared temporary receiver unavailability"
+        ],
+        "retry_key": "same original logical sync operation key",
+        "attempt_timeout": "Adapter-declared bounded terminal-result timeout. No delay is proof of completion."
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "Drop one test transport attempt, reconnect, and complete once with receiver readback.",
+        "Restart between attempts and keep the same logical transfer identity."
+      ],
+      "negative_tests": [
+        "Cancelled transfer, wrong shop, permission denial, unsupported protocol, and unresolved stock conflict produce no automatic retry.",
+        "No fifth attempt occurs after a four-attempt budget.",
+        "A success receipt without receiver data is not accepted."
+      ],
+      "scenario_ids": [
+        "SCN-013",
+        "SCN-014",
+        "SCN-015",
+        "SCN-016",
+        "SCN-017"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "sync operator",
+      "responsible_staff_id": "STAFF-001",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-007",
+      "name": "Draft a missing-price quote request",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "purchaser",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-002",
+        "JOB-004"
+      ],
+      "trigger": {
+        "kind": "event",
+        "event": "An eligible draft material line references an offer whose price is null.",
+        "calendar_fallback_proposal": {
+          "local_time": "09:00",
+          "days": "weekdays",
+          "timezone": "America/Denver",
+          "activation": "No schedule is installed."
+        }
+      },
+      "eligibility": [
+        "The draft is active and its required price is still unknown.",
+        "The offer exists and has a retailer SKU or online item ID with an explicit identifier type.",
+        "No unresolved quote draft exists for that offer and draft business revision."
+      ],
+      "proposed_outputs": [
+        "One local quote-request draft with supplier, model, identifier type, quantity, sell unit, and source URL.",
+        "The cost summary remains pending until a separate quote fact supplies a price."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-007:{draft_id}:{offer_id}:{draft_business_revision}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys."
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "backoff_seconds": [
+          1,
+          5
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "transient local storage failure",
+          "temporary fake-sink unavailability"
+        ],
+        "retry_key": "same logical key for every attempt"
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "The Costco unknown-price shop-light line creates one quote draft with pack quantity 4.",
+        "A Platt quote draft preserves a leading-zero SKU."
+      ],
+      "negative_tests": [
+        "An offer price of 0.00 is not inferred from null.",
+        "A priced offer creates no missing-price draft.",
+        "No email, supplier message, or real quote request is sent."
+      ],
+      "scenario_ids": [
+        "SCN-003",
+        "SCN-005",
+        "SCN-022",
+        "SCN-024"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "purchasing planner",
+      "responsible_staff_id": "STAFF-003",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    },
+    {
+      "id": "AUTO-008",
+      "name": "Plan a nightly isolated regression run",
+      "shop_id": "SHOP-001",
+      "status": "PLANNED_NOT_CONFIGURED",
+      "execution_status": "NOT_RUN",
+      "capability_status": "adapter_required",
+      "owner_role": "owner",
+      "timezone": "America/Denver",
+      "job_ids": [
+        "JOB-001",
+        "JOB-002",
+        "JOB-003",
+        "JOB-004",
+        "JOB-005",
+        "JOB-006",
+        "JOB-007"
+      ],
+      "trigger": {
+        "kind": "calendar_proposal",
+        "local_time": "01:30",
+        "days": "every local day",
+        "timezone": "America/Denver",
+        "activation": "No schedule is installed.",
+        "dst_policy": "Use one run key per Denver local date. On the fall repeated hour, the second 01:30 observation reuses the first key. If a configured time is nonexistent, require a declared skip or shift policy."
+      },
+      "eligibility": [
+        "A pinned fixture checksum, app revision, adapter version, isolated database, and test transport are available.",
+        "No production path, live credential, or real output sink is accessible.",
+        "The previous run has terminal receipts or an explicit recovered stale-run record."
+      ],
+      "proposed_outputs": [
+        "One local regression run request for SCN-001 through SCN-028.",
+        "A report that separates fixture validation, local source behavior, sync behavior, proposed workflow cases, and blockers."
+      ],
+      "idempotency": {
+        "key_template": "{test_namespace}:SHOP-001:AUTO-008:{target_revision}:{fixture_sha256}:{local_date}",
+        "scope": "Isolated fixture shop and run namespace.",
+        "dedupe_rule": "Atomically claim the logical key. Before retry, reconcile an existing output and receipt. A duplicate observation does not create a second unresolved output.",
+        "revision_rule": "Include a source business revision only when it changes the proposed action. A repeated event or unchanged scheduler observation keeps the same key.",
+        "completion_record": "Persist output IDs and a terminal receipt. If a crash occurs between them, recover by the same key.",
+        "namespace_rule": "Keep test_namespace stable across worker restarts and duplicate observations. Give each independent regression run its own namespace. Attempt IDs do not enter logical dedupe keys."
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "backoff_seconds": [
+          300
+        ],
+        "jitter": "disabled in deterministic tests",
+        "retry_only": [
+          "test-environment startup failure before scenario execution"
+        ],
+        "retry_key": "same nightly logical key",
+        "failed_assertions": "Do not rerun unchanged failed assertions to seek a pass. Preserve the failed receipt and wait for changed evidence."
+      },
+      "failure_handling": [
+        "Keep the original input and all attempt receipts.",
+        "Stop after the retry budget. Create one local attention item with the exact prerequisite and next action.",
+        "Permission denials, malformed input, unknown price, cancelled job, and absent product policy do not receive blind retries."
+      ],
+      "test_boundaries": [
+        "Use a fake scheduler and a local draft sink inside the scenario namespace.",
+        "Never place an order, send a supplier or customer message, redeem credits, make a payment, configure a live schedule, or write a production database.",
+        "The plan alone does not prove a configured routine or a timed execution."
+      ],
+      "action_guard": "The routine can propose local outputs only. Any external promotion needs separate explicit authority and a supported execution path.",
+      "positive_tests": [
+        "A fake clock tick creates one isolated run request and a receipt for every scenario.",
+        "Two fall-back 01:30 observations create one logical run."
+      ],
+      "negative_tests": [
+        "Missing adapter produces BLOCKED and no app acceptance claim.",
+        "An attempted production path or live supplier sink is rejected before execution.",
+        "An unchanged failing scenario remains FAIL."
+      ],
+      "scenario_ids": [
+        "SCN-019",
+        "SCN-023",
+        "SCN-024",
+        "SCN-028"
+      ],
+      "required_result_receipt": [
+        "automation_id",
+        "logical_key",
+        "trigger_event_ids",
+        "source_record_ids_and_revisions",
+        "eligibility_result",
+        "local_output_ids",
+        "attempt_count",
+        "terminal_status",
+        "timestamps_utc",
+        "fixture_namespace",
+        "failure_reason_or_blocker",
+        "evidence_refs"
+      ],
+      "acceptance_status": "SYNTHETIC_FIXTURE_POLICY_NOT_PRODUCT_APPROVAL",
+      "blocked_if": [
+        "The target adapter is missing.",
+        "An app assertion requires an approved product policy that the pinned target lacks."
+      ],
+      "baseline_id": "BASELINE-SHOP-ASOF-20261020",
+      "deterministic_completion_signal": "An atomic claim outcome, a stored local output or explicit no-output decision, and a terminal immutable receipt with source revision readback.",
+      "functional_owner_label": "test maintainer",
+      "responsible_staff_id": "STAFF-001",
+      "owner_binding_scope": "Synthetic accountability only. This assignment grants no live identity, app permission, or external authority."
+    }
+  ],
+  "synthetic_policy_notice": "Requirements in this file are synthetic fixture test policies and proposed app acceptance cases. They are not owner approval of product behavior. App assertions that require an absent adapter or approved product policy are BLOCKED."
+}
