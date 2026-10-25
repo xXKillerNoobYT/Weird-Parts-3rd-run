@@ -411,14 +411,13 @@ extension CompanyUsers on CompanyEnrollment {
     if (account == null) return null;
     final user = await _checkUserAccount(account, requireActive: false);
     final outgoing = account.values['o'];
+    final disable = account.disable;
     return CompanyUserProvisionStatus._(
       user.user['id'] as String,
-      account.isDisabled
-          ? (account.disable!.target?[1] as String?)
+      disable != null
+          ? (disable.target?[1] as String?)
           : (outgoing is List ? outgoing[2] as String : null),
-      account.isDisabled
-          ? account.disable!.receipt != null
-          : account.values['r'] != null,
+      disable != null ? disable.receipt != null : account.values['r'] != null,
       account.isDisabled,
     );
   }

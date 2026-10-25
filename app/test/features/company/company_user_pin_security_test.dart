@@ -8,7 +8,12 @@ import 'package:wired_parts/features/company/company_bootstrap.dart';
 import 'package:wired_parts/features/installation/installation_security.dart';
 
 import 'company_join_test.dart'
-    show JoinFixture, canonicalJoinTest, sqlSnapshot, advanceJoinFloor;
+    show
+        JoinFixture,
+        canonicalJoinTest,
+        sqlSnapshot,
+        advanceJoinFloor,
+        expectJoinProtectedUnchanged;
 import 'company_user_disable_domain_test.dart'
     show provisionDisableFixture, disablePeers, disableJob;
 
@@ -33,6 +38,116 @@ Future<Map<String, Object?>> _exchangePolicy(JoinFixture f) async {
 }
 
 void main() {
+  for (final resetCount in [0, 2]) {
+    test(
+      '${resetCount == 0 ? 'legacy v2' : 'current v3'} terminal provisioning status preserves pending and confirmed lifecycle',
+      () async {
+        final f = await JoinFixture.create();
+        final user = await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: 'Casey',
+          pin: '0123',
+        );
+        final initial = await provisionDisableFixture(f, user.userId);
+        for (var epoch = 1; epoch <= resetCount; epoch++) {
+          await f.aEnrollment.resetRestrictedUserPin(
+            owner: f.owner,
+            userId: user.userId,
+            requestId: const Uuid().v4(),
+            expectedCredentialVersion: epoch,
+            pin: epoch == 1 ? '4567' : '6789',
+          );
+        }
+        await f.aEnrollment.disableRestrictedUser(
+          owner: f.owner,
+          userId: user.userId,
+          requestId: const Uuid().v4(),
+        );
+
+        Future<void> expectStatus(String? target, bool confirmed) async {
+          final protected = Map.of(f.aStore.states);
+          final sql = await sqlSnapshot(f.aDb);
+          final status = (await f.aEnrollment.userProvisionStatus(f.owner))!;
+          expect(status.userId, user.userId);
+          expect(status.disabled, isTrue);
+          expect(status.targetDeviceId, target);
+          expect(status.confirmed, confirmed);
+          final lifecycle = (await f.aEnrollment.userLifecycleStatus())!;
+          expect(lifecycle.userId, user.userId);
+          expect(lifecycle.disabled, isTrue);
+          expect(lifecycle.credentialVersion, resetCount + 1);
+          expect(lifecycle.targetDeviceId, target);
+          expect(lifecycle.confirmed, confirmed);
+          expectJoinProtectedUnchanged(f.aStore, protected);
+          expect(await sqlSnapshot(f.aDb), sql);
+        }
+
+        await expectStatus(resetCount == 0 ? initial.a.deviceId : null, false);
+        final p = await disablePeers(f);
+        final target = await f.aEnrollment.verifyUserLifecycleOffer(
+          await f.bEnrollment.createUserLifecycleOffer(p.b),
+          p.a,
+        );
+        final source = await f.bEnrollment.verifyUserLifecycleOffer(
+          await f.aEnrollment.createUserLifecycleOffer(p.a),
+          p.b,
+        );
+        final policy = (await f.aEnrollment.prepareUserDisablePolicy(
+          p.a,
+          target,
+        ))!;
+        await expectStatus(p.a.deviceId, false);
+        final receipt = await f.bEnrollment.acceptUserDisablePolicy(
+          policy,
+          p.b,
+          source,
+        );
+        await f.aEnrollment.acceptUserDisableReceipt(receipt!, p.a);
+        await expectStatus(p.a.deviceId, true);
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+    );
+  }
+
+  test(
+    'current terminal state refuses a legacy receipt envelope without mutation',
+    () async {
+      final f = await JoinFixture.create();
+      final user = await f.aEnrollment.createRestrictedUser(
+        owner: f.owner,
+        requestId: const Uuid().v4(),
+        name: 'Casey',
+        pin: '0123',
+      );
+      await provisionDisableFixture(f, user.userId);
+      await f.aEnrollment.resetRestrictedUserPin(
+        owner: f.owner,
+        userId: user.userId,
+        requestId: const Uuid().v4(),
+        expectedCredentialVersion: 1,
+        pin: '4567',
+      );
+      await f.aEnrollment.disableRestrictedUser(
+        owner: f.owner,
+        userId: user.userId,
+        requestId: const Uuid().v4(),
+      );
+      final p = await disablePeers(f);
+      final protected = Map.of(f.aStore.states);
+      final sql = await sqlSnapshot(f.aDb);
+      await expectLater(
+        f.aEnrollment.acceptUserDisableReceipt({
+          'body': {'kind': 'company.user.disable.receipt@1'},
+          'signature': '',
+        }, p.a),
+        throwsA(isA<CompanyBootstrapRefusal>()),
+      );
+      expectJoinProtectedUnchanged(f.aStore, protected);
+      expect(await sqlSnapshot(f.aDb), sql);
+    },
+  );
+
   test('current floor three preserves anchored history, spent receipts and held old proof', () async {
     final f = await JoinFixture.create();
     final user = await f.aEnrollment.createRestrictedUser(

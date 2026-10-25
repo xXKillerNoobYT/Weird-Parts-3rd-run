@@ -526,6 +526,7 @@ extension CompanyUserDisable on CompanyEnrollment {
     await _requireUserPeer(peer);
     final account = await _readUserAccount();
     if (account == null ||
+        account.isCurrentState ||
         !account.isDisabled ||
         account.disable!.target?[0] != 0) {
       throw const CompanyBootstrapRefusal('Disable delivery is not pending');
