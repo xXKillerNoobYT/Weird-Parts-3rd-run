@@ -71,7 +71,11 @@ String ephemeralMockPin() {
 
 final class MockLocalWorkspace {
   MockLocalWorkspace._(
-    this.root, this._db, this._pin, this._secret, this._deviceId,
+    this.root,
+    this._db,
+    this._pin,
+    this._secret,
+    this._deviceId,
   );
 
   static const _owner = 'wired-parts-mock-shop-v1';
@@ -152,10 +156,13 @@ final class MockLocalWorkspace {
       final actual = await _readRows();
       for (final table in db.allTables) {
         final name = table.actualTableName;
-        if (name == 'app_settings' || name == 'device_profiles' ||
-            projection.containsKey(name)) continue;
-        if ((await db.customSelect('SELECT 1 FROM "' + name +
-            '" LIMIT 1').get()).isNotEmpty) {
+        if (name == 'app_settings' ||
+            name == 'device_profiles' ||
+            projection.containsKey(name)) {
+          continue;
+        }
+        if ((await db.customSelect('SELECT 1 FROM "$name" LIMIT 1').get())
+            .isNotEmpty) {
           throw StateError('Mock target contains an unprojected business row');
         }
       }

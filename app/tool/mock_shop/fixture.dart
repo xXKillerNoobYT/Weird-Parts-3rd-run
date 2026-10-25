@@ -71,8 +71,22 @@ final class MockShopFixture {
 
   static MockShopFixture read(Directory directory) => decode(
     File('${directory.path}/shop.json').readAsBytesSync(),
-    File('${directory.path}/source-catalog.json').readAsBytesSync(),
+    readSourceBytes(directory),
   );
+
+  static List<int> readSourceBytes(Directory directory) {
+    final raw = File('${directory.path}/source-catalog.json');
+    final compressed = File('${directory.path}/source-catalog.json.gz');
+    final hasRaw = raw.existsSync();
+    final hasCompressed = compressed.existsSync();
+    _require(
+      hasRaw != hasCompressed,
+      'Expected exactly one frozen catalog encoding: JSON or gzip',
+    );
+    return hasRaw
+        ? raw.readAsBytesSync()
+        : gzip.decode(compressed.readAsBytesSync());
+  }
 
   static MockShopFixture decode(
     List<int> bytes,
