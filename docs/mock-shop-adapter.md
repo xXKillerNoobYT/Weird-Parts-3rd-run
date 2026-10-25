@@ -44,6 +44,25 @@ Open Warehouse to inspect 11 locations and absolute on-hand observations. Reserv
 
 The editor starts unlocked under an ephemeral synthetic test PIN. The PIN is neither printed nor embedded in source. Automated tests can lock and unlock their own workspace. A manual inspection run does not provision the source's eight staff identities or roles.
 
+## Preserve a local native profile
+
+The default entrypoint creates a new temporary shop each launch. For process-cold readback, launch the same separately qualified mock binary with both public environment values set:
+
+```sh
+MOCK_SHOP_PROFILE_MODE=create MOCK_SHOP_PROFILE_ID=ponderosa-local-a \
+  /path/to/qualified-mock.app/Contents/MacOS/wired_parts
+```
+
+Use `create` only once. It refuses an existing profile. The identifier selects an owned directory under the native process's resolved temporary directory; it cannot select an arbitrary database path. Package the frozen fixture inside the qualified app bundle before signing and compile its absolute resource path into `MOCK_SHOP_FIXTURE_DIRECTORY`. Verify the bundle identity, signature, embedded hashes and actual runtime before crediting native acceptance. The default Runner bundle identity is not a qualified isolated build.
+
+While the first run is unlocked, use More > Change PIN to choose an operator-known synthetic PIN through the existing UI. Keep that PIN ephemeral. Make the deliberate synthetic edit, save public record exports, attach the normal-exit observer, and quit through the app. Relaunch the same binary with `MOCK_SHOP_PROFILE_MODE=resume` and the same `MOCK_SHOP_PROFILE_ID`. Resume refuses a missing or incomplete profile rather than importing a replacement. The existing PIN service starts locked; use the normal PIN gate to unlock it.
+
+Resume checks ownership, path redirects, fixture binding, schema, device ID, PIN state, company markers and relationships through read-only SQLite before opening a writable connection. It holds an exclusive profile claim for the app lifetime. No PIN, verifier or protected-store state goes into the public profile binding or startup receipt. It does not call the importer, replace the PIN, repair the device ID or migrate a refused target.
+
+Named profiles must close and use explicit resume. The temporary workspace's same-process `reopen()` helper refuses named profiles.
+
+Compare the same seven Job IDs, device ID, catalog/material relationships and deliberate edit after relaunch. A same-process database reopen or backup restore into a fresh shop does not establish this result. Preserve the native profile and receipts for review; they are not automatically synchronized to another host.
+
 ## Run the company Job profile
 
 `mock_shop_sync_test.dart` creates two different file-backed app databases and synthetic protected stores. It creates exactly seven Jobs through production company commands, enrolls the second installation through normal Pair and Match, and runs production company sync over real loopback TCP.

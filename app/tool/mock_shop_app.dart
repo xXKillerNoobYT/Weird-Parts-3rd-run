@@ -12,6 +12,26 @@ import 'package:wired_parts/features/reset/local_data_reset.dart';
 import 'mock_shop/adapter.dart';
 import 'mock_shop/fixture.dart';
 
+enum MockProfileMode { temporary, create, resume }
+
+({MockProfileMode mode, String? profileId}) mockProfileSelection(
+  Map<String, String> environment,
+) {
+  final mode = environment['MOCK_SHOP_PROFILE_MODE'];
+  final id = environment['MOCK_SHOP_PROFILE_ID'];
+  if (mode == null && id == null) {
+    return (mode: MockProfileMode.temporary, profileId: null);
+  }
+  if (id == null || (mode != 'create' && mode != 'resume')) {
+    throw StateError('Mock profile requires an explicit create or resume mode');
+  }
+  MockLocalWorkspace.profileRoot(id);
+  return (
+    mode: mode == 'create' ? MockProfileMode.create : MockProfileMode.resume,
+    profileId: id,
+  );
+}
+
 final class _MockPaths extends PathProviderPlatform {
   _MockPaths(this.root);
   final Directory root;
@@ -43,18 +63,36 @@ Future<void> main() async {
   if (input.isEmpty || !p.isAbsolute(input)) {
     throw StateError('Mock shop input requires an absolute fixture directory');
   }
+  final selection = mockProfileSelection(Platform.environment);
+  final profileId = selection.profileId;
   final fixture = MockShopFixture.read(Directory(input));
   WidgetsFlutterBinding.ensureInitialized();
-  final workspace = await MockLocalWorkspace.create();
+  final workspace = switch (selection.mode) {
+    MockProfileMode.create => await MockLocalWorkspace.createProfile(
+      profileId: profileId!,
+    ),
+    MockProfileMode.resume => await MockLocalWorkspace.resumeProfile(
+      profileId: profileId!,
+      fixture: fixture,
+    ),
+    MockProfileMode.temporary => await MockLocalWorkspace.create(),
+  };
   PathProviderPlatform.instance = _MockPaths(workspace.root);
-  final receipt = await workspace.import(fixture);
+  final receipt = selection.mode == MockProfileMode.resume
+      ? null
+      : await workspace.import(fixture);
   final documents = Directory('${workspace.root.path}/documents');
   await documents.create();
   stdout.writeln(
     jsonEncode({
       'test_profile': 'mock-local-shop',
+      'operation': selection.mode.name,
+      'profile_id': profileId,
+      'device_id': workspace.deviceId,
+      'fixture_sha256': fixture.sha256Value,
       'database': workspace.databaseFile.path,
-      'receipt': receipt.toJson(),
+      'receipt': receipt?.toJson(),
+      'pin_locked': !workspace.pin.isUnlocked,
       'native_acceptance': 'NOT_RUN',
     }),
   );

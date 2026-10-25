@@ -4,8 +4,11 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:wired_parts/data/app_database.dart';
 import 'package:wired_parts/features/company/company_store_markers.dart';
+import 'package:wired_parts/features/installation/installation_security.dart';
 import 'package:wired_parts/features/pin/pin_service.dart';
 import 'package:wired_parts/features/warehouse/warehouse_integrity.dart';
 
@@ -69,6 +72,43 @@ String ephemeralMockPin() {
   return List.generate(8, (_) => random.nextInt(10)).join();
 }
 
+final class _ProfileClaim {
+  _ProfileClaim(this.root, this.file);
+  final String root;
+  final RandomAccessFile file;
+  static final _held = <String>{};
+
+  static _ProfileClaim acquire(Directory root) {
+    if (!_held.add(root.path)) {
+      throw StateError('Mock profile is already open');
+    }
+    RandomAccessFile? file;
+    try {
+      final path = '${root.path}.lock';
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type != FileSystemEntityType.notFound &&
+          type != FileSystemEntityType.file) {
+        throw StateError('Refusing a redirected mock profile claim');
+      }
+      file = File(path).openSync(mode: FileMode.append);
+      file.lockSync(FileLock.exclusive);
+      return _ProfileClaim(root.path, file);
+    } catch (_) {
+      file?.closeSync();
+      _held.remove(root.path);
+      throw StateError('Mock profile claim is unavailable');
+    }
+  }
+
+  void close() {
+    try {
+      file.closeSync();
+    } finally {
+      _held.remove(root);
+    }
+  }
+}
+
 final class MockLocalWorkspace {
   MockLocalWorkspace._(
     this.root,
@@ -76,7 +116,9 @@ final class MockLocalWorkspace {
     this._pin,
     this._secret,
     this._deviceId,
-  );
+    this._claim, {
+    this.profileId,
+  });
 
   static const _owner = 'wired-parts-mock-shop-v1';
   static const _marker = 'mock_shop_import_v1';
@@ -85,8 +127,10 @@ final class MockLocalWorkspace {
   PinService _pin;
   AppDatabase get db => _db;
   PinService get pin => _pin;
-  final String _secret;
+  final String? _secret;
   final String _deviceId;
+  final String? profileId;
+  final _ProfileClaim? _claim;
   bool _closed = false;
   String get deviceId => _deviceId;
   File get databaseFile => File('${root.path}/wired_parts.sqlite');
@@ -95,16 +139,265 @@ final class MockLocalWorkspace {
     final root = await Directory.systemTemp.createTemp(
       'wired-parts-mock-shop-',
     );
+    return _createAt(root);
+  }
+
+  static Directory profileRoot(String profileId) {
+    if (!RegExp(r'^[a-z0-9][a-z0-9-]{0,47}$').hasMatch(profileId)) {
+      throw ArgumentError('Invalid mock profile identifier');
+    }
+    return Directory(
+      p.join(
+        Directory.systemTemp.resolveSymbolicLinksSync(),
+        'wired-parts-mock-shop-profile-$profileId',
+      ),
+    );
+  }
+
+  static Future<MockLocalWorkspace> createProfile({
+    required String profileId,
+  }) async {
+    final root = profileRoot(profileId);
+    final claim = _ProfileClaim.acquire(root);
+    try {
+      if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        throw StateError('Mock profile creation requires an absent target');
+      }
+      await root.create();
+      return await _createAt(root, profileId: profileId, claim: claim);
+    } catch (_) {
+      claim.close();
+      rethrow;
+    }
+  }
+
+  static Future<MockLocalWorkspace> _createAt(
+    Directory root, {
+    String? profileId,
+    _ProfileClaim? claim,
+  }) async {
     await File('${root.path}/owner').writeAsString(_owner, flush: true);
     final db = AppDatabase.forTesting(
       NativeDatabase(File('${root.path}/wired_parts.sqlite')),
     );
-    final deviceId = await db.settingsDao.ensureDeviceId();
-    final pin = PinService(db.settingsDao);
-    final secret = ephemeralMockPin();
-    await pin.setPin(secret);
-    await pin.unlock(secret);
-    return MockLocalWorkspace._(root, db, pin, secret, deviceId);
+    try {
+      final deviceId = await db.settingsDao.ensureDeviceId();
+      final pin = PinService(db.settingsDao);
+      final secret = ephemeralMockPin();
+      await pin.setPin(secret);
+      await pin.unlock(secret);
+      return MockLocalWorkspace._(
+        root,
+        db,
+        pin,
+        secret,
+        deviceId,
+        claim,
+        profileId: profileId,
+      );
+    } catch (_) {
+      await db.close();
+      rethrow;
+    }
+  }
+
+  static Future<MockLocalWorkspace> resumeProfile({
+    required String profileId,
+    required MockShopFixture fixture,
+  }) async {
+    if (fixture.sha256Value != mockShopFixtureSha256) {
+      throw StateError('Mock profile requires the frozen fixture');
+    }
+    final root = profileRoot(profileId);
+    final claim = _ProfileClaim.acquire(root);
+    try {
+      _requireProfileFiles(root);
+      final binding = jsonDecode(
+        File('${root.path}/profile.json').readAsStringSync(),
+      );
+      const keys = {
+        'format',
+        'profile_id',
+        'root',
+        'fixture_sha256',
+        'schema_version',
+        'device_id',
+      };
+      if (binding is! Map<String, dynamic> ||
+          binding.length != keys.length ||
+          !binding.keys.toSet().containsAll(keys) ||
+          binding['format'] != 1 ||
+          binding['profile_id'] != profileId ||
+          binding['root'] != root.path ||
+          binding['fixture_sha256'] != fixture.sha256Value ||
+          binding['schema_version'] != kAppSchemaVersion ||
+          binding['device_id'] is! String ||
+          (binding['device_id'] as String).isEmpty) {
+        throw StateError('Mock profile identity does not match');
+      }
+      final deviceId = binding['device_id'] as String;
+      await _preflightProfile(root, fixture, deviceId);
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File('${root.path}/wired_parts.sqlite')),
+      );
+      return MockLocalWorkspace._(
+        root,
+        db,
+        PinService(db.settingsDao),
+        null,
+        deviceId,
+        claim,
+        profileId: profileId,
+      );
+    } catch (_) {
+      claim.close();
+      throw StateError('Mock profile resume refused');
+    }
+  }
+
+  static void _requireProfileFiles(Directory root) {
+    if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+            FileSystemEntityType.directory ||
+        root.resolveSymbolicLinksSync() != root.path) {
+      throw StateError('Refusing an unowned mock profile');
+    }
+    for (final name in ['owner', 'profile.json', 'wired_parts.sqlite']) {
+      if (FileSystemEntity.typeSync('${root.path}/$name', followLinks: false) !=
+          FileSystemEntityType.file) {
+        throw StateError('Mock profile initialization is incomplete');
+      }
+    }
+    for (final entry in root.listSync(recursive: true, followLinks: false)) {
+      if (FileSystemEntity.typeSync(entry.path, followLinks: false) ==
+              FileSystemEntityType.link ||
+          !p.isWithin(root.path, entry.resolveSymbolicLinksSync())) {
+        throw StateError('Refusing a redirected mock profile');
+      }
+    }
+    if (File('${root.path}/owner').readAsStringSync() != _owner) {
+      throw StateError('Refusing an unowned mock profile');
+    }
+  }
+
+  static Future<void> _preflightProfile(
+    Directory root,
+    MockShopFixture fixture,
+    String deviceId,
+  ) async {
+    final sqlite = raw.sqlite3.open(
+      '${root.path}/wired_parts.sqlite',
+      mode: raw.OpenMode.readOnly,
+    );
+    final model = AppDatabase.forTesting(
+      NativeDatabase.opened(
+        sqlite,
+        enableMigrations: false,
+        closeUnderlyingOnClose: false,
+      ),
+    );
+    try {
+      sqlite.execute('BEGIN');
+      if (sqlite.select('PRAGMA user_version').single.values.single !=
+              kAppSchemaVersion ||
+          sqlite.select('PRAGMA integrity_check').single.values.single !=
+              'ok' ||
+          sqlite.select('PRAGMA foreign_key_check').isNotEmpty) {
+        throw StateError('Invalid mock profile database');
+      }
+      final expected = model.allTables.map((t) => t.actualTableName).toSet();
+      final tables = sqlite
+          .select(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%'",
+          )
+          .map((r) => r['name'])
+          .toSet();
+      if (tables.length != expected.length ||
+          !tables.containsAll(expected) ||
+          sqlite
+              .select(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type IN ('trigger', 'view') LIMIT 1",
+              )
+              .isNotEmpty) {
+        throw StateError('Unsupported mock profile schema');
+      }
+      for (final table in model.allTables) {
+        final columns = sqlite
+            .select('PRAGMA table_info("${table.actualTableName}")')
+            .map((r) => r['name'])
+            .toSet();
+        final required = table.$columns.map((c) => c.name).toSet();
+        if (columns.length != required.length ||
+            !columns.containsAll(required)) {
+          throw StateError('Unsupported mock profile columns');
+        }
+      }
+      final devices = sqlite.select('SELECT id FROM device_profiles');
+      final settings = {
+        for (final r in sqlite.select('SELECT key, value FROM app_settings'))
+          r['key']: r['value'],
+      };
+      if (devices.length != 1 ||
+          devices.single['id'] != deviceId ||
+          settings[_marker] != fixture.sha256Value ||
+          settings['editor_pin_hash'] is! String ||
+          !RegExp(r'^[0-9a-f]{32}:[0-9a-f]{64}$')
+              .hasMatch(settings['editor_pin_hash'] as String) ||
+          settings.containsKey(kInstallationBindingKey)) {
+        throw StateError('Mock profile security state does not match');
+      }
+      for (final table in companyMarkerTables) {
+        if (sqlite.select('SELECT 1 FROM "$table" LIMIT 1').isNotEmpty) {
+          throw StateError('Company stores cannot resume as local mock shops');
+        }
+      }
+      const references = [
+        ('styles', 'category_id', 'categories'),
+        ('types', 'style_id', 'styles'),
+        ('parts', 'category_id', 'categories'),
+        ('parts', 'style_id', 'styles'),
+        ('parts', 'type_id', 'types'),
+        ('parts', 'default_supplier_id', 'suppliers'),
+        ('brand_versions', 'part_id', 'parts'),
+        ('brand_versions', 'brand_id', 'brands'),
+        ('supplier_listings', 'brand_version_id', 'brand_versions'),
+        ('supplier_listings', 'supplier_id', 'suppliers'),
+        ('job_lines', 'job_id', 'jobs'),
+        ('job_lines', 'part_id', 'parts'),
+        ('job_lines', 'brand_version_id', 'brand_versions'),
+        ('order_splits', 'job_line_id', 'job_lines'),
+        ('order_splits', 'supplier_id', 'suppliers'),
+      ];
+      for (final (table, column, parent) in references) {
+        if (sqlite
+            .select(
+              'SELECT 1 FROM "$table" child '
+              'LEFT JOIN "$parent" parent ON child."$column" = parent.id '
+              'WHERE child."$column" IS NOT NULL AND parent.id IS NULL LIMIT 1',
+            )
+            .isNotEmpty) {
+          throw StateError('Invalid mock profile relationship');
+        }
+      }
+      if (sqlite
+          .select(
+            'SELECT 1 FROM job_lines line '
+            'JOIN brand_versions version ON line.brand_version_id = version.id '
+            'WHERE line.part_id IS NULL OR line.part_id != version.part_id LIMIT 1',
+          )
+          .isNotEmpty) {
+        throw StateError('Mock line variant belongs to another part');
+      }
+      await validateWarehouseStore(model);
+    } finally {
+      try {
+        await model.close();
+      } finally {
+        sqlite.dispose();
+      }
+    }
   }
 
   void _requireOwned() {
@@ -120,11 +413,17 @@ final class MockLocalWorkspace {
     }
   }
 
-  Future<void> unlock() => pin.unlock(_secret).then((ok) {
-    if (!ok) throw StateError('Synthetic editor unlock failed');
-  });
+  Future<void> unlock() async {
+    final secret = _secret;
+    if (secret == null || !await pin.unlock(secret)) {
+      throw StateError('Synthetic editor requires supported PIN unlock');
+    }
+  }
 
   Future<void> reopen() async {
+    if (profileId != null) {
+      throw StateError('Named mock profiles require close and explicit resume');
+    }
     _requireOwned();
     await db.close();
     _db = AppDatabase.forTesting(NativeDatabase(databaseFile));
@@ -132,25 +431,34 @@ final class MockLocalWorkspace {
       throw StateError('Mock workspace device identity changed');
     }
     _pin = PinService(db.settingsDao);
-    await unlock();
+    if (_secret != null) await unlock();
   }
 
   Future<void> close({bool retainForInspection = false}) async {
     if (_closed) return;
-    _requireOwned();
-    await db.close();
-    _closed = true;
-    if (!retainForInspection) await root.delete(recursive: true);
+    try {
+      await db.close();
+      if (profileId == null && !retainForInspection) {
+        _requireOwned();
+        await root.delete(recursive: true);
+      }
+    } finally {
+      _closed = true;
+      _claim?.close();
+    }
   }
 
   Future<MockImportReceipt> import(
     MockShopFixture fixture, {
     Future<void> Function()? beforeCommit,
   }) async {
+    if (profileId != null && fixture.sha256Value != mockShopFixtureSha256) {
+      throw StateError('Mock profile requires the frozen fixture');
+    }
     _requireOwned();
     await pin.requireUnlocked();
     final projection = _project(fixture);
-    return legacyBusinessWrite(db, () async {
+    final receipt = await legacyBusinessWrite(db, () async {
       await pin.requireUnlocked();
       final prior = await db.settingsDao.getSetting(_marker);
       final actual = await _readRows();
@@ -214,6 +522,24 @@ final class MockLocalWorkspace {
         unchanged: false,
       );
     });
+    if (profileId != null) {
+      final binding = File('${root.path}/profile.json');
+      if (!binding.existsSync()) {
+        await binding.create(exclusive: true);
+        await binding.writeAsString(
+          jsonEncode({
+            'format': 1,
+            'profile_id': profileId,
+            'root': root.resolveSymbolicLinksSync(),
+            'fixture_sha256': fixture.sha256Value,
+            'schema_version': kAppSchemaVersion,
+            'device_id': deviceId,
+          }),
+          flush: true,
+        );
+      }
+    }
+    return receipt;
   }
 
   Future<Map<String, List<Map<String, Object?>>>> _readRows() async => {
