@@ -105,6 +105,51 @@ void main() {
     }
   }
 
+  Future<({MockLocalWorkspace workspace, String partId, String legacyDeviceId})>
+  createWithPartDeviceLink({String? orphanColumn}) async {
+    final workspace = await create();
+    final partId =
+        (await workspace.db.select(workspace.db.parts).get()).first.id;
+    const legacyDeviceId = 'resume-legacy-device';
+    final originDeviceId = workspace.deviceId;
+    final timestamp = fixture.asOf.millisecondsSinceEpoch ~/ 1000;
+    await workspace.close();
+    _mutateDatabase(workspace.databaseFile, (db) {
+      db.execute(
+        'INSERT INTO devices '
+        '(id, origin_device_id, created_at, modified_at, revision, name) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          legacyDeviceId,
+          originDeviceId,
+          timestamp,
+          timestamp,
+          1,
+          'Synthetic legacy device',
+        ],
+      );
+      db.execute(
+        'INSERT INTO part_devices '
+        '(id, origin_device_id, created_at, modified_at, revision, part_id, device_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          'resume-part-device-link',
+          originDeviceId,
+          timestamp,
+          timestamp,
+          1,
+          orphanColumn == 'part_id' ? 'missing-reference' : partId,
+          orphanColumn == 'device_id' ? 'missing-reference' : legacyDeviceId,
+        ],
+      );
+    });
+    return (
+      workspace: workspace,
+      partId: partId,
+      legacyDeviceId: legacyDeviceId,
+    );
+  }
+
   setUpAll(() {
     fixture = MockShopFixture.read(Directory('test/fixtures/mock_shop'));
   });
@@ -557,6 +602,27 @@ void main() {
       }
     },
   );
+
+  for (final column in ['part_id', 'device_id']) {
+    test('dangling part_devices.$column refuses without writes', () async {
+      final seeded = await createWithPartDeviceLink(orphanColumn: column);
+      await expectRefused(profileFor[seeded.workspace]!);
+    });
+  }
+
+  test('valid legacy part-device link survives locked resume', () async {
+    final seeded = await createWithPartDeviceLink();
+    final restored = await resume(profileFor[seeded.workspace]!);
+    expect(restored.pin.isUnlocked, isFalse);
+    final links = await restored.db
+        .customSelect('SELECT part_id, device_id FROM part_devices')
+        .get();
+    expect(links, hasLength(1));
+    expect(links.single.data, {
+      'part_id': seeded.partId,
+      'device_id': seeded.legacyDeviceId,
+    });
+  });
 
   test('corrupt database refuses without rewriting the file', () async {
     final workspace = await create();
