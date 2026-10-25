@@ -236,7 +236,7 @@ private final class NearbyLocalTcpDiagnostic {
     parameters.requiredInterfaceType = .wifi
     parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(target.sourceAddress), port: .any)
     parameters.includePeerToPeer = false
-    connection = NWConnection(host: NWEndpoint.Host(target.address), port: NWEndpoint.Port(rawValue: target.port)!, parameters: parameters)
+    connection = NWConnection(host: NWEndpoint.Host(target.address), port: NWEndpoint.Port(rawValue: target.port)!, using: parameters)
   }
 
   func start() {
@@ -290,7 +290,7 @@ private final class NearbyLocalTcpDiagnostic {
       case .posix(let value): domain = "posix"; code = Int(value.rawValue)
       case .dns(let value): domain = "dns"; code = Int(value)
       case .tls(let value): domain = "tls"; code = Int(value)
-      @unknown default: domain = "other"
+      default: domain = "other"
       }
     }
     let signature = "\(state):\(status):\(reason):\(domain):\(code)"
