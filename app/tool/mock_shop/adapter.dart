@@ -360,6 +360,8 @@ final class MockLocalWorkspace {
         ('parts', 'style_id', 'styles'),
         ('parts', 'type_id', 'types'),
         ('parts', 'default_supplier_id', 'suppliers'),
+        ('part_devices', 'part_id', 'parts'),
+        ('part_devices', 'device_id', 'devices'),
         ('brand_versions', 'part_id', 'parts'),
         ('brand_versions', 'brand_id', 'brands'),
         ('supplier_listings', 'brand_version_id', 'brand_versions'),
