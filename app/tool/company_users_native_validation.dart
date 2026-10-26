@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:uuid/uuid.dart';
@@ -49,6 +50,7 @@ Future<void> main() async {
   InstallationReadiness? readiness;
   InstallationSecurity? startedInstallation;
   CompanyUserTransportReceipts? acquiredTransport;
+  final observedStore = ObservedCompanyUserNativeStore();
   late final ValidationRole role;
   try {
     role = _validateStartupArguments();
@@ -94,6 +96,7 @@ Future<void> main() async {
     acquiredTransport = transport;
     final app = await validationApplication(
       workspace,
+      installationStore: observedStore,
       createCompanyJoinController: transport.createController,
       onStartupStage: (current, observedReadiness) {
         stage = switch (current) {
@@ -236,6 +239,7 @@ Future<void> main() async {
     final failure = CompanyUserStartupFailure(
       stage,
       startedInstallation?.readiness ?? readiness,
+      nativeFailure: observedStore.firstFailure,
     );
     await finishCompanyUserStartupFailure(
       failure: failure,
@@ -280,10 +284,160 @@ enum CompanyUserStartupCategory {
   installationIdentityMissing,
 }
 
+enum CompanyUserNativeOperation { readState, compareAndSwapState }
+
+enum CompanyUserNativeDomain { keychain, posix, platform }
+
+enum CompanyUserNativeReason {
+  interactionNotAllowed,
+  missingEntitlement,
+  notAvailable,
+  authFailed,
+  ioFailure,
+  permissionDenied,
+  busy,
+  unknown,
+}
+
+final class CompanyUserNativeFailure {
+  const CompanyUserNativeFailure(this.operation, this.domain, this.reason);
+  final CompanyUserNativeOperation operation;
+  final CompanyUserNativeDomain domain;
+  final CompanyUserNativeReason reason;
+
+  Map<String, String> toJson() => {
+    'operation': operation.name,
+    'domain': domain.name,
+    'reason': reason.name,
+  };
+}
+
+/// Observes existing native failures without changing calls, results or errors.
+final class ObservedCompanyUserNativeStore
+    extends NativeInstallationSecureStore {
+  ObservedCompanyUserNativeStore({
+    this._delegate = const NativeInstallationSecureStore(),
+    bool? macOS,
+  }) : _macOS = macOS ?? Platform.isMacOS;
+
+  final NativeInstallationSecureStore _delegate;
+  final bool _macOS;
+  bool _observedFailure = false;
+  CompanyUserNativeFailure? _firstFailure;
+  CompanyUserNativeFailure? get firstFailure => _firstFailure;
+
+  @override
+  Future<ProtectedInstallationState?> readState(String namespace) async {
+    try {
+      return await _delegate.readState(namespace);
+    } on PlatformException catch (error) {
+      try {
+        _observe(CompanyUserNativeOperation.readState, error);
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  @override
+  Future<String> compareAndSwapState(
+    String namespace, {
+    required String? expectedRevision,
+    required String nextRevision,
+    required Uint8List bytes,
+  }) async {
+    try {
+      return await _delegate.compareAndSwapState(
+        namespace,
+        expectedRevision: expectedRevision,
+        nextRevision: nextRevision,
+        bytes: bytes,
+      );
+    } on PlatformException catch (error) {
+      try {
+        _observe(CompanyUserNativeOperation.compareAndSwapState, error);
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  void _observe(CompanyUserNativeOperation operation, PlatformException error) {
+    if (_observedFailure) {
+      return;
+    }
+    _observedFailure = true;
+    var failure = CompanyUserNativeFailure(
+      operation,
+      CompanyUserNativeDomain.platform,
+      CompanyUserNativeReason.unknown,
+    );
+    try {
+      failure = _classify(operation, error);
+    } catch (_) {}
+    _firstFailure = failure;
+  }
+
+  CompanyUserNativeFailure _classify(
+    CompanyUserNativeOperation operation,
+    PlatformException error,
+  ) {
+    final unknown = CompanyUserNativeFailure(
+      operation,
+      CompanyUserNativeDomain.platform,
+      CompanyUserNativeReason.unknown,
+    );
+    final details = error.details;
+    if (!_macOS ||
+        error.code != 'installation_unavailable' ||
+        details is! Map ||
+        details.length != 1) {
+      return unknown;
+    }
+    final key = details.keys.single;
+    final value = details[key];
+    if (value is! int || value < -2147483648 || value > 2147483647) {
+      return unknown;
+    }
+    // Definitions, not observed causes: Apple's Security/base/SecBase.h and
+    // xnu/bsd/sys/errno.h. Numeric values never leave this classifier.
+    if (key == 'osStatus') {
+      return CompanyUserNativeFailure(
+        operation,
+        CompanyUserNativeDomain.keychain,
+        switch (value) {
+          -25308 => CompanyUserNativeReason.interactionNotAllowed,
+          -34018 => CompanyUserNativeReason.missingEntitlement,
+          -25291 => CompanyUserNativeReason.notAvailable,
+          -25293 => CompanyUserNativeReason.authFailed,
+          -36 => CompanyUserNativeReason.ioFailure,
+          _ => CompanyUserNativeReason.unknown,
+        },
+      );
+    }
+    if (key == 'errno') {
+      return CompanyUserNativeFailure(
+        operation,
+        CompanyUserNativeDomain.posix,
+        switch (value) {
+          1 || 13 => CompanyUserNativeReason.permissionDenied,
+          5 => CompanyUserNativeReason.ioFailure,
+          16 => CompanyUserNativeReason.busy,
+          _ => CompanyUserNativeReason.unknown,
+        },
+      );
+    }
+    return unknown;
+  }
+}
+
 final class CompanyUserStartupFailure {
-  const CompanyUserStartupFailure(this.stage, this.readiness);
+  const CompanyUserStartupFailure(
+    this.stage,
+    this.readiness, {
+    this.nativeFailure,
+  });
   final CompanyUserStartupStage stage;
   final InstallationReadiness? readiness;
+  final CompanyUserNativeFailure? nativeFailure;
 
   CompanyUserStartupCategory get category => switch (readiness) {
     InstallationReadiness.unsupported =>
@@ -354,6 +508,8 @@ final class CompanyUserStartupFailureReporter {
         'stage': failure.stage.name,
         'category': failure.category.name,
         'installationReadiness': failure.readiness?.name ?? 'notObserved',
+        if (failure.nativeFailure case final native?)
+          'nativeFailure': native.toJson(),
       }),
     );
     if (bytes.length > maxBytes) {

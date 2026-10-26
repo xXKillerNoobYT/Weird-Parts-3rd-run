@@ -79,6 +79,8 @@ enum ValidationApplicationStage {
 Future<WiredPartsApp> validationApplication(
   ValidationWorkspace workspace, {
   NearbyController Function(String encounterAlias)? createCompanyJoinController,
+  NativeInstallationSecureStore installationStore =
+      const NativeInstallationSecureStore(),
   void Function(ValidationApplicationStage, InstallationReadiness?)?
   onStartupStage,
 }) async {
@@ -92,7 +94,7 @@ Future<WiredPartsApp> validationApplication(
   try {
     onStartupStage?.call(ValidationApplicationStage.protectedStore, null);
     final installation = InstallationSecurity(
-      store: const NativeInstallationSecureStore(),
+      store: installationStore,
       namespace: namespace,
     );
     await installation.start(db);

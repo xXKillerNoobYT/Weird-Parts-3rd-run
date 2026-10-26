@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,6 +16,58 @@ import 'package:wired_parts/features/installation/installation_security.dart';
 import '../../tool/company_users_native_validation.dart';
 import '../../tool/nearby_lan_validation.dart';
 import '../../tool/nearby_lan_workspace.dart';
+
+final class _NativeDelegate extends NativeInstallationSecureStore {
+  Object? failure;
+  ProtectedInstallationState? state;
+  String resultRevision = 'unchanged-public-revision';
+  String? namespace, expectedRevision, nextRevision;
+  Uint8List? bytes;
+  int reads = 0, writes = 0;
+
+  @override
+  Future<ProtectedInstallationState?> readState(String namespace) async {
+    reads++;
+    this.namespace = namespace;
+    if (failure case final error?) {
+      throw error;
+    }
+    return state;
+  }
+
+  @override
+  Future<String> compareAndSwapState(
+    String namespace, {
+    required String? expectedRevision,
+    required String nextRevision,
+    required Uint8List bytes,
+  }) async {
+    writes++;
+    this.namespace = namespace;
+    this.expectedRevision = expectedRevision;
+    this.nextRevision = nextRevision;
+    this.bytes = bytes;
+    if (failure case final error?) {
+      throw error;
+    }
+    return resultRevision;
+  }
+}
+
+final class _ThrowingDetails extends MapBase<Object?, Object?> {
+  @override
+  Iterable<Object?> get keys => throw StateError('unexportable-test-value');
+  @override
+  Object? operator [](Object? key) =>
+      throw StateError('unexportable-test-value');
+  @override
+  void operator []=(Object? key, Object? value) =>
+      throw UnsupportedError('write');
+  @override
+  void clear() => throw UnsupportedError('clear');
+  @override
+  Object? remove(Object? key) => throw UnsupportedError('remove');
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -77,6 +130,7 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       var reads = 0;
+      final observedStore = ObservedCompanyUserNativeStore(macOS: true);
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       messenger.setMockMethodCallHandler(channel, (call) async {
         reads++;
@@ -84,7 +138,7 @@ void main() {
         throw PlatformException(
           code: 'installation_unavailable',
           message: 'unexportable-test-value',
-          details: {'osStatus': -25308, 'private': 'unexportable-test-value'},
+          details: {'osStatus': -25308},
         );
       });
       try {
@@ -106,6 +160,7 @@ void main() {
           try {
             returned = await validationApplication(
               workspace,
+              installationStore: observedStore,
               onStartupStage: (current, observed) {
                 stage = current;
                 readiness = observed;
@@ -133,6 +188,7 @@ void main() {
             failure: CompanyUserStartupFailure(
               CompanyUserStartupStage.protectedStore,
               readiness,
+              nativeFailure: observedStore.firstFailure,
             ),
             workspace: workspace,
             reporter: reporter(),
@@ -145,6 +201,11 @@ void main() {
             .single;
         final text = receiptFile.readAsStringSync();
         final receipt = jsonDecode(text) as Map;
+        expect(receipt['nativeFailure'], {
+          'operation': 'readState',
+          'domain': 'keychain',
+          'reason': 'interactionNotAllowed',
+        });
         expect(receipt.keys.toSet(), {
           'kind',
           'passed',
@@ -157,6 +218,7 @@ void main() {
           'stage',
           'category',
           'installationReadiness',
+          'nativeFailure',
         });
         expect(receipt['kind'], 'company-user-startup-failure@1');
         expect(receipt['passed'], isFalse);
@@ -253,6 +315,99 @@ void main() {
       }
     },
   );
+
+  testWidgets('native CAS failure is classified before startup swallows it', (
+    tester,
+  ) async {
+    final workspace = owned();
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    final previousPaths = PathProviderPlatform.instance;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final file = File(p.join(workspace.support.path, 'wired_parts.sqlite'));
+    var reads = 0, writes = 0;
+    final observed = ObservedCompanyUserNativeStore(macOS: true);
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    PathProviderPlatform.instance = workspace;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'readState') {
+        reads++;
+        return null;
+      }
+      expect(call.method, 'compareAndSwapState');
+      writes++;
+      throw PlatformException(
+        code: 'installation_unavailable',
+        message: 'unexportable-test-value',
+        details: {'osStatus': -34018},
+      );
+    });
+    WiredPartsApp? returned;
+    Object? failure;
+    InstallationReadiness? readiness;
+    try {
+      await tester.runAsync(() async {
+        final seed = AppDatabase();
+        expect(
+          await seed.customSelect('SELECT id FROM device_profiles').get(),
+          isEmpty,
+        );
+        await seed.close();
+      });
+      final before = sha256.convert(file.readAsBytesSync()).toString();
+      await tester.runAsync(() async {
+        try {
+          returned = await validationApplication(
+            workspace,
+            installationStore: observed,
+            onStartupStage: (_, value) {
+              readiness = value;
+            },
+          );
+        } catch (error) {
+          failure = error;
+        } finally {
+          await returned?.db.close();
+        }
+      });
+      expect(failure, isNotNull);
+      expect(reads, 1);
+      expect(writes, 1);
+      expect(readiness, InstallationReadiness.unavailable);
+      expect(observed.firstFailure!.toJson(), {
+        'operation': 'compareAndSwapState',
+        'domain': 'keychain',
+        'reason': 'missingEntitlement',
+      });
+      expect(sha256.convert(file.readAsBytesSync()).toString(), before);
+      final moved = file.renameSync('${file.path}.closed');
+      moved.renameSync(file.path);
+      expect(
+        await finishCompanyUserStartupFailure(
+          failure: CompanyUserStartupFailure(
+            CompanyUserStartupStage.protectedStore,
+            readiness,
+            nativeFailure: observed.firstFailure,
+          ),
+          workspace: workspace,
+          reporter: reporter(),
+        ),
+        isTrue,
+      );
+      final text = workspace.receipts
+          .listSync()
+          .whereType<File>()
+          .single
+          .readAsStringSync();
+      expect(text, isNot(contains('unexportable-test-value')));
+      expect(text, isNot(contains('-34018')));
+      expect(utf8.encode(text).length, lessThanOrEqualTo(1024));
+    } finally {
+      messenger.setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = previousPlatform;
+      PathProviderPlatform.instance = previousPaths;
+    }
+  });
 
   test('closed claim and invalid metadata cannot publish', () {
     final workspace = owned();
@@ -373,6 +528,203 @@ void main() {
       reopened.close();
     },
   );
+
+  test(
+    'native observer delegates successful arguments and results unchanged',
+    () async {
+      final delegate = _NativeDelegate()
+        ..state = ProtectedInstallationState(
+          'public-revision',
+          Uint8List.fromList([1, 2]),
+        );
+      final store = ObservedCompanyUserNativeStore(
+        delegate: delegate,
+        macOS: true,
+      );
+      const namespace = 'synthetic.lan.receiver.test';
+      expect(await store.readState(namespace), same(delegate.state));
+      expect(delegate.namespace, same(namespace));
+      final bytes = Uint8List.fromList([3, 4]);
+      const expected = 'expected-public-revision',
+          next = 'next-public-revision';
+      expect(
+        await store.compareAndSwapState(
+          namespace,
+          expectedRevision: expected,
+          nextRevision: next,
+          bytes: bytes,
+        ),
+        same(delegate.resultRevision),
+      );
+      expect(delegate.namespace, same(namespace));
+      expect(delegate.expectedRevision, same(expected));
+      expect(delegate.nextRevision, same(next));
+      expect(delegate.bytes, same(bytes));
+      expect(delegate.reads, 1);
+      expect(delegate.writes, 1);
+      expect(store.firstFailure, isNull);
+    },
+  );
+
+  test(
+    'native observer preserves exact exceptions and first failure',
+    () async {
+      final first = PlatformException(
+        code: 'installation_unavailable',
+        details: {'errno': 5},
+      );
+      final second = PlatformException(
+        code: 'installation_unavailable',
+        details: {'osStatus': -34018},
+      );
+      final delegate = _NativeDelegate()..failure = first;
+      final store = ObservedCompanyUserNativeStore(
+        delegate: delegate,
+        macOS: true,
+      );
+      await expectLater(
+        store.readState('synthetic.lan.receiver.test'),
+        throwsA(same(first)),
+      );
+      final captured = store.firstFailure;
+      expect(captured!.toJson(), {
+        'operation': 'readState',
+        'domain': 'posix',
+        'reason': 'ioFailure',
+      });
+      delegate.failure = second;
+      final bytes = Uint8List.fromList([1]);
+      await expectLater(
+        store.compareAndSwapState(
+          'synthetic.lan.receiver.test',
+          expectedRevision: null,
+          nextRevision: 'public-revision',
+          bytes: bytes,
+        ),
+        throwsA(same(second)),
+      );
+      expect(delegate.bytes, same(bytes));
+      expect(delegate.writes, 1);
+      expect(store.firstFailure, same(captured));
+      final other = StateError('unchanged non-platform failure');
+      final unobserved = ObservedCompanyUserNativeStore(
+        delegate: _NativeDelegate()..failure = other,
+        macOS: true,
+      );
+      await expectLater(
+        unobserved.readState('synthetic.lan.receiver.test'),
+        throwsA(same(other)),
+      );
+      expect(unobserved.firstFailure, isNull);
+    },
+  );
+
+  test(
+    'Mac native definitions remain domain-specific for both operations',
+    () async {
+      final cases = <(String, int, String, String)>[
+        ('osStatus', -25308, 'keychain', 'interactionNotAllowed'),
+        ('osStatus', -34018, 'keychain', 'missingEntitlement'),
+        ('osStatus', -25291, 'keychain', 'notAvailable'),
+        ('osStatus', -25293, 'keychain', 'authFailed'),
+        ('osStatus', -36, 'keychain', 'ioFailure'),
+        ('errno', 1, 'posix', 'permissionDenied'),
+        ('errno', 13, 'posix', 'permissionDenied'),
+        ('errno', 5, 'posix', 'ioFailure'),
+        ('errno', 16, 'posix', 'busy'),
+        ('osStatus', 13, 'keychain', 'unknown'),
+        ('errno', -25308, 'posix', 'unknown'),
+        ('osStatus', -99999, 'keychain', 'unknown'),
+        ('errno', 99999, 'posix', 'unknown'),
+      ];
+      for (final operation in CompanyUserNativeOperation.values) {
+        for (final entry in cases) {
+          final error = PlatformException(
+            code: 'installation_unavailable',
+            message: 'unexportable-test-value',
+            details: {entry.$1: entry.$2},
+          );
+          final delegate = _NativeDelegate()..failure = error;
+          final store = ObservedCompanyUserNativeStore(
+            delegate: delegate,
+            macOS: true,
+          );
+          await expectLater(
+            operation == CompanyUserNativeOperation.readState
+                ? store.readState('synthetic.lan.receiver.test')
+                : store.compareAndSwapState(
+                    'synthetic.lan.receiver.test',
+                    expectedRevision: null,
+                    nextRevision: 'public-revision',
+                    bytes: Uint8List(0),
+                  ),
+            throwsA(same(error)),
+          );
+          expect(store.firstFailure!.toJson(), {
+            'operation': operation.name,
+            'domain': entry.$3,
+            'reason': entry.$4,
+          });
+        }
+      }
+    },
+  );
+
+  test('malformed details and observer errors stay unknown without replacing native error', () async {
+    final details = <Object?>[
+      null,
+      'unexportable-test-value',
+      {},
+      {'osStatus': '-25308'},
+      {'osStatus': true},
+      {'osStatus': -25308.0},
+      {'osStatus': -2147483649},
+      {'errno': 2147483648},
+      {'private': 'unexportable-test-value'},
+      {'osStatus': -25308, 'private': 'unexportable-test-value'},
+      {'osStatus': -25308, 'errno': 5},
+      _ThrowingDetails(),
+    ];
+    for (final value in details) {
+      final error = PlatformException(
+        code: 'installation_unavailable',
+        message: 'unexportable-test-value',
+        details: value,
+      );
+      final store = ObservedCompanyUserNativeStore(
+        delegate: _NativeDelegate()..failure = error,
+        macOS: true,
+      );
+      await expectLater(
+        store.readState('synthetic.lan.receiver.test'),
+        throwsA(same(error)),
+      );
+      expect(store.firstFailure!.toJson(), {
+        'operation': 'readState',
+        'domain': 'platform',
+        'reason': 'unknown',
+      });
+      final text = jsonEncode(store.firstFailure!.toJson());
+      expect(text, isNot(contains('unexportable-test-value')));
+      expect(text, isNot(contains('osStatus')));
+    }
+    for (final macOS in [false, true]) {
+      final error = PlatformException(
+        code: macOS ? 'unexpected-code' : 'installation_unavailable',
+        details: {'osStatus': -25308},
+      );
+      final store = ObservedCompanyUserNativeStore(
+        delegate: _NativeDelegate()..failure = error,
+        macOS: macOS,
+      );
+      await expectLater(
+        store.readState('synthetic.lan.receiver.test'),
+        throwsA(same(error)),
+      );
+      expect(store.firstFailure!.domain, CompanyUserNativeDomain.platform);
+      expect(store.firstFailure!.reason, CompanyUserNativeReason.unknown);
+    }
+  });
 
   test('fixed categories and one bounded attempt never expand error text', () {
     final workspace = owned();
