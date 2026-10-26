@@ -17,7 +17,10 @@ import 'package:wired_parts/features/nearby/nearby_discovery.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'nearby_lan_validation.dart'
-    show validationApplication, validationInstallationNamespace;
+    show
+        validationApplication,
+        validationInstallationNamespace,
+        ValidationApplicationStage;
 import 'nearby_lan_workspace.dart';
 import 'company_user_network_diagnostic.dart';
 
@@ -42,17 +45,28 @@ ValidationWorkspace? _heldWorkspace;
 AppDatabase? _openedDatabase;
 
 Future<void> main() async {
+  var stage = CompanyUserStartupStage.arguments;
+  InstallationReadiness? readiness;
+  InstallationSecurity? startedInstallation;
+  CompanyUserTransportReceipts? acquiredTransport;
   late final ValidationRole role;
   try {
     role = _validateStartupArguments();
   } catch (_) {
     stderr.writeln('Company user validation startup failed.');
+    stderr.writeln(
+      const CompanyUserStartupFailure(
+        CompanyUserStartupStage.arguments,
+        null,
+      ).summary,
+    );
     exit(1);
   }
-  WidgetsFlutterBinding.ensureInitialized();
-
   late final WiredPartsApp readyApp;
   try {
+    stage = CompanyUserStartupStage.binding;
+    WidgetsFlutterBinding.ensureInitialized();
+    stage = CompanyUserStartupStage.workspace;
     final namespace = validationInstallationNamespace(
       run: _run,
       roleName: _roleName,
@@ -77,16 +91,32 @@ Future<void> main() async {
       processId: pid,
       localNetworkDiagnostic: _networkDiagnostic,
     );
+    acquiredTransport = transport;
     final app = await validationApplication(
       workspace,
       createCompanyJoinController: transport.createController,
+      onStartupStage: (current, observedReadiness) {
+        stage = switch (current) {
+          ValidationApplicationStage.database =>
+            CompanyUserStartupStage.database,
+          ValidationApplicationStage.protectedStore =>
+            CompanyUserStartupStage.protectedStore,
+          ValidationApplicationStage.localDevice =>
+            CompanyUserStartupStage.localDevice,
+          ValidationApplicationStage.appConstruction =>
+            CompanyUserStartupStage.appConstruction,
+        };
+        readiness = observedReadiness;
+      },
     );
     _openedDatabase = app.db;
     final installation = app.installation;
+    startedInstallation = installation;
     if (installation == null || installation.identity == null) {
       throw StateError('installation setup unavailable');
     }
 
+    stage = CompanyUserStartupStage.companyReadback;
     CompanyIdentity? createdCompany;
     if (role == ValidationRole.sender && !workspace.initialized) {
       final enrollment = CompanyEnrollment(
@@ -187,6 +217,7 @@ Future<void> main() async {
           },
       },
     };
+    stage = CompanyUserStartupStage.receiptWrite;
     final receiptId = '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
     final file = File(
       p.join(
@@ -202,18 +233,178 @@ Future<void> main() async {
     debugPrint('Company user validation startup receipt written.');
     readyApp = app;
   } catch (_) {
-    try {
-      await _openedDatabase?.close();
-    } catch (_) {}
+    final failure = CompanyUserStartupFailure(
+      stage,
+      startedInstallation?.readiness ?? readiness,
+    );
+    await finishCompanyUserStartupFailure(
+      failure: failure,
+      workspace: _heldWorkspace,
+      reporter: CompanyUserStartupFailureReporter(
+        enabled: _enabled,
+        run: _run,
+        role: _roleName,
+        sourceRevision: _revision,
+        sourceTree: _tree,
+        processId: pid,
+      ),
+      closeTransport: acquiredTransport?.close,
+      closeDatabase: _openedDatabase?.close,
+    );
     _openedDatabase = null;
-    try {
-      _heldWorkspace?.close();
-    } catch (_) {}
     _heldWorkspace = null;
     stderr.writeln('Company user validation startup failed.');
+    stderr.writeln(failure.summary);
     exit(1);
   }
   runApp(readyApp);
+}
+
+enum CompanyUserStartupStage {
+  arguments,
+  binding,
+  workspace,
+  database,
+  protectedStore,
+  localDevice,
+  appConstruction,
+  companyReadback,
+  receiptWrite,
+}
+
+enum CompanyUserStartupCategory {
+  stageFailed,
+  installationUnsupported,
+  installationUnavailable,
+  installationRecoveryRequired,
+  installationIdentityMissing,
+}
+
+final class CompanyUserStartupFailure {
+  const CompanyUserStartupFailure(this.stage, this.readiness);
+  final CompanyUserStartupStage stage;
+  final InstallationReadiness? readiness;
+
+  CompanyUserStartupCategory get category => switch (readiness) {
+    InstallationReadiness.unsupported =>
+      CompanyUserStartupCategory.installationUnsupported,
+    InstallationReadiness.unavailable =>
+      CompanyUserStartupCategory.installationUnavailable,
+    InstallationReadiness.needsRecovery =>
+      CompanyUserStartupCategory.installationRecoveryRequired,
+    InstallationReadiness.ready
+        when stage == CompanyUserStartupStage.protectedStore =>
+      CompanyUserStartupCategory.installationIdentityMissing,
+    _ => CompanyUserStartupCategory.stageFailed,
+  };
+
+  String get summary =>
+      'stage=${stage.name} category=${category.name} readiness=${readiness?.name ?? 'notObserved'}';
+}
+
+/// One fixed-shape failure record; never serializes an exception or store value.
+final class CompanyUserStartupFailureReporter {
+  CompanyUserStartupFailureReporter({
+    required this.enabled,
+    required this.run,
+    required this.role,
+    required this.sourceRevision,
+    required this.sourceTree,
+    required this.processId,
+    DateTime? observation,
+  }) : observation = (observation ?? DateTime.now()).toUtc();
+
+  static const maxBytes = 1024;
+  final bool enabled;
+  final String run, role, sourceRevision, sourceTree;
+  final int processId;
+  final DateTime observation;
+  bool _attempted = false;
+
+  File publish(
+    ValidationWorkspace workspace,
+    CompanyUserStartupFailure failure,
+  ) {
+    if (_attempted) {
+      throw StateError('Startup failure receipt already attempted');
+    }
+    _attempted = true;
+    if (!enabled ||
+        !RegExp(r'^g2-users-\d{8}-[a-z0-9][a-z0-9-]{0,29}$').hasMatch(run) ||
+        run.length > 48 ||
+        !{'sender', 'receiver'}.contains(role) ||
+        workspace.run != run ||
+        workspace.role.name != role ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceRevision) ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceTree) ||
+        processId <= 0 ||
+        processId > 2147483647) {
+      throw StateError('Startup failure receipt refused');
+    }
+    final bytes = utf8.encode(
+      jsonEncode({
+        'kind': 'company-user-startup-failure@1',
+        'passed': false,
+        'run': run,
+        'role': role,
+        'sourceRevision': sourceRevision,
+        'sourceTree': sourceTree,
+        'pid': processId,
+        'observedUtc': observation.toIso8601String(),
+        'stage': failure.stage.name,
+        'category': failure.category.name,
+        'installationReadiness': failure.readiness?.name ?? 'notObserved',
+      }),
+    );
+    if (bytes.length > maxBytes) {
+      throw StateError('Startup failure receipt refused');
+    }
+    workspace.requireOwnedReceipts();
+    final file = File(
+      p.join(
+        workspace.receipts.path,
+        'company-user-startup-failure-$processId-${observation.microsecondsSinceEpoch}.json',
+      ),
+    );
+    if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      throw StateError('Startup failure receipt target occupied');
+    }
+    file.createSync(exclusive: true);
+    file.writeAsBytesSync(bytes, flush: true);
+    return file;
+  }
+}
+
+Future<bool> finishCompanyUserStartupFailure({
+  required CompanyUserStartupFailure failure,
+  required CompanyUserStartupFailureReporter reporter,
+  ValidationWorkspace? workspace,
+  Future<void> Function()? closeTransport,
+  Future<void> Function()? closeDatabase,
+}) async {
+  var published = false;
+  try {
+    if (workspace != null) {
+      reporter.publish(workspace, failure);
+      published = true;
+    }
+  } catch (_) {
+    // Publishing must never replace the original fixed failure classification.
+  }
+  try {
+    try {
+      await closeTransport?.call();
+    } catch (_) {}
+    try {
+      await closeDatabase?.call();
+    } catch (_) {}
+  } finally {
+    try {
+      workspace?.close();
+    } catch (_) {}
+  }
+  return published;
 }
 
 Future<Map<String, Object?>?> runCompanyUserDisabledApiProbe({
