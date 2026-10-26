@@ -22,7 +22,7 @@ void main() {
         (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
           'user_version',
         ),
-        12,
+        kAppSchemaVersion,
       );
     },
   );
@@ -39,6 +39,8 @@ void main() {
       final raw = sqlite.sqlite3.open(file.path);
       raw.execute('DROP TABLE warehouse_counts');
       raw.execute('DROP TABLE warehouse_locations');
+      raw.execute('DROP TABLE company_user_events');
+      raw.execute('DROP TABLE company_user_deliveries');
       raw.execute('PRAGMA user_version = 11');
       raw.dispose();
       final db = AppDatabase.forTesting(NativeDatabase(file));
@@ -46,7 +48,10 @@ void main() {
         expect(await db.select(db.warehouseCounts).get(), isEmpty);
         expect(await db.select(db.warehouseLocations).get(), isEmpty);
         for (final entry in before.entries) {
-          if (entry.key.startsWith('warehouse_')) continue;
+          if (entry.key.startsWith('warehouse_') ||
+              entry.key.startsWith('company_user_')) {
+            continue;
+          }
           expect(
             (await db
                     .customSelect('SELECT * FROM "${entry.key}" ORDER BY rowid')
@@ -61,7 +66,7 @@ void main() {
           (await db.customSelect('PRAGMA user_version').getSingle()).read<int>(
             'user_version',
           ),
-          12,
+          kAppSchemaVersion,
         );
       } finally {
         await db.close();
@@ -83,6 +88,8 @@ void main() {
       final raw = sqlite.sqlite3.open(file.path);
       raw.execute('DROP TABLE warehouse_counts');
       raw.execute('DROP TABLE warehouse_locations');
+      raw.execute('DROP TABLE company_user_events');
+      raw.execute('DROP TABLE company_user_deliveries');
       raw.execute('CREATE TABLE migration_blocker (id INTEGER)');
       raw.execute('CREATE INDEX warehouse_counts ON migration_blocker(id)');
       raw.execute('PRAGMA user_version = 11');

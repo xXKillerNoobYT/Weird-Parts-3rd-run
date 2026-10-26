@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:uuid/uuid.dart';
@@ -16,8 +18,12 @@ import 'package:wired_parts/features/nearby/nearby_discovery.dart';
 import 'package:wired_parts/features/nearby/nearby_protocol.dart';
 
 import 'nearby_lan_validation.dart'
-    show validationApplication, validationInstallationNamespace;
+    show
+        validationApplication,
+        validationInstallationNamespace,
+        ValidationApplicationStage;
 import 'nearby_lan_workspace.dart';
+import 'company_user_network_diagnostic.dart';
 
 const _enabled = bool.fromEnvironment('NATIVE_COMPANY_USER_VALIDATION');
 const _run = String.fromEnvironment('LAN_VALIDATION_RUN');
@@ -26,6 +32,9 @@ const _revision = String.fromEnvironment('COMPANY_USER_SOURCE_REVISION');
 const _tree = String.fromEnvironment('COMPANY_USER_SOURCE_TREE');
 const _disabledApiProbe = bool.fromEnvironment(
   'NATIVE_COMPANY_USER_DISABLED_API_PROBE',
+);
+const _networkDiagnostic = bool.fromEnvironment(
+  'NATIVE_COMPANY_USER_NETWORK_DIAGNOSTIC',
 );
 const _disabledApiProbeRun = 'g2-users-20261024-disable-a';
 const _disabledApiProbeUser = '8bca98b6-de9d-4816-ad4e-54290686f16c';
@@ -37,17 +46,29 @@ ValidationWorkspace? _heldWorkspace;
 AppDatabase? _openedDatabase;
 
 Future<void> main() async {
+  var stage = CompanyUserStartupStage.arguments;
+  InstallationReadiness? readiness;
+  InstallationSecurity? startedInstallation;
+  CompanyUserTransportReceipts? acquiredTransport;
+  final observedStore = ObservedCompanyUserNativeStore();
   late final ValidationRole role;
   try {
     role = _validateStartupArguments();
   } catch (_) {
     stderr.writeln('Company user validation startup failed.');
+    stderr.writeln(
+      const CompanyUserStartupFailure(
+        CompanyUserStartupStage.arguments,
+        null,
+      ).summary,
+    );
     exit(1);
   }
-  WidgetsFlutterBinding.ensureInitialized();
-
   late final WiredPartsApp readyApp;
   try {
+    stage = CompanyUserStartupStage.binding;
+    WidgetsFlutterBinding.ensureInitialized();
+    stage = CompanyUserStartupStage.workspace;
     final namespace = validationInstallationNamespace(
       run: _run,
       roleName: _roleName,
@@ -70,17 +91,35 @@ Future<void> main() async {
       sourceRevision: _revision,
       sourceTree: _tree,
       processId: pid,
+      localNetworkDiagnostic: _networkDiagnostic,
     );
+    acquiredTransport = transport;
     final app = await validationApplication(
       workspace,
+      installationStore: observedStore,
       createCompanyJoinController: transport.createController,
+      onStartupStage: (current, observedReadiness) {
+        stage = switch (current) {
+          ValidationApplicationStage.database =>
+            CompanyUserStartupStage.database,
+          ValidationApplicationStage.protectedStore =>
+            CompanyUserStartupStage.protectedStore,
+          ValidationApplicationStage.localDevice =>
+            CompanyUserStartupStage.localDevice,
+          ValidationApplicationStage.appConstruction =>
+            CompanyUserStartupStage.appConstruction,
+        };
+        readiness = observedReadiness;
+      },
     );
     _openedDatabase = app.db;
     final installation = app.installation;
+    startedInstallation = installation;
     if (installation == null || installation.identity == null) {
       throw StateError('installation setup unavailable');
     }
 
+    stage = CompanyUserStartupStage.companyReadback;
     CompanyIdentity? createdCompany;
     if (role == ValidationRole.sender && !workspace.initialized) {
       final enrollment = CompanyEnrollment(
@@ -118,7 +157,12 @@ Future<void> main() async {
     final trust = await installation.readCompanyTrust(app.db);
     final protectedUser = trust == null
         ? {'present': false, 'available': false}
-        : await _readProtectedUserProjection(enrollment, installation);
+        : await readCompanyUserValidationProjection(
+            enrollment,
+            installation,
+            run: _run,
+            roleName: _roleName,
+          );
     final identity = installation.identity!;
     final receipt = <String, Object?>{
       'kind': 'company-user-startup@1',
@@ -167,8 +211,16 @@ Future<void> main() async {
         'maxRecords': CompanyUserTransportReceipts.maxRecords,
         'maxRecordBytes': CompanyUserTransportReceipts.maxRecordBytes,
         'maxTotalBytes': CompanyUserTransportReceipts.maxTotalBytes,
+        if (_networkDiagnostic && Platform.isMacOS)
+          'localNetworkDiagnostic': {
+            'maxAttempts': 1,
+            'deadlineMillis': 10000,
+            'maxEvents': 8,
+            'scope': 'separate zero-payload app-context TCP diagnosis only',
+          },
       },
     };
+    stage = CompanyUserStartupStage.receiptWrite;
     final receiptId = '$pid-${DateTime.now().toUtc().microsecondsSinceEpoch}';
     final file = File(
       p.join(
@@ -184,18 +236,331 @@ Future<void> main() async {
     debugPrint('Company user validation startup receipt written.');
     readyApp = app;
   } catch (_) {
-    try {
-      await _openedDatabase?.close();
-    } catch (_) {}
+    final failure = CompanyUserStartupFailure(
+      stage,
+      startedInstallation?.readiness ?? readiness,
+      nativeFailure: observedStore.firstFailure,
+    );
+    await finishCompanyUserStartupFailure(
+      failure: failure,
+      workspace: _heldWorkspace,
+      reporter: CompanyUserStartupFailureReporter(
+        enabled: _enabled,
+        run: _run,
+        role: _roleName,
+        sourceRevision: _revision,
+        sourceTree: _tree,
+        processId: pid,
+      ),
+      closeTransport: acquiredTransport?.close,
+      closeDatabase: _openedDatabase?.close,
+    );
     _openedDatabase = null;
-    try {
-      _heldWorkspace?.close();
-    } catch (_) {}
     _heldWorkspace = null;
     stderr.writeln('Company user validation startup failed.');
+    stderr.writeln(failure.summary);
     exit(1);
   }
   runApp(readyApp);
+}
+
+enum CompanyUserStartupStage {
+  arguments,
+  binding,
+  workspace,
+  database,
+  protectedStore,
+  localDevice,
+  appConstruction,
+  companyReadback,
+  receiptWrite,
+}
+
+enum CompanyUserStartupCategory {
+  stageFailed,
+  installationUnsupported,
+  installationUnavailable,
+  installationRecoveryRequired,
+  installationIdentityMissing,
+}
+
+enum CompanyUserNativeOperation { readState, compareAndSwapState }
+
+enum CompanyUserNativeDomain { keychain, posix, platform }
+
+enum CompanyUserNativeReason {
+  interactionNotAllowed,
+  missingEntitlement,
+  notAvailable,
+  authFailed,
+  ioFailure,
+  permissionDenied,
+  busy,
+  unknown,
+}
+
+final class CompanyUserNativeFailure {
+  const CompanyUserNativeFailure(this.operation, this.domain, this.reason);
+  final CompanyUserNativeOperation operation;
+  final CompanyUserNativeDomain domain;
+  final CompanyUserNativeReason reason;
+
+  Map<String, String> toJson() => {
+    'operation': operation.name,
+    'domain': domain.name,
+    'reason': reason.name,
+  };
+}
+
+/// Observes existing native failures without changing calls, results or errors.
+final class ObservedCompanyUserNativeStore
+    extends NativeInstallationSecureStore {
+  ObservedCompanyUserNativeStore({
+    this._delegate = const NativeInstallationSecureStore(),
+    bool? macOS,
+  }) : _macOS = macOS ?? Platform.isMacOS;
+
+  final NativeInstallationSecureStore _delegate;
+  final bool _macOS;
+  bool _observedFailure = false;
+  CompanyUserNativeFailure? _firstFailure;
+  CompanyUserNativeFailure? get firstFailure => _firstFailure;
+
+  @override
+  Future<ProtectedInstallationState?> readState(String namespace) async {
+    try {
+      return await _delegate.readState(namespace);
+    } on PlatformException catch (error) {
+      try {
+        _observe(CompanyUserNativeOperation.readState, error);
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  @override
+  Future<String> compareAndSwapState(
+    String namespace, {
+    required String? expectedRevision,
+    required String nextRevision,
+    required Uint8List bytes,
+  }) async {
+    try {
+      return await _delegate.compareAndSwapState(
+        namespace,
+        expectedRevision: expectedRevision,
+        nextRevision: nextRevision,
+        bytes: bytes,
+      );
+    } on PlatformException catch (error) {
+      try {
+        _observe(CompanyUserNativeOperation.compareAndSwapState, error);
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  void _observe(CompanyUserNativeOperation operation, PlatformException error) {
+    if (_observedFailure) {
+      return;
+    }
+    _observedFailure = true;
+    var failure = CompanyUserNativeFailure(
+      operation,
+      CompanyUserNativeDomain.platform,
+      CompanyUserNativeReason.unknown,
+    );
+    try {
+      failure = _classify(operation, error);
+    } catch (_) {}
+    _firstFailure = failure;
+  }
+
+  CompanyUserNativeFailure _classify(
+    CompanyUserNativeOperation operation,
+    PlatformException error,
+  ) {
+    final unknown = CompanyUserNativeFailure(
+      operation,
+      CompanyUserNativeDomain.platform,
+      CompanyUserNativeReason.unknown,
+    );
+    final details = error.details;
+    if (!_macOS ||
+        error.code != 'installation_unavailable' ||
+        details is! Map ||
+        details.length != 1) {
+      return unknown;
+    }
+    final key = details.keys.single;
+    final value = details[key];
+    if (value is! int || value < -2147483648 || value > 2147483647) {
+      return unknown;
+    }
+    // Definitions, not observed causes: Apple's Security/base/SecBase.h and
+    // xnu/bsd/sys/errno.h. Numeric values never leave this classifier.
+    if (key == 'osStatus') {
+      return CompanyUserNativeFailure(
+        operation,
+        CompanyUserNativeDomain.keychain,
+        switch (value) {
+          -25308 => CompanyUserNativeReason.interactionNotAllowed,
+          -34018 => CompanyUserNativeReason.missingEntitlement,
+          -25291 => CompanyUserNativeReason.notAvailable,
+          -25293 => CompanyUserNativeReason.authFailed,
+          -36 => CompanyUserNativeReason.ioFailure,
+          _ => CompanyUserNativeReason.unknown,
+        },
+      );
+    }
+    if (key == 'errno') {
+      return CompanyUserNativeFailure(
+        operation,
+        CompanyUserNativeDomain.posix,
+        switch (value) {
+          1 || 13 => CompanyUserNativeReason.permissionDenied,
+          5 => CompanyUserNativeReason.ioFailure,
+          16 => CompanyUserNativeReason.busy,
+          _ => CompanyUserNativeReason.unknown,
+        },
+      );
+    }
+    return unknown;
+  }
+}
+
+final class CompanyUserStartupFailure {
+  const CompanyUserStartupFailure(
+    this.stage,
+    this.readiness, {
+    this.nativeFailure,
+  });
+  final CompanyUserStartupStage stage;
+  final InstallationReadiness? readiness;
+  final CompanyUserNativeFailure? nativeFailure;
+
+  CompanyUserStartupCategory get category => switch (readiness) {
+    InstallationReadiness.unsupported =>
+      CompanyUserStartupCategory.installationUnsupported,
+    InstallationReadiness.unavailable =>
+      CompanyUserStartupCategory.installationUnavailable,
+    InstallationReadiness.needsRecovery =>
+      CompanyUserStartupCategory.installationRecoveryRequired,
+    InstallationReadiness.ready
+        when stage == CompanyUserStartupStage.protectedStore =>
+      CompanyUserStartupCategory.installationIdentityMissing,
+    _ => CompanyUserStartupCategory.stageFailed,
+  };
+
+  String get summary =>
+      'stage=${stage.name} category=${category.name} readiness=${readiness?.name ?? 'notObserved'}';
+}
+
+/// One fixed-shape failure record; never serializes an exception or store value.
+final class CompanyUserStartupFailureReporter {
+  CompanyUserStartupFailureReporter({
+    required this.enabled,
+    required this.run,
+    required this.role,
+    required this.sourceRevision,
+    required this.sourceTree,
+    required this.processId,
+    DateTime? observation,
+  }) : observation = (observation ?? DateTime.now()).toUtc();
+
+  static const maxBytes = 1024;
+  final bool enabled;
+  final String run, role, sourceRevision, sourceTree;
+  final int processId;
+  final DateTime observation;
+  bool _attempted = false;
+
+  File publish(
+    ValidationWorkspace workspace,
+    CompanyUserStartupFailure failure,
+  ) {
+    if (_attempted) {
+      throw StateError('Startup failure receipt already attempted');
+    }
+    _attempted = true;
+    if (!enabled ||
+        !RegExp(r'^g2-users-\d{8}-[a-z0-9][a-z0-9-]{0,29}$').hasMatch(run) ||
+        run.length > 48 ||
+        !{'sender', 'receiver'}.contains(role) ||
+        workspace.run != run ||
+        workspace.role.name != role ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceRevision) ||
+        !RegExp(r'^[a-f0-9]{40}$').hasMatch(sourceTree) ||
+        processId <= 0 ||
+        processId > 2147483647) {
+      throw StateError('Startup failure receipt refused');
+    }
+    final bytes = utf8.encode(
+      jsonEncode({
+        'kind': 'company-user-startup-failure@1',
+        'passed': false,
+        'run': run,
+        'role': role,
+        'sourceRevision': sourceRevision,
+        'sourceTree': sourceTree,
+        'pid': processId,
+        'observedUtc': observation.toIso8601String(),
+        'stage': failure.stage.name,
+        'category': failure.category.name,
+        'installationReadiness': failure.readiness?.name ?? 'notObserved',
+        if (failure.nativeFailure case final native?)
+          'nativeFailure': native.toJson(),
+      }),
+    );
+    if (bytes.length > maxBytes) {
+      throw StateError('Startup failure receipt refused');
+    }
+    workspace.requireOwnedReceipts();
+    final file = File(
+      p.join(
+        workspace.receipts.path,
+        'company-user-startup-failure-$processId-${observation.microsecondsSinceEpoch}.json',
+      ),
+    );
+    if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      throw StateError('Startup failure receipt target occupied');
+    }
+    file.createSync(exclusive: true);
+    file.writeAsBytesSync(bytes, flush: true);
+    return file;
+  }
+}
+
+Future<bool> finishCompanyUserStartupFailure({
+  required CompanyUserStartupFailure failure,
+  required CompanyUserStartupFailureReporter reporter,
+  ValidationWorkspace? workspace,
+  Future<void> Function()? closeTransport,
+  Future<void> Function()? closeDatabase,
+}) async {
+  var published = false;
+  try {
+    if (workspace != null) {
+      reporter.publish(workspace, failure);
+      published = true;
+    }
+  } catch (_) {
+    // Publishing must never replace the original fixed failure classification.
+  }
+  try {
+    try {
+      await closeTransport?.call();
+    } catch (_) {}
+    try {
+      await closeDatabase?.call();
+    } catch (_) {}
+  } finally {
+    try {
+      workspace?.close();
+    } catch (_) {}
+  }
+  return published;
 }
 
 Future<Map<String, Object?>?> runCompanyUserDisabledApiProbe({
@@ -337,6 +702,7 @@ final class CompanyUserTransportReceipts {
     required String sourceRevision,
     required String sourceTree,
     required int processId,
+    bool localNetworkDiagnostic = false,
   }) : _metadata = Map.unmodifiable({
          'kind': 'company-user-transport@1',
          'passed': false,
@@ -362,6 +728,9 @@ final class CompanyUserTransportReceipts {
         processId > 2147483647) {
       throw ArgumentError('Invalid local transport measurement metadata');
     }
+    _networkDiagnostic = localNetworkDiagnostic && Platform.isMacOS
+        ? CompanyUserNetworkDiagnostic(enabled: true, run: run, record: _append)
+        : null;
   }
   static const maxRecords = 128;
   static const maxRecordBytes = 1024;
@@ -375,23 +744,41 @@ final class CompanyUserTransportReceipts {
   bool _closed = false;
   RandomAccessFile? _handle;
   Future<void>? _flushing;
+  late final CompanyUserNetworkDiagnostic? _networkDiagnostic;
   String get filePath => _file.path;
   int get capturedCount => _records.length;
 
-  NearbyController createController(String alias) => NearbyController(
-    deviceId: alias,
-    deviceName: 'Nearby ${alias.substring(0, 6)}',
-    discovery: LanNearbyDiscovery(),
-    companyJoin: true,
-    onTransportObservation: record,
-  );
+  NearbyController createController(String alias) {
+    final diagnostic = _networkDiagnostic;
+    if (diagnostic == null) {
+      return NearbyController(
+        deviceId: alias,
+        deviceName: 'Nearby ${alias.substring(0, 6)}',
+        discovery: LanNearbyDiscovery(),
+        companyJoin: true,
+        onTransportObservation: record,
+      );
+    }
+    int? controller;
+    return _DiagnosticNearbyController(
+      alias: alias,
+      observe: (event) {
+        controller ??= event.controller;
+        record(event);
+      },
+      cancel: () => diagnostic.cancelController(controller),
+    );
+  }
 
   void record(NearbyTransportObservation event) {
+    _networkDiagnostic?.observe(event);
+    _append(event.toJson());
+  }
+
+  void _append(Map<String, Object?> event) {
     if (_disabled || _closed || _records.length >= maxRecords) return;
     try {
-      final bytes = utf8.encode(
-        '${jsonEncode({..._metadata, ...event.toJson()})}\n',
-      );
+      final bytes = utf8.encode('${jsonEncode({..._metadata, ...event})}\n');
       if (bytes.length > maxRecordBytes ||
           _bytes + bytes.length > maxTotalBytes) {
         return;
@@ -446,11 +833,35 @@ final class CompanyUserTransportReceipts {
 
   Future<void> close() async {
     _closed = true;
+    await _networkDiagnostic?.close();
     await drain();
     try {
       await _handle?.close();
     } catch (_) {}
     _handle = null;
+  }
+}
+
+final class _DiagnosticNearbyController extends NearbyController {
+  _DiagnosticNearbyController({
+    required String alias,
+    required NearbyTransportObserver observe,
+    required this.cancel,
+  }) : super(
+         deviceId: alias,
+         deviceName: 'Nearby ${alias.substring(0, 6)}',
+         discovery: LanNearbyDiscovery(),
+         companyJoin: true,
+         onTransportObservation: observe,
+       );
+  final Future<void> Function() cancel;
+
+  @override
+  Future<void> stop({
+    NearbyTransportStopReason reason = NearbyTransportStopReason.requested,
+  }) {
+    unawaited(cancel());
+    return super.stop(reason: reason);
   }
 }
 
@@ -483,15 +894,18 @@ ValidationRole _validateStartupArguments() {
       : ValidationRole.receiver;
 }
 
-Future<Map<String, Object?>> _readProtectedUserProjection(
+Future<Map<String, Object?>> readCompanyUserValidationProjection(
   CompanyEnrollment enrollment,
-  InstallationSecurity installation,
-) async {
+  InstallationSecurity installation, {
+  required String run,
+  required String roleName,
+}) async {
   final namespace = validationInstallationNamespace(
-    run: _run,
-    roleName: _roleName,
+    run: run,
+    roleName: roleName,
   );
-  if (!namespace.startsWith('synthetic.lan.$_roleName.')) {
+  if (!namespace.startsWith('synthetic.lan.$roleName.') ||
+      namespace != installation.namespace) {
     return {'present': false, 'available': false};
   }
   final slot = companyUserNamespace(namespace);
@@ -527,10 +941,15 @@ Future<Map<String, Object?>> _readProtectedUserProjection(
       'available': choice.available,
       'disabled': lifecycle.disabled,
       'attemptsRemaining': lifecycle.attemptsRemaining,
-      'disableReceiptSaved': lifecycle.confirmed,
+      'disableReceiptSaved': lifecycle.disabled && lifecycle.confirmed,
+      'awaitingCredential': lifecycle.awaitingCredential,
+      'credentialReceiptSaved':
+          !lifecycle.disabled &&
+          lifecycle.credentialVersion > 1 &&
+          lifecycle.confirmed,
       'certificatePublic': {
         'userId': choice.userId,
-        'credentialVersion': 1,
+        'credentialVersion': lifecycle.credentialVersion,
         'permissionVersion': 1,
       },
     };

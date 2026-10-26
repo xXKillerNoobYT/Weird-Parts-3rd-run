@@ -27,6 +27,8 @@ void main() {
     'company_job_detail_peer_acks',
     'company_job_lifecycles',
     'company_job_lifecycle_peer_acks',
+    'company_user_events',
+    'company_user_deliveries',
   ]) {
     for (final malformed in ['missing', 'wrong columns']) {
       test(
@@ -220,6 +222,8 @@ void main() {
     ]) {
       await source.customStatement('DROP TABLE $table');
     }
+    await source.customStatement('DROP TABLE company_user_events');
+    await source.customStatement('DROP TABLE company_user_deliveries');
     await source.customStatement('PRAGMA user_version = 1');
     await source.close();
     final original = File(p.join(scenario.source.support.path, kSqliteFileName))

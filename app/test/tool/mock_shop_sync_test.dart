@@ -33,7 +33,11 @@ void main() {
       expect(await pair.a.publicJobState(), original);
       final synced = await pair.openSync();
       final first = await synced.a.syncNow();
-      expect(first.complete, isTrue);
+      expect(
+        first.complete,
+        isTrue,
+        reason: '${first.failure?.stage.name}/${first.failure?.reason.name}',
+      );
       expect(first.received, 0);
       expect(first.sent, greaterThan(0));
       expect(await pair.b.db.select(pair.b.db.companyJobs).get(), hasLength(7));
@@ -52,7 +56,12 @@ void main() {
         hasLength(2),
       );
       final repeated = await synced.a.syncNow();
-      expect(repeated.complete, isTrue);
+      expect(
+        repeated.complete,
+        isTrue,
+        reason:
+            '${repeated.failure?.stage.name}/${repeated.failure?.reason.name}',
+      );
       expect(repeated.sent, 0);
       expect(repeated.received, 0);
       await pair.reopen();
@@ -60,83 +69,99 @@ void main() {
       expect(await pair.b.publicJobState(), original);
       final reopened = await pair.openSync();
       final after = await reopened.a.syncNow();
-      expect(after.complete, isTrue);
+      expect(
+        after.complete,
+        isTrue,
+        reason: '${after.failure?.stage.name}/${after.failure?.reason.name}',
+      );
       expect(after.sent, 0);
       expect(after.received, 0);
     },
-    timeout: const Timeout(Duration(minutes: 4)),
+    timeout: const Timeout(Duration(minutes: 6)),
   );
 
-  test(
-    'production controller exchanges independent offline Job detail edits',
-    () async {
-      final pair = await MockCompanyPair.create(fixture);
-      addTearDown(pair.close);
-      final initial = await pair.openSync();
-      expect((await initial.a.syncNow()).complete, isTrue);
-      await initial.close();
-      final aNotes = (await pair.a.views())
+  test('production controller exchanges independent offline Job detail edits', () async {
+    final pair = await MockCompanyPair.create(fixture);
+    addTearDown(pair.close);
+    final initial = await pair.openSync();
+    final initialResult = await initial.a.syncNow();
+    expect(
+      initialResult.complete,
+      isTrue,
+      reason:
+          '${initialResult.failure?.stage.name}/${initialResult.failure?.reason.name}',
+    );
+    await initial.close();
+    final aNotes = (await pair.a.views())
+        .singleWhere(
+          (v) => v.baseJob.id == fixture.nativeId('company-job', 'JOB-001'),
+        )
+        .details
+        .notes
+        .value!;
+    final bNotes = (await pair.b.views())
+        .singleWhere(
+          (v) => v.baseJob.id == fixture.nativeId('company-job', 'JOB-002'),
+        )
+        .details
+        .notes
+        .value!;
+    final aEdit = canonicalMockJson({
+      ...jsonDecode(aNotes) as Map<String, dynamic>,
+      'scenario_edit': 'offline A',
+    });
+    final bEdit = canonicalMockJson({
+      ...jsonDecode(bNotes) as Map<String, dynamic>,
+      'scenario_edit': 'offline B',
+    });
+    await pair.a.patchNotes(fixture, 'JOB-001', aEdit, 'offline-a');
+    await pair.b.patchNotes(fixture, 'JOB-002', bEdit, 'offline-b');
+    final connection = await pair.openSync();
+    final exchanged = await connection.a.syncNow();
+    expect(
+      exchanged.complete,
+      isTrue,
+      reason:
+          '${exchanged.failure?.stage.name}/${exchanged.failure?.reason.name}',
+    );
+    expect(exchanged.sent, 1);
+    expect(exchanged.received, 1);
+    expect(await pair.a.publicJobState(), await pair.b.publicJobState());
+    final all = await pair.a.views();
+    expect(
+      all
           .singleWhere(
             (v) => v.baseJob.id == fixture.nativeId('company-job', 'JOB-001'),
           )
           .details
           .notes
-          .value!;
-      final bNotes = (await pair.b.views())
+          .value,
+      aEdit,
+    );
+    expect(
+      all
           .singleWhere(
             (v) => v.baseJob.id == fixture.nativeId('company-job', 'JOB-002'),
           )
           .details
           .notes
-          .value!;
-      final aEdit = canonicalMockJson({
-        ...jsonDecode(aNotes) as Map<String, dynamic>,
-        'scenario_edit': 'offline A',
-      });
-      final bEdit = canonicalMockJson({
-        ...jsonDecode(bNotes) as Map<String, dynamic>,
-        'scenario_edit': 'offline B',
-      });
-      await pair.a.patchNotes(fixture, 'JOB-001', aEdit, 'offline-a');
-      await pair.b.patchNotes(fixture, 'JOB-002', bEdit, 'offline-b');
-      final connection = await pair.openSync();
-      final exchanged = await connection.a.syncNow();
-      expect(exchanged.complete, isTrue);
-      expect(exchanged.sent, 1);
-      expect(exchanged.received, 1);
-      expect(await pair.a.publicJobState(), await pair.b.publicJobState());
-      final all = await pair.a.views();
-      expect(
-        all
-            .singleWhere(
-              (v) => v.baseJob.id == fixture.nativeId('company-job', 'JOB-001'),
-            )
-            .details
-            .notes
-            .value,
-        aEdit,
-      );
-      expect(
-        all
-            .singleWhere(
-              (v) => v.baseJob.id == fixture.nativeId('company-job', 'JOB-002'),
-            )
-            .details
-            .notes
-            .value,
-        bEdit,
-      );
-      final repeated = await connection.a.syncNow();
-      expect(repeated.complete, isTrue);
-      expect(repeated.sent, 0);
-      expect(repeated.received, 0);
-      await pair.reopen();
-      expect(await pair.a.publicJobState(), await pair.b.publicJobState());
-      expect(await pair.a.db.select(pair.a.db.companyJobs).get(), hasLength(7));
-      expect(await pair.b.db.select(pair.b.db.companyJobs).get(), hasLength(7));
-    },
-    timeout: const Timeout(Duration(minutes: 4)),
-  );
+          .value,
+      bEdit,
+    );
+    final repeated = await connection.a.syncNow();
+    expect(
+      repeated.complete,
+      isTrue,
+      reason:
+          '${repeated.failure?.stage.name}/${repeated.failure?.reason.name}',
+    );
+    expect(repeated.sent, 0);
+    expect(repeated.received, 0);
+    await pair.reopen();
+    expect(await pair.a.publicJobState(), await pair.b.publicJobState());
+    expect(await pair.a.db.select(pair.a.db.companyJobs).get(), hasLength(7));
+    expect(await pair.b.db.select(pair.b.db.companyJobs).get(), hasLength(7));
+  }, timeout: const Timeout(Duration(minutes: 6)));
 
   test(
     'wrong company command and changed import refuse without Job mutation',

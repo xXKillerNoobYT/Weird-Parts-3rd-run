@@ -31,6 +31,186 @@ Future<void> _wait(WidgetTester tester, Finder finder) async {
 
 void main() {
   testWidgets(
+    'ambiguous saved reset retains one immutable PIN choice until explicit new request',
+    (tester) async {
+      late JoinFixture f;
+      late String userId;
+      await tester.runAsync(() async {
+        f = await JoinFixture.create();
+        userId = (await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: 'Casey retry',
+          pin: '0123',
+        )).userId;
+        await f.aEnrollment.signOut();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CompanyBootstrapGate(db: f.aDb, installation: f.a),
+        ),
+      );
+      await _wait(tester, find.byKey(const Key('company-signin')));
+      await tester.enterText(
+        find.byKey(const Key('company-signin-pin')),
+        '1234',
+      );
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-signin'))),
+      );
+      await _wait(tester, find.textContaining('Company ID:'));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('company-reset-user')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _wait(tester, find.byKey(const Key('company-reset-user')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('company-reset-pin')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.enterText(
+        find.byKey(const Key('company-reset-pin')),
+        '4567',
+      );
+      await tester.runAsync(
+        () => f.aDb.customStatement(
+          "CREATE TRIGGER widget_projection_fault BEFORE INSERT ON company_user_events BEGIN SELECT RAISE(ABORT, 'synthetic projection fault'); END",
+        ),
+      );
+      await tester.ensureVisible(find.byKey(const Key('company-reset-user')));
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-reset-user'))),
+      );
+      await tester.pump();
+      await _wait(
+        tester,
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is OutlinedButton &&
+              widget.key == const Key('company-reset-user') &&
+              widget.onPressed != null,
+        ),
+      );
+      expect(
+        find.textContaining('This PIN replacement request is pending.'),
+        findsOneWidget,
+      );
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('company-reset-pin')),
+      );
+      expect(field.enabled, isFalse);
+      // Even programmatic controller edits cannot change an existing intent.
+      field.controller!.text = '6789';
+      await tester.runAsync(
+        () => f.aDb.customStatement('DROP TRIGGER widget_projection_fault'),
+      );
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-reset-user'))),
+      );
+      await _wait(
+        tester,
+        find.textContaining('Additional-user PIN replaced here.'),
+      );
+      await tester.runAsync(() async {
+        expect((await f.aDb.select(f.aDb.companyUserEvents).get()).length, 2);
+        await expectLater(
+          f.aEnrollment.signInUser(userId, '6789'),
+          throwsA(isA<CompanyBootstrapRefusal>()),
+        );
+        await f.aEnrollment.signInUser(userId, '4567');
+      });
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Owner replaces a forgotten PIN through Gate and user signs in with replacement offline',
+    (tester) async {
+      late JoinFixture f;
+      await tester.runAsync(() async {
+        f = await JoinFixture.create(allowOwnerAdditions: true);
+        await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: 'Casey UI',
+          pin: '0123',
+        );
+        await f.aEnrollment.signOut();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CompanyBootstrapGate(db: f.aDb, installation: f.a),
+        ),
+      );
+      await _wait(tester, find.byKey(const Key('company-signin')));
+      await tester.enterText(
+        find.byKey(const Key('company-signin-pin')),
+        '1234',
+      );
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-signin'))),
+      );
+      await _wait(tester, find.textContaining('Company ID:'));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('company-reset-user')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _wait(tester, find.byKey(const Key('company-reset-user')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('company-reset-pin')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.enterText(
+        find.byKey(const Key('company-reset-pin')),
+        '4567',
+      );
+      await tester.ensureVisible(find.byKey(const Key('company-reset-user')));
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-reset-user'))),
+      );
+      await _wait(
+        tester,
+        find.textContaining('Additional-user PIN replaced here.'),
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('company-switch-user')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-switch-user'))),
+      );
+      await _wait(tester, find.byKey(const Key('company-user-selector')));
+      await tester.tap(find.byKey(const Key('company-user-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Casey UI').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('company-signin-pin')),
+        '0123',
+      );
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-signin'))),
+      );
+      await _wait(tester, find.textContaining('User PIN refused'));
+      await tester.enterText(
+        find.byKey(const Key('company-signin-pin')),
+        '4567',
+      );
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-signin'))),
+      );
+      await _wait(tester, find.textContaining('Company ID:'));
+      expect(find.byKey(const Key('company-reset-user')), findsNothing);
+      expect(find.byKey(const Key('company-disable-user')), findsNothing);
+      expect(find.byKey(const Key('company-enroll-open')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
     'damaged additional-user policy does not lock the owner Job list',
     (tester) async {
       late JoinFixture f;

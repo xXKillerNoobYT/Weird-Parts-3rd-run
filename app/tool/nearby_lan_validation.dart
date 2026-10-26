@@ -69,23 +69,52 @@ String validationInstallationNamespace({
   return namespace;
 }
 
+enum ValidationApplicationStage {
+  database,
+  protectedStore,
+  localDevice,
+  appConstruction,
+}
+
 Future<WiredPartsApp> validationApplication(
   ValidationWorkspace workspace, {
   NearbyController Function(String encounterAlias)? createCompanyJoinController,
+  NativeInstallationSecureStore installationStore =
+      const NativeInstallationSecureStore(),
+  void Function(ValidationApplicationStage, InstallationReadiness?)?
+  onStartupStage,
 }) async {
   final namespace = validationInstallationNamespace(
     run: workspace.run,
     roleName: workspace.role.name,
   );
   PathProviderPlatform.instance = workspace;
+  onStartupStage?.call(ValidationApplicationStage.database, null);
   final db = AppDatabase();
   try {
+    onStartupStage?.call(ValidationApplicationStage.protectedStore, null);
     final installation = InstallationSecurity(
-      store: const NativeInstallationSecureStore(),
+      store: installationStore,
       namespace: namespace,
     );
     await installation.start(db);
+    onStartupStage?.call(
+      ValidationApplicationStage.protectedStore,
+      installation.readiness,
+    );
+    if (installation.readiness != InstallationReadiness.ready ||
+        installation.identity == null) {
+      throw StateError('Synthetic installation startup refused');
+    }
+    onStartupStage?.call(
+      ValidationApplicationStage.localDevice,
+      installation.readiness,
+    );
     final deviceId = await db.settingsDao.ensureDeviceId();
+    onStartupStage?.call(
+      ValidationApplicationStage.appConstruction,
+      installation.readiness,
+    );
     return WiredPartsApp(
       db: db,
       pin: PinService(db.settingsDao),
@@ -95,7 +124,9 @@ Future<WiredPartsApp> validationApplication(
       createCompanyJoinController: createCompanyJoinController,
     );
   } catch (_) {
-    await db.close();
+    try {
+      await db.close();
+    } catch (_) {}
     rethrow;
   }
 }

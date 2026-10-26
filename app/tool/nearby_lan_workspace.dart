@@ -21,6 +21,34 @@ class ValidationWorkspace extends PathProviderPlatform {
   Directory get receipts => Directory(p.join(root.path, 'receipts'));
   String get deviceId => 'lan-$run-${role.name}';
 
+  /// Diagnostic files require the same live claim as the synthetic workspace.
+  void requireOwnedReceipts() {
+    if (_heldLock == null ||
+        FileSystemEntity.typeSync(root.path, followLinks: false) !=
+            FileSystemEntityType.directory ||
+        root.resolveSymbolicLinksSync() != root.path ||
+        FileSystemEntity.typeSync(receipts.path, followLinks: false) !=
+            FileSystemEntityType.directory ||
+        receipts.resolveSymbolicLinksSync() != p.join(root.path, 'receipts')) {
+      throw StateError('Validation receipt ownership unavailable');
+    }
+    final marker = File(p.join(root.path, 'validation-owner.json'));
+    if (FileSystemEntity.typeSync(marker.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      throw StateError('Validation receipt ownership unavailable');
+    }
+    final owner = jsonDecode(marker.readAsStringSync());
+    if (owner is! Map ||
+        owner.length != 5 ||
+        owner['format'] != 1 ||
+        owner['run'] != run ||
+        owner['role'] != role.name ||
+        owner['root'] != root.path ||
+        owner['initialized'] is! bool) {
+      throw StateError('Validation receipt ownership unavailable');
+    }
+  }
+
   static ValidationWorkspace open({
     required String run,
     required ValidationRole role,

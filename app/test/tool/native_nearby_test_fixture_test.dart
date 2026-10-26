@@ -26,7 +26,12 @@ void main() {
     temp.deleteSync(recursive: true);
   });
 
-  for (final history in ['company_job_lifecycles', 'company_authority_facts']) {
+  for (final history in [
+    'company_job_lifecycles',
+    'company_authority_facts',
+    'company_user_events',
+    'company_user_deliveries',
+  ]) {
     test(
       'schema10 projection refuses nonempty $history without changing schema or rows',
       () async {
@@ -47,7 +52,11 @@ void main() {
           'VALUES (${columns.map((_) => '?').join(',')})',
           [
             for (final name in columns)
-              name == 'outgoing' ? 0 : 'synthetic-history',
+              name == 'outgoing'
+                  ? 0
+                  : name == 'sequence'
+                  ? 1
+                  : 'synthetic-history',
           ],
         );
         Future<Map<String, Object?>> snapshot() async {
@@ -92,7 +101,7 @@ void main() {
                 "SELECT name FROM sqlite_master WHERE type = 'table'",
               )
               .get(),
-          hasLength(36),
+          hasLength(38),
         );
       },
     );
@@ -166,7 +175,7 @@ void main() {
                 "SELECT name FROM sqlite_master WHERE type = 'table'",
               )
               .get(),
-          hasLength(36),
+          hasLength(38),
         );
       },
     );
@@ -537,7 +546,11 @@ void main() {
         'VALUES (${columns.map((_) => '?').join(',')})',
         [
           for (final name in columns)
-            name == 'admitted' || name == 'outgoing' ? 0 : 'synthetic-history',
+            name == 'admitted' || name == 'outgoing'
+                ? 0
+                : name == 'sequence'
+                ? 1
+                : 'synthetic-history',
         ],
       );
       await expectLater(

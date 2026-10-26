@@ -774,17 +774,17 @@ void main() {
           body['run'] as String,
           'profile.reply',
           {},
-          'company.job.sync@5',
+          'company.job.sync@6',
         );
       };
       final before = await sqlSnapshot(f.bDb);
       final result = await a.syncNow();
       expect(result.complete, isFalse);
       expect(disclosed, hasLength(1));
-      expect(disclosed.single['protocol'], 'company.job.sync@6');
+      expect(disclosed.single['protocol'], 'company.job.sync@7');
       expect(disclosed.single['action'], 'profile');
       expect(disclosed.single['data'], {
-        'profile': 'company.user.disable@1/job.create.authorization@4',
+        'profile': 'company.user.state@1/job.create.authorization@4',
       });
       expect(await sqlSnapshot(f.bDb), before);
       expect(
