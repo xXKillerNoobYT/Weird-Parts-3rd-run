@@ -729,11 +729,24 @@ void main() {
           peer: peers.a,
         );
         final beforeSql = await sqlSnapshot(f.aDb);
-        var accountReads = 0;
+        var finalDisclosureReadReached = false;
+        var disclosed = false;
         Future<void>? signingOut;
         f.aStore.beforeRead = (namespace) {
-          if (namespace == companyUserNamespace(f.a.namespace) &&
-              ++accountReads == 2) {
+          if (namespace != companyUserNamespace(f.a.namespace) ||
+              finalDisclosureReadReached) {
+            return null;
+          }
+          final raw =
+              jsonDecode(utf8.decode(f.aStore.states[namespace]!.bytes)) as Map;
+          final outgoing = raw['o'];
+          // The final disclosure read follows the durable outgoing intent.
+          // Earlier collection-validation reads must not trigger this fault.
+          if (outgoing is List &&
+              outgoing.length == 8 &&
+              outgoing[0] == 0 &&
+              outgoing[1] == request.requestId) {
+            finalDisclosureReadReached = true;
             if (loss == 'sign-out') {
               signingOut = f.aEnrollment.signOut();
               unawaited(signingOut!);
@@ -743,16 +756,17 @@ void main() {
           }
           return null;
         };
-        await expectLater(
-          f.aEnrollment.prepareUserProvision(
+        await expectLater(() async {
+          await f.aEnrollment.prepareUserProvision(
             owner: f.owner,
             peer: peers.a,
             request: request,
-          ),
-          throwsA(isA<CompanyBootstrapRefusal>()),
-        );
+          );
+          disclosed = true;
+        }(), throwsA(isA<CompanyBootstrapRefusal>()));
         await signingOut;
-        expect(accountReads, 2);
+        expect(finalDisclosureReadReached, isTrue);
+        expect(disclosed, isFalse);
         final saved = jsonDecode(
           utf8.decode(
             f.aStore.states[companyUserNamespace(f.a.namespace)]!.bytes,

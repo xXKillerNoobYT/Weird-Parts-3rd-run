@@ -261,25 +261,26 @@ void main() {
       throwsA(isA<CompanyBootstrapRefusal>()),
     );
     final recovered = await f.bEnrollment.signIn('1234');
-    final recoveredSecond = await f.bEnrollment.createRestrictedUser(
-      owner: recovered,
-      requestId: const Uuid().v4(),
-      name: 'Independent recovered builder',
-      pin: '4567',
-    );
-    expect(recoveredSecond.userId, isNot(user.userId));
-    expect(f.bStore.states[bSlot]!.revision, terminal.revision);
-    final recoveredFull = Map.of(f.bStore.states);
+    final foreignProtected = Map.of(f.bStore.states);
+    final foreignSql = await sqlSnapshot(f.bDb);
+    // A copied terminal record still belongs to A's installation. Its occupied
+    // locator fences the whole collection rather than becoming free capacity.
     await expectLater(
       f.bEnrollment.createRestrictedUser(
         owner: recovered,
         requestId: const Uuid().v4(),
-        name: 'Third recovered builder',
-        pin: '6789',
+        name: 'Independent recovered builder',
+        pin: '4567',
       ),
       throwsA(isA<CompanyBootstrapRefusal>()),
     );
-    expectJoinProtectedUnchanged(f.bStore, recoveredFull);
+    expectJoinProtectedUnchanged(f.bStore, foreignProtected);
+    expect(await sqlSnapshot(f.bDb), foreignSql);
+    expect(
+      f.bStore.states.containsKey(companyUserNamespace(f.b.namespace, slot: 2)),
+      isFalse,
+    );
+    expect(f.bStore.states[bSlot]!.revision, terminal.revision);
     expect(f.bStore.states[bSlot]!.bytes, terminal.bytes);
   }, timeout: const Timeout(Duration(minutes: 2)));
   test('held creation keeps dependent owner edits pending while independent owner work continues', () async {
