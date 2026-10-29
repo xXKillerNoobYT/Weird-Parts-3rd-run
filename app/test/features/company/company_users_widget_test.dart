@@ -33,6 +33,7 @@ Future<void> _manageUser(
   WidgetTester tester,
   String name, {
   String? userId,
+  bool diagnoseMenu = false,
 }) async {
   final selector = find.byKey(const Key('company-managed-user-selector'));
   await tester.scrollUntilVisible(
@@ -66,6 +67,52 @@ Future<void> _manageUser(
       '$name — ${userId == null ? '' : '$userId — '}Create Job only',
     ),
   );
+  if (diagnoseMenu) {
+    final label =
+        '$name — ${userId == null ? '' : '$userId — '}Create Job only';
+    final globalLabels = tester
+        .widgetList<Text>(find.byType(Text, skipOffstage: false))
+        .map((text) => text.data)
+        .whereType<String>()
+        .where((text) => text.startsWith('$name — '))
+        .take(6)
+        .toList();
+    debugPrint(
+      'narrow-menu: before=$closedScrollables now=${scrollables.evaluate().length} '
+      'barriers=${find.byType(ModalBarrier).evaluate().length} '
+      'lists=${find.byType(ListView).evaluate().length} '
+      'targetVisible=${find.text(label).evaluate().length} '
+      'targetAll=${find.text(label, skipOffstage: false).evaluate().length} '
+      'scopedTarget=${option.evaluate().length} selector=${tester.getRect(selector)}',
+    );
+    debugPrint('narrow-menu: publicLabels=$globalLabels');
+    final elements = scrollables.evaluate().take(12).toList();
+    for (var i = 0; i < elements.length; i++) {
+      final element = elements[i];
+      final ancestors = <String>[];
+      element.visitAncestorElements((ancestor) {
+        ancestors.add(ancestor.widget.runtimeType.toString());
+        return ancestors.length < 12;
+      });
+      final state = tester.state<ScrollableState>(scrollables.at(i));
+      final position = state.position;
+      final dimensions = position.hasContentDimensions
+          ? 'viewport=${position.viewportDimension} min=${position.minScrollExtent} max=${position.maxScrollExtent}'
+          : 'layout=pending';
+      final exact = find
+          .descendant(
+            of: scrollables.at(i),
+            matching: find.text(label, skipOffstage: false),
+            skipOffstage: false,
+          )
+          .evaluate()
+          .length;
+      debugPrint(
+        'narrow-menu: scrollable=$i axis=${state.widget.axisDirection} '
+        '$dimensions targetAll=$exact ancestors=${ancestors.join('/')}',
+      );
+    }
+  }
   await tester.scrollUntilVisible(option, 80, scrollable: menu);
   await _wait(tester, option);
   await tester.runAsync(() => tester.tap(option));
@@ -647,7 +694,7 @@ void main() {
         () => tester.tap(find.byKey(const Key('company-signin'))),
       );
       await _wait(tester, find.textContaining('Company ID:'));
-      await _manageUser(tester, name, userId: secondId);
+      await _manageUser(tester, name, userId: secondId, diagnoseMenu: true);
       final managementSelector = find.byKey(
         const Key('company-managed-user-selector'),
       );
