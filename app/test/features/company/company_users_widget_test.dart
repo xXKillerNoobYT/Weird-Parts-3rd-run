@@ -40,11 +40,33 @@ Future<void> _manageUser(
     200,
     scrollable: find.byType(Scrollable).first,
   );
+  final scrollables = find.byType(Scrollable);
+  final closedScrollables = scrollables.evaluate().length;
   await tester.tap(selector);
   await tester.pump(const Duration(milliseconds: 300));
-  final option = find
-      .text('$name — ${userId == null ? '' : '$userId — '}Create Job only')
-      .last;
+  for (
+    var i = 0;
+    i < 400 && scrollables.evaluate().length <= closedScrollables;
+    i++
+  ) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 25)),
+    );
+    await tester.pump(const Duration(milliseconds: 25));
+  }
+  expect(
+    scrollables.evaluate().length,
+    greaterThan(closedScrollables),
+    reason: 'Management menu opened',
+  );
+  final menu = scrollables.last;
+  final option = find.descendant(
+    of: menu,
+    matching: find.text(
+      '$name — ${userId == null ? '' : '$userId — '}Create Job only',
+    ),
+  );
+  await tester.scrollUntilVisible(option, 80, scrollable: menu);
   await _wait(tester, option);
   await tester.runAsync(() => tester.tap(option));
   await tester.pump();
@@ -58,6 +80,7 @@ void main() {
       late JoinFixture f;
       late String userId;
       late String firstUserId;
+      late ProtectedInstallationState firstProtected;
       await tester.runAsync(() async {
         f = await JoinFixture.create();
         firstUserId = (await f.aEnrollment.createRestrictedUser(
@@ -72,6 +95,7 @@ void main() {
           name: 'Casey retry',
           pin: '0123',
         )).userId;
+        firstProtected = f.aStore.states[companyUserNamespace(f.a.namespace)]!;
         await f.aEnrollment.signOut();
       });
       await tester.pumpWidget(
@@ -182,7 +206,20 @@ void main() {
         find.textContaining('Additional-user PIN replaced here.'),
       );
       await tester.runAsync(() async {
-        expect((await f.aDb.select(f.aDb.companyUserEvents).get()).length, 3);
+        final events = await f.aDb.select(f.aDb.companyUserEvents).get();
+        events.sort((a, b) => a.sequence.compareTo(b.sequence));
+        expect(
+          events.map((event) => (event.userId, event.sequence, event.kind)),
+          [(userId, 1, 'created'), (userId, 2, 'pinReset')],
+        );
+        final savedFirst =
+            f.aStore.states[companyUserNamespace(f.a.namespace)]!;
+        expect(savedFirst.revision, firstProtected.revision);
+        expect(
+          base64Encode(savedFirst.bytes) == base64Encode(firstProtected.bytes),
+          isTrue,
+          reason: 'Untouched legacy user A retains its protected bytes',
+        );
         final first = await f.aEnrollment.userLifecycleStatus(
           userId: firstUserId,
         );
@@ -686,7 +723,23 @@ void main() {
       await tester.runAsync(
         () async => tester.tap(find.byKey(const Key('company-create-user'))),
       );
-      await _wait(tester, find.text('Sam UI'));
+      // EditableText already contains the entered name before creation saves.
+      // Observe the directory row and the completed handler instead.
+      await _wait(
+        tester,
+        find.byWidgetPredicate(
+          (widget) => widget is Text && widget.data == 'Sam UI',
+        ),
+      );
+      await _wait(
+        tester,
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is FilledButton &&
+              widget.key == const Key('company-create-user') &&
+              widget.onPressed != null,
+        ),
+      );
       final firstDirectory = await tester.runAsync(
         () => f.aEnrollment.listCompanyUsers(),
       );
