@@ -298,7 +298,9 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
       if (pair == null || !ownsStatus()) return false;
       try {
         pair.requireCurrent();
-        await membership?.requireCurrent();
+        if (wire['kind'] == 'peer-ack') {
+          await membership?.requireCurrent();
+        }
         return ownsStatus();
       } catch (_) {
         return false;

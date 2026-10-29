@@ -40,6 +40,8 @@ enum _PeerAckOutcome {
   newerError,
   closed,
   replacedPair,
+  reverifiedResponseRefused,
+  reverifiedCompletionRefused,
 }
 
 void main() {
@@ -179,12 +181,51 @@ void main() {
           tester,
           () => acknowledgmentReturned.isCompleted,
         );
-        if (outcome == _PeerAckOutcome.success) {
+        if (outcome == _PeerAckOutcome.success ||
+            outcome == _PeerAckOutcome.reverifiedResponseRefused ||
+            outcome == _PeerAckOutcome.reverifiedCompletionRefused) {
           await joinWidgetSignal(
             tester,
             () => find.text(verified).evaluate().length == 2,
           );
           expect(find.text(pending), findsNothing);
+          if (outcome != _PeerAckOutcome.success) {
+            final aPair = a.pairedJoinSession;
+            final bPair = b.pairedJoinSession;
+            final response =
+                outcome == _PeerAckOutcome.reverifiedResponseRefused;
+            final target = response ? b : a;
+            final currentReceive = target.onJoinMessage!;
+            final refused = Completer<void>();
+            target.onJoinMessage = (pair, wire) async {
+              if (wire['kind'] ==
+                  (response ? 'peer-response' : 'peer-complete')) {
+                refused.complete();
+                throw StateError('Test current proof reply refused');
+              }
+              return currentReceive(pair, wire);
+            };
+            await tester.runAsync(() => tester.tap(buttons.at(1)));
+            await tester.pump();
+            await joinWidgetSignal(tester, () => refused.isCompleted);
+            await joinWidgetSignal(
+              tester,
+              () => find
+                  .byKey(const Key('company-join-error'))
+                  .evaluate()
+                  .isNotEmpty,
+            );
+            expect(a.pairedJoinSession, same(aPair));
+            expect(b.pairedJoinSession, same(bPair));
+            final page = find.byType(CompanyJoinPage).at(response ? 0 : 1);
+            expect(
+              find.descendant(
+                of: page,
+                matching: find.byKey(const Key('company-join-error')),
+              ),
+              findsOneWidget,
+            );
+          }
         } else if (outcome == _PeerAckOutcome.refused) {
           await joinWidgetSignal(
             tester,
