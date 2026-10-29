@@ -27,6 +27,10 @@ The owner explicitly authorized normal completion of this project's already-appr
 - This authority excludes production deployment/publication, purchases or paid services, credential/access-policy changes, disabling safeguards, force-pushing shared/protected branches, destructive data operations, unrelated features and scope expansion. Do not change approval settings automatically.
 - An enforced denial is still a block. If separate runtime approval or a permitted settings change is necessary, present its exact action, scope and effects for the owner to approve. Record real decisions, permission blocks and unresolved risks; never fabricate authority or automate approval controls.
 
+## Standing authority for all ten existing goals
+
+The owner directly pre-approved routine work needed to complete all ten existing admitted Wired Parts goals and their necessary PRs, and requested this authority be recorded here. Apply the [standing development and synthetic-test authorization](docs/agent-test-authorization.md) across those goals under their existing scopes and owners. Continue through the completion workflow below, including eligible ordinary main integration and post-main verification, without renewed routine project approval per goal, PR, revision, session or iteration. This authority admits no new goals or features. Preserve all scope exclusions, independent review, tests, applicable native acceptance, branch protections and mandatory runtime controls. An actual enforced tool, OS or authentication block still requires its supported control; project approval never bypasses a denial.
+
 ## Own the change through delivery
 
 1. State the smallest useful outcome and its acceptance test before implementation. Link the issue, branch, PR and evidence. Keep a current delivery checklist.

@@ -4,6 +4,12 @@ The owner explicitly confirmed this standing scope on 2026-10-24 for Wired Parts
 
 Use this record with [AGENTS.md](../AGENTS.md) and the existing delivery authority in [issue #88](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/88). [Issue #38](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/38) governs shared users and PIN behavior under [issue #33](https://github.com/xXKillerNoobYT/Weird-Parts-3rd-run/issues/33). This record preserves approval already given. It does not expand the product scope or change mandatory platform controls.
 
+## Authority across all ten existing admitted goals
+
+The owner separately confirmed standing routine completion authority for all ten existing admitted Wired Parts goals and asked that it be saved in `AGENTS.md`. This covers the routine in-scope work and necessary implementation or repair PRs for each existing goal through the recorded completion workflow, including eligible ordinary main integration and post-main verification. Reuse this authority across goals, PRs, revisions, sessions and iterations without another routine project-approval request. Existing goal scopes and Windows/Mac owner roles remain governing; this record adds no goal descriptions, new goals or features.
+
+Keep all exclusions and gates below, including independent review, tests and applicable native acceptance. Project authority is separate from mandatory tool, OS and authentication controls. When an actual enforced block requires a supported runtime confirmation, obtain that confirmation for the exact action; never bypass a denial or treat this record as an action-time waiver of safeguards.
+
 ## Continue routine approved work
 
 Carry out these actions without repeated project-approval questions when they serve the authorized milestone and use isolated synthetic data:
