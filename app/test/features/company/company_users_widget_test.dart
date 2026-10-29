@@ -43,6 +43,7 @@ Future<void> _manageUser(
   );
   final scrollables = find.byType(Scrollable);
   final closedScrollables = scrollables.evaluate().length;
+  final selectorRect = diagnoseMenu ? tester.getRect(selector) : null;
   await tester.tap(selector);
   await tester.pump(const Duration(milliseconds: 300));
   for (
@@ -83,7 +84,7 @@ Future<void> _manageUser(
       'lists=${find.byType(ListView).evaluate().length} '
       'targetVisible=${find.text(label).evaluate().length} '
       'targetAll=${find.text(label, skipOffstage: false).evaluate().length} '
-      'scopedTarget=${option.evaluate().length} selector=${tester.getRect(selector)}',
+      'scopedTarget=${option.evaluate().length} selectorBeforePopup=$selectorRect',
     );
     debugPrint('narrow-menu: publicLabels=$globalLabels');
     final elements = scrollables.evaluate().take(12).toList();
