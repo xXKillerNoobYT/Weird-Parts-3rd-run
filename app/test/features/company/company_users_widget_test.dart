@@ -29,14 +29,43 @@ Future<void> _wait(WidgetTester tester, Finder finder) async {
   );
 }
 
+Future<void> _manageUser(
+  WidgetTester tester,
+  String name, {
+  String? userId,
+}) async {
+  final selector = find.byKey(const Key('company-managed-user-selector'));
+  await tester.scrollUntilVisible(
+    selector,
+    200,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.tap(selector);
+  await tester.pumpAndSettle();
+  await tester.tap(
+    find
+        .text('$name — ${userId == null ? '' : '$userId — '}Create Job only')
+        .last,
+  );
+  await tester.pumpAndSettle();
+  await _wait(tester, find.byKey(const Key('company-reset-user')));
+}
+
 void main() {
   testWidgets(
-    'ambiguous saved reset retains one immutable PIN choice until explicit new request',
+    'second-user ambiguous reset freezes target and PIN while first user stays unchanged',
     (tester) async {
       late JoinFixture f;
       late String userId;
+      late String firstUserId;
       await tester.runAsync(() async {
         f = await JoinFixture.create();
+        firstUserId = (await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: 'Casey retry',
+          pin: '7890',
+        )).userId;
         userId = (await f.aEnrollment.createRestrictedUser(
           owner: f.owner,
           requestId: const Uuid().v4(),
@@ -51,6 +80,20 @@ void main() {
         ),
       );
       await _wait(tester, find.byKey(const Key('company-signin')));
+      final signInChoices = tester
+          .widget<DropdownButton<String>>(
+            find.descendant(
+              of: find.byKey(const Key('company-user-selector')),
+              matching: find.byWidgetPredicate(
+                (widget) => widget is DropdownButton<String>,
+              ),
+            ),
+          )
+          .items!;
+      for (final id in [firstUserId, userId]) {
+        final item = signInChoices.singleWhere((item) => item.value == id);
+        expect((item.child as Text).data, contains(id));
+      }
       await tester.enterText(
         find.byKey(const Key('company-signin-pin')),
         '1234',
@@ -59,6 +102,13 @@ void main() {
         () async => tester.tap(find.byKey(const Key('company-signin'))),
       );
       await _wait(tester, find.textContaining('Company ID:'));
+      expect(find.byKey(const Key('company-reset-user')), findsNothing);
+      await _manageUser(tester, 'Casey retry', userId: userId);
+      final selectorCallback = tester
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(const Key('company-managed-user-selector')),
+          )
+          .onChanged!;
       await tester.scrollUntilVisible(
         find.byKey(const Key('company-reset-user')),
         200,
@@ -97,6 +147,24 @@ void main() {
         find.textContaining('This PIN replacement request is pending.'),
         findsOneWidget,
       );
+      expect(
+        tester
+            .widget<DropdownButtonFormField<String>>(
+              find.byKey(const Key('company-managed-user-selector')),
+            )
+            .onChanged,
+        isNull,
+      );
+      selectorCallback(firstUserId);
+      await tester.pump();
+      expect(
+        tester
+            .state<FormFieldState<String>>(
+              find.byKey(const Key('company-managed-user-selector')),
+            )
+            .value,
+        userId,
+      );
       final field = tester.widget<TextField>(
         find.byKey(const Key('company-reset-pin')),
       );
@@ -114,7 +182,14 @@ void main() {
         find.textContaining('Additional-user PIN replaced here.'),
       );
       await tester.runAsync(() async {
-        expect((await f.aDb.select(f.aDb.companyUserEvents).get()).length, 2);
+        expect((await f.aDb.select(f.aDb.companyUserEvents).get()).length, 3);
+        final first = await f.aEnrollment.userLifecycleStatus(
+          userId: firstUserId,
+        );
+        expect(first!.credentialVersion, 1);
+        expect(first.attemptsRemaining, 8);
+        expect(first.disabled, isFalse);
+        await f.aEnrollment.signInUser(firstUserId, '7890');
         await expectLater(
           f.aEnrollment.signInUser(userId, '6789'),
           throwsA(isA<CompanyBootstrapRefusal>()),
@@ -152,6 +227,7 @@ void main() {
         () async => tester.tap(find.byKey(const Key('company-signin'))),
       );
       await _wait(tester, find.textContaining('Company ID:'));
+      await _manageUser(tester, 'Casey UI');
       await tester.scrollUntilVisible(
         find.byKey(const Key('company-reset-user')),
         200,
@@ -265,6 +341,7 @@ void main() {
       late JoinFixture f;
       late OwnerSession owner;
       late String id;
+      late String resetJobId;
       await tester.runAsync(() async {
         f = await JoinFixture.create(allowOwnerAdditions: true);
         final user = await f.aEnrollment.createRestrictedUser(
@@ -286,6 +363,35 @@ void main() {
           ownerSession: selected,
         );
         owner = await f.aEnrollment.signIn('1234');
+        final other = await f.aEnrollment.createRestrictedUser(
+          owner: owner,
+          requestId: const Uuid().v4(),
+          name: 'Reset user',
+          pin: '4567',
+        );
+        final otherSession = await f.aEnrollment.signInUser(
+          other.userId,
+          '4567',
+        );
+        resetJobId = const Uuid().v4();
+        await CompanyJobCommands(enrollment: f.aEnrollment).createJob(
+          CreateJob(
+            companyId: otherSession.identity.companyId,
+            shopId: otherSession.identity.shopId,
+            jobId: resetJobId,
+            requestId: const Uuid().v4(),
+            name: 'Superseded retained work',
+          ),
+          ownerSession: otherSession,
+        );
+        owner = await f.aEnrollment.signIn('1234');
+        await f.aEnrollment.resetRestrictedUserPin(
+          owner: owner,
+          userId: other.userId,
+          requestId: const Uuid().v4(),
+          expectedCredentialVersion: 1,
+          pin: '6789',
+        );
         await f.aEnrollment.disableRestrictedUser(
           owner: owner,
           userId: user.userId,
@@ -312,15 +418,29 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Offline retained work'), findsOneWidget);
+      expect(find.byKey(Key('company-job-held-$resetJobId')), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Superseded-credential work has no applied peer confirmation',
+        ),
+        findsOneWidget,
+      );
       await tester.pumpWidget(const SizedBox());
     },
   );
   testWidgets(
-    'owner disables the additional user through the production gate and keeps owner access',
+    'owner disables selected second user and preserves first-user access',
     (tester) async {
       late JoinFixture f;
+      late String firstUserId;
       await tester.runAsync(() async {
         f = await JoinFixture.create();
+        firstUserId = (await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: 'Alex first',
+          pin: '7890',
+        )).userId;
         await f.aEnrollment.createRestrictedUser(
           owner: f.owner,
           requestId: '11111111-1111-4111-8111-111111111111',
@@ -343,6 +463,7 @@ void main() {
         () => tester.tap(find.byKey(const Key('company-signin'))),
       );
       await _wait(tester, find.textContaining('Company ID:'));
+      await _manageUser(tester, 'Casey Work');
       await tester.scrollUntilVisible(
         find.textContaining('Additional user capacity reached'),
         200,
@@ -350,9 +471,19 @@ void main() {
       );
       final disable = find.byKey(const Key('company-disable-user'));
       expect(disable, findsOneWidget);
+      await tester.ensureVisible(disable);
       await tester.runAsync(() => tester.tap(disable));
       await _wait(tester, find.text('Casey Work (disabled)'));
       expect(find.byKey(const Key('company-disable-user')), findsNothing);
+      await tester.runAsync(() async {
+        final first = await f.aEnrollment.userLifecycleStatus(
+          userId: firstUserId,
+        );
+        expect(first!.disabled, isFalse);
+        expect(first.credentialVersion, 1);
+        expect(first.attemptsRemaining, 8);
+        await f.aEnrollment.signInUser(firstUserId, '7890');
+      });
       await tester.scrollUntilVisible(
         find.textContaining('Company ID:'),
         -200,
@@ -365,7 +496,7 @@ void main() {
       );
       final record = jsonDecode(
         utf8.decode(
-          f.aStore.states[companyUserNamespace(f.a.namespace)]!.bytes,
+          f.aStore.states[companyUserNamespace(f.a.namespace, slot: 2)]!.bytes,
         ),
       ) as Map;
       expect(record['v'], 2);
@@ -439,6 +570,16 @@ void main() {
       await tester.runAsync(
         () async => tester.tap(find.byKey(const Key('company-create-user'))),
       );
+      await _wait(tester, find.text('Sam UI'));
+      expect(find.byKey(const Key('company-create-user')), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('company-user-name')),
+        'Alex second',
+      );
+      await tester.enterText(find.byKey(const Key('company-user-pin')), '7890');
+      await tester.runAsync(
+        () async => tester.tap(find.byKey(const Key('company-create-user'))),
+      );
       await _wait(
         tester,
         find.textContaining('Additional user capacity reached'),
@@ -465,7 +606,7 @@ void main() {
               find.byKey(const Key('company-user-selector')),
             )
             .value,
-        directory!.last.userId,
+        directory!.singleWhere((user) => user.name == 'Sam UI').userId,
       );
       await tester.enterText(
         find.byKey(const Key('company-signin-pin')),
