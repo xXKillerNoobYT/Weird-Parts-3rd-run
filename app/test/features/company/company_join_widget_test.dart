@@ -514,7 +514,8 @@ void main() {
           );
         }, JoinLoopbackHttpOverrides()),
       );
-      await tester.binding.setSurfaceSize(const Size(1500, 1400));
+      // Exercise both full-ID selectors in realistic 360-pixel panes.
+      await tester.binding.setSurfaceSize(const Size(720, 1400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         MaterialApp(
@@ -639,8 +640,10 @@ void main() {
         final peerUsers = await f.bEnrollment.listCompanyUsers();
         expect(peerUsers.any((user) => user.userId == firstUserId), isFalse);
         expect(peerUsers.any((user) => user.userId == secondUserId), isTrue);
-        await f.bEnrollment.signInUser(secondUserId, '0123');
       });
+      // Keep the Owner proof live until every transport assertion is complete.
+      expect(f.bEnrollment.currentSession, same(member));
+      expect(member.isValid, isTrue);
       final invitationRefused = Completer<void>();
       final peerReceive = b.onJoinMessage!;
       b.onJoinMessage = (pair, wire) async {
@@ -675,6 +678,7 @@ void main() {
         secondUserId,
       );
       await tester.runAsync(() async {
+        await f.bEnrollment.signInUser(secondUserId, '0123');
         await a.dispose();
         await b.dispose();
         await f.closeAndCheckOwnerData();

@@ -868,6 +868,9 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
                 _provisionUsers.isNotEmpty) ...[
               DropdownButtonFormField<String>(
                 key: const Key('company-provision-user-selector'),
+                isExpanded: true,
+                isDense: false,
+                itemHeight: null,
                 initialValue: _provisionUserId,
                 decoration: const InputDecoration(
                   labelText: 'Additional user to provision',

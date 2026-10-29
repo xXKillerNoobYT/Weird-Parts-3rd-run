@@ -861,6 +861,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         const Text('Select a company user and enter their PIN.'),
         DropdownButtonFormField<String>(
           key: const Key('company-user-selector'),
+          isExpanded: true,
+          isDense: false,
+          itemHeight: null,
           initialValue: _selectedUser,
           decoration: const InputDecoration(labelText: 'Company user'),
           items: [
@@ -949,6 +952,9 @@ class _CompanyBootstrapGateState extends State<CompanyBootstrapGate>
         if (_userDirectoryValid && _additionalUsers.isNotEmpty)
           DropdownButtonFormField<String>(
             key: const Key('company-managed-user-selector'),
+            isExpanded: true,
+            isDense: false,
+            itemHeight: null,
             initialValue: _managedUserId,
             decoration: const InputDecoration(
               labelText: 'Manage additional user',

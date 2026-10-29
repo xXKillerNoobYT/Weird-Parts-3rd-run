@@ -41,13 +41,13 @@ Future<void> _manageUser(
     scrollable: find.byType(Scrollable).first,
   );
   await tester.tap(selector);
-  await tester.pumpAndSettle();
-  await tester.tap(
-    find
-        .text('$name — ${userId == null ? '' : '$userId — '}Create Job only')
-        .last,
-  );
-  await tester.pumpAndSettle();
+  await tester.pump(const Duration(milliseconds: 300));
+  final option = find
+      .text('$name — ${userId == null ? '' : '$userId — '}Create Job only')
+      .last;
+  await _wait(tester, option);
+  await tester.runAsync(() => tester.tap(option));
+  await tester.pump();
   await _wait(tester, find.byKey(const Key('company-reset-user')));
 }
 
@@ -535,6 +535,113 @@ void main() {
   });
 
   testWidgets(
+    '360px Gate retains full identities for maximum-length duplicate user names',
+    (tester) async {
+      final name = List.filled(64, 'W').join();
+      expect(utf8.encode(name), hasLength(64));
+      late JoinFixture f;
+      late String firstId;
+      late String secondId;
+      await tester.runAsync(() async {
+        f = await JoinFixture.create();
+        firstId = (await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: name,
+          pin: '0123',
+        )).userId;
+        secondId = (await f.aEnrollment.createRestrictedUser(
+          owner: f.owner,
+          requestId: const Uuid().v4(),
+          name: name,
+          pin: '7890',
+        )).userId;
+        await f.aEnrollment.signOut();
+      });
+      expect(firstId, isNot(secondId));
+      expect(firstId, hasLength(36));
+      expect(secondId, hasLength(36));
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CompanyBootstrapGate(db: f.aDb, installation: f.a),
+        ),
+      );
+      await _wait(tester, find.byKey(const Key('company-signin')));
+      final lockSelector = find.byKey(const Key('company-user-selector'));
+      final lockDropdown = tester.widget<DropdownButton<String>>(
+        find.descendant(
+          of: lockSelector,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is DropdownButton<String>,
+          ),
+        ),
+      );
+      for (final id in [firstId, secondId]) {
+        final identityText =
+            lockDropdown.items!.singleWhere((item) => item.value == id).child
+                as Text;
+        expect(identityText.data, '$name — $id');
+        expect(identityText.overflow, isNot(TextOverflow.ellipsis));
+        expect(identityText.maxLines, isNull);
+      }
+      await tester.ensureVisible(lockSelector);
+      await tester.tap(lockSelector);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.runAsync(
+        () => tester.tap(find.text('$name — $secondId').last),
+      );
+      await tester.pump();
+      expect(
+        tester.state<FormFieldState<String>>(lockSelector).value,
+        secondId,
+      );
+      await tester.tap(lockSelector);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.runAsync(() => tester.tap(find.text('Owner').last));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const Key('company-signin-pin')),
+        '1234',
+      );
+      await tester.ensureVisible(find.byKey(const Key('company-signin')));
+      await tester.runAsync(
+        () => tester.tap(find.byKey(const Key('company-signin'))),
+      );
+      await _wait(tester, find.textContaining('Company ID:'));
+      await _manageUser(tester, name, userId: secondId);
+      final managementSelector = find.byKey(
+        const Key('company-managed-user-selector'),
+      );
+      expect(
+        tester.state<FormFieldState<String>>(managementSelector).value,
+        secondId,
+      );
+      final managementDropdown = tester.widget<DropdownButton<String>>(
+        find.descendant(
+          of: managementSelector,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is DropdownButton<String>,
+          ),
+        ),
+      );
+      for (final id in [firstId, secondId]) {
+        final identityText =
+            managementDropdown.items!
+                    .singleWhere((item) => item.value == id)
+                    .child
+                as Text;
+        expect(identityText.data, '$name — $id — Create Job only');
+        expect(identityText.overflow, isNot(TextOverflow.ellipsis));
+        expect(identityText.maxLines, isNull);
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
     'owner creates named user and switches to restricted offline Job through production gate',
     (tester) async {
       late JoinFixture f;
@@ -561,6 +668,15 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).first,
       );
+      final createUser = tester
+          .widget<FilledButton>(find.byKey(const Key('company-create-user')))
+          .onPressed!;
+      final nameController = tester
+          .widget<TextField>(find.byKey(const Key('company-user-name')))
+          .controller!;
+      final pinController = tester
+          .widget<TextField>(find.byKey(const Key('company-user-pin')))
+          .controller!;
       await tester.enterText(
         find.byKey(const Key('company-user-name')),
         'Sam UI',
@@ -571,12 +687,20 @@ void main() {
         () async => tester.tap(find.byKey(const Key('company-create-user'))),
       );
       await _wait(tester, find.text('Sam UI'));
+      final firstDirectory = await tester.runAsync(
+        () => f.aEnrollment.listCompanyUsers(),
+      );
+      final samId = firstDirectory!
+          .singleWhere((user) => user.name == 'Sam UI')
+          .userId;
+      expect(firstDirectory, hasLength(2));
       expect(find.byKey(const Key('company-create-user')), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('company-user-name')),
         'Alex second',
       );
       await tester.enterText(find.byKey(const Key('company-user-pin')), '7890');
+      await tester.ensureVisible(find.byKey(const Key('company-create-user')));
       await tester.runAsync(
         () async => tester.tap(find.byKey(const Key('company-create-user'))),
       );
@@ -584,6 +708,30 @@ void main() {
         tester,
         find.textContaining('Additional user capacity reached'),
       );
+      final fullDirectory = await tester.runAsync(
+        () => f.aEnrollment.listCompanyUsers(),
+      );
+      final alexId = fullDirectory!
+          .singleWhere((user) => user.name == 'Alex second')
+          .userId;
+      expect(fullDirectory, hasLength(3));
+      expect(alexId, isNot(samId));
+      final fullIds = fullDirectory.map((user) => user.userId).toSet();
+      expect(fullIds, hasLength(3));
+      expect(find.byKey(const Key('company-create-user')), findsNothing);
+      expect(find.byKey(const Key('company-user-name')), findsNothing);
+      // A retained callback must still refuse a third account through the Gate handler.
+      nameController.text = 'Third refused';
+      pinController.text = '4567';
+      await tester.runAsync(() async {
+        createUser();
+      });
+      await _wait(tester, find.text('Company user capacity reached'));
+      final afterThird = await tester.runAsync(
+        () => f.aEnrollment.listCompanyUsers(),
+      );
+      expect(afterThird!.map((user) => user.userId).toSet(), fullIds);
+      expect(afterThird.any((user) => user.name == 'Third refused'), isFalse);
       await tester.scrollUntilVisible(
         find.byKey(const Key('company-switch-user')),
         200,
@@ -597,16 +745,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Sam UI').last);
       await tester.pumpAndSettle();
-      final directory = await tester.runAsync(
-        () => f.aEnrollment.listCompanyUsers(),
-      );
       expect(
         tester
             .state<FormFieldState<String>>(
               find.byKey(const Key('company-user-selector')),
             )
             .value,
-        directory!.singleWhere((user) => user.name == 'Sam UI').userId,
+        samId,
       );
       await tester.enterText(
         find.byKey(const Key('company-signin-pin')),
@@ -647,9 +792,6 @@ void main() {
           matching: find.text('Sam UI Job'),
         ),
       );
-      final users = await tester.runAsync(
-        () => f.aEnrollment.listCompanyUsers(),
-      );
       final rows = await tester.runAsync(
         () => f.aDb.select(f.aDb.companyJobs).get(),
       );
@@ -658,10 +800,7 @@ void main() {
             (jsonDecode(r.operationBytes)['body'] as Map)['name'] ==
             'Sam UI Job',
       );
-      expect(
-        jsonDecode(authored.operationBytes)['body']['user'],
-        users!.last.userId,
-      );
+      expect(jsonDecode(authored.operationBytes)['body']['user'], samId);
       expect(
         jsonDecode(authored.operationBytes)['body']['device'],
         f.owner.identity.deviceId,
