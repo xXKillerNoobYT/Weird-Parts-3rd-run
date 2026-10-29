@@ -216,15 +216,17 @@ void main() {
       await tester.runAsync(
         () => tester.tap(find.byKey(const Key('company-peer-verify')).at(1)),
       );
+      await tester.pump();
       await joinWidgetSignal(
         tester,
         () =>
+            find.byKey(const Key('company-join-busy')).evaluate().isEmpty &&
             tester
-                .widget<Text>(
-                  find.byKey(const Key('company-join-status')).at(1),
-                )
-                .data ==
-            'Trusted peer authenticated. Verification alone does not exchange Jobs.',
+                    .widget<Text>(
+                      find.byKey(const Key('company-join-status')).at(1),
+                    )
+                    .data ==
+                'Trusted peer authenticated. Verification alone does not exchange Jobs.',
         attempts: 1200,
       );
       expect(a.pairedJoinSession, same(aPair));
@@ -280,7 +282,11 @@ void main() {
       final sync = find.byKey(const Key('company-jobs-sync-now'));
       await joinWidgetSignal(
         tester,
-        () => sync.evaluate().length == 2,
+        () =>
+            sync.evaluate().length == 2 &&
+            tester
+                .widgetList<FilledButton>(sync)
+                .every((button) => button.onPressed != null),
         attempts: 1200,
       );
       expect(find.textContaining('Ready to exchange Jobs'), findsNWidgets(2));
@@ -293,7 +299,7 @@ void main() {
       });
       b.onJoinMessage = (session, wire) async {
         final reply = await handling(session, wire);
-        if (!incomingStarted.isCompleted) {
+        if (freezeEntered.isCompleted && !incomingStarted.isCompleted) {
           incomingStarted.complete();
           await releaseStartReply.future;
         }

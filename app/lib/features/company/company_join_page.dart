@@ -276,10 +276,50 @@ class _CompanyJoinPageState extends State<CompanyJoinPage>
   }
 
   Future<void> _sendPeerReply(Map<String, Object?> wire) async {
+    final peerReply =
+        wire['kind'] == 'peer-response' ||
+        wire['kind'] == 'peer-complete' ||
+        wire['kind'] == 'peer-ack';
+    final pair = _pair;
+    final channel = _channel;
+    final membership = _peerMembership;
+    final status = _status;
+    final error = _error;
+    bool ownsStatus() =>
+        mounted &&
+        !_closed &&
+        identical(pair, _pair) &&
+        identical(pair, _controller.pairedJoinSession) &&
+        identical(channel, _channel) &&
+        identical(membership, _peerMembership) &&
+        status == _status &&
+        error == _error;
+    Future<bool> currentPeerReply() async {
+      if (pair == null || !ownsStatus()) return false;
+      try {
+        pair.requireCurrent();
+        if (wire['kind'] == 'peer-ack') {
+          await membership?.requireCurrent();
+        }
+        return ownsStatus();
+      } catch (_) {
+        return false;
+      }
+    }
+
     try {
       await _controller.sendJoinMessage(wire);
-    } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (wire['kind'] == 'peer-ack' &&
+          membership != null &&
+          await currentPeerReply()) {
+        setState(
+          () => _status = 'Trusted peer authenticated. Verification alone does not exchange Jobs.',
+        );
+      }
+    } catch (failure) {
+      if (mounted && (!peerReply || await currentPeerReply())) {
+        setState(() => _error = '$failure');
+      }
     }
   }
 
