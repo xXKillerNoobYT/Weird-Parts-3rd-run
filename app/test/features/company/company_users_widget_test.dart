@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show SemanticsRole;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,7 +34,6 @@ Future<void> _manageUser(
   WidgetTester tester,
   String name, {
   String? userId,
-  bool diagnoseMenu = false,
 }) async {
   final selector = find.byKey(const Key('company-managed-user-selector'));
   await tester.scrollUntilVisible(
@@ -41,81 +41,31 @@ Future<void> _manageUser(
     200,
     scrollable: find.byType(Scrollable).first,
   );
-  final scrollables = find.byType(Scrollable);
-  final closedScrollables = scrollables.evaluate().length;
-  final selectorRect = diagnoseMenu ? tester.getRect(selector) : null;
+  // Lay out ensureVisible's final scroll jump before computing the tap point.
+  await tester.pump();
+  expect(selector.hitTestable(), findsOneWidget);
   await tester.tap(selector);
   await tester.pump(const Duration(milliseconds: 300));
-  for (
-    var i = 0;
-    i < 400 && scrollables.evaluate().length <= closedScrollables;
-    i++
-  ) {
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 25)),
-    );
-    await tester.pump(const Duration(milliseconds: 25));
-  }
-  expect(
-    scrollables.evaluate().length,
-    greaterThan(closedScrollables),
-    reason: 'Management menu opened',
+  final menu = find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics && widget.properties.role == SemanticsRole.menu,
   );
-  final menu = scrollables.last;
+  await _wait(tester, menu);
+  final menuScrollable = find.descendant(
+    of: menu,
+    matching: find.byType(Scrollable),
+  );
+  expect(menuScrollable, findsOneWidget);
   final option = find.descendant(
     of: menu,
     matching: find.text(
       '$name — ${userId == null ? '' : '$userId — '}Create Job only',
     ),
   );
-  if (diagnoseMenu) {
-    final label =
-        '$name — ${userId == null ? '' : '$userId — '}Create Job only';
-    final globalLabels = tester
-        .widgetList<Text>(find.byType(Text, skipOffstage: false))
-        .map((text) => text.data)
-        .whereType<String>()
-        .where((text) => text.startsWith('$name — '))
-        .take(6)
-        .toList();
-    debugPrint(
-      'narrow-menu: before=$closedScrollables now=${scrollables.evaluate().length} '
-      'barriers=${find.byType(ModalBarrier).evaluate().length} '
-      'lists=${find.byType(ListView).evaluate().length} '
-      'targetVisible=${find.text(label).evaluate().length} '
-      'targetAll=${find.text(label, skipOffstage: false).evaluate().length} '
-      'scopedTarget=${option.evaluate().length} selectorBeforePopup=$selectorRect',
-    );
-    debugPrint('narrow-menu: publicLabels=$globalLabels');
-    final elements = scrollables.evaluate().take(12).toList();
-    for (var i = 0; i < elements.length; i++) {
-      final element = elements[i];
-      final ancestors = <String>[];
-      element.visitAncestorElements((ancestor) {
-        ancestors.add(ancestor.widget.runtimeType.toString());
-        return ancestors.length < 12;
-      });
-      final state = tester.state<ScrollableState>(scrollables.at(i));
-      final position = state.position;
-      final dimensions = position.hasContentDimensions
-          ? 'viewport=${position.viewportDimension} min=${position.minScrollExtent} max=${position.maxScrollExtent}'
-          : 'layout=pending';
-      final exact = find
-          .descendant(
-            of: scrollables.at(i),
-            matching: find.text(label, skipOffstage: false),
-            skipOffstage: false,
-          )
-          .evaluate()
-          .length;
-      debugPrint(
-        'narrow-menu: scrollable=$i axis=${state.widget.axisDirection} '
-        '$dimensions targetAll=$exact ancestors=${ancestors.join('/')}',
-      );
-    }
-  }
-  await tester.scrollUntilVisible(option, 80, scrollable: menu);
+  await tester.scrollUntilVisible(option, 80, scrollable: menuScrollable);
+  await tester.pump();
   await _wait(tester, option);
+  expect(option.hitTestable(), findsOneWidget);
   await tester.runAsync(() => tester.tap(option));
   await tester.pump();
   await _wait(tester, find.byKey(const Key('company-reset-user')));
@@ -695,7 +645,7 @@ void main() {
         () => tester.tap(find.byKey(const Key('company-signin'))),
       );
       await _wait(tester, find.textContaining('Company ID:'));
-      await _manageUser(tester, name, userId: secondId, diagnoseMenu: true);
+      await _manageUser(tester, name, userId: secondId);
       final managementSelector = find.byKey(
         const Key('company-managed-user-selector'),
       );
